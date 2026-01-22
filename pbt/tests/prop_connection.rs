@@ -85,7 +85,7 @@ fn setup_connected_client(
 proptest! {
     /// ホストとパスは常に設定される
     #[test]
-    fn test_connection_options_basic(
+    fn prop_connection_options_basic(
         host in "[a-z][a-z0-9-]{0,20}\\.[a-z]{2,6}",
         path in "/[a-zA-Z0-9/_-]{0,50}"
     ) {
@@ -96,7 +96,7 @@ proptest! {
 
     /// origin の設定
     #[test]
-    fn test_connection_options_origin(
+    fn prop_connection_options_origin(
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         origin in "https://[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
@@ -107,7 +107,7 @@ proptest! {
 
     /// protocol の設定
     #[test]
-    fn test_connection_options_protocol(
+    fn prop_connection_options_protocol(
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         protocol in "[a-z][a-z0-9-]{0,20}"
     ) {
@@ -118,7 +118,7 @@ proptest! {
 
     /// ping_interval の設定
     #[test]
-    fn test_connection_options_ping_interval(
+    fn prop_connection_options_ping_interval(
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         interval in 1000u64..300000
     ) {
@@ -135,7 +135,7 @@ proptest! {
 proptest! {
     /// 初期状態は Disconnected
     #[test]
-    fn test_initial_state_disconnected(
+    fn prop_initial_state_disconnected(
         host in "[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
         let options = ClientConnectionOptions::new(&host, "/");
@@ -145,7 +145,7 @@ proptest! {
 
     /// connect() 後は Connecting
     #[test]
-    fn test_state_after_connect(
+    fn prop_state_after_connect(
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         millis in 0u64..u64::MAX
     ) {
@@ -159,7 +159,7 @@ proptest! {
 
     /// connect() は SendData を出力
     #[test]
-    fn test_connect_outputs_send_data(
+    fn prop_connect_outputs_send_data(
         host in "[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
         let options = ClientConnectionOptions::new(&host, "/");
@@ -188,14 +188,14 @@ proptest! {
 proptest! {
     /// Timestamp の生成
     #[test]
-    fn test_timestamp_from_millis(millis in any::<u64>()) {
+    fn prop_timestamp_from_millis(millis in any::<u64>()) {
         let ts = Timestamp::from_millis(millis);
         prop_assert_eq!(ts.as_millis(), millis);
     }
 
     /// Timestamp の比較
     #[test]
-    fn test_timestamp_ordering(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_timestamp_ordering(a in any::<u64>(), b in any::<u64>()) {
         let ts_a = Timestamp::from_millis(a);
         let ts_b = Timestamp::from_millis(b);
 
@@ -206,7 +206,7 @@ proptest! {
 
     /// Timestamp の加算 (add_millis)
     #[test]
-    fn test_timestamp_add(base in 0u64..u64::MAX/2, offset in 0u64..u64::MAX/2) {
+    fn prop_timestamp_add(base in 0u64..u64::MAX/2, offset in 0u64..u64::MAX/2) {
         let ts = Timestamp::from_millis(base);
         let result = ts.add_millis(offset);
         prop_assert_eq!(result.as_millis(), base + offset);
@@ -214,7 +214,7 @@ proptest! {
 
     /// Timestamp の減算 (saturating_sub)
     #[test]
-    fn test_timestamp_saturating_sub(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_timestamp_saturating_sub(a in any::<u64>(), b in any::<u64>()) {
         let ts_a = Timestamp::from_millis(a);
         let ts_b = Timestamp::from_millis(b);
 
@@ -224,7 +224,7 @@ proptest! {
 
     /// Timestamp の Add 演算子
     #[test]
-    fn test_timestamp_add_operator(base in 0u64..u64::MAX/2, offset in 0u64..u64::MAX/2) {
+    fn prop_timestamp_add_operator(base in 0u64..u64::MAX/2, offset in 0u64..u64::MAX/2) {
         let ts = Timestamp::from_millis(base);
         let result = ts + offset;
         prop_assert_eq!(result.as_millis(), base.saturating_add(offset));
@@ -232,7 +232,7 @@ proptest! {
 
     /// Timestamp の Sub 演算子
     #[test]
-    fn test_timestamp_sub_operator(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_timestamp_sub_operator(a in any::<u64>(), b in any::<u64>()) {
         let ts_a = Timestamp::from_millis(a);
         let ts_b = Timestamp::from_millis(b);
 
@@ -242,14 +242,14 @@ proptest! {
 
     /// Timestamp::default は 0
     #[test]
-    fn test_timestamp_default(_dummy in 0u8..1) {
+    fn prop_timestamp_default(_dummy in 0u8..1) {
         let ts = Timestamp::default();
         prop_assert_eq!(ts.as_millis(), 0);
     }
 
     /// Timestamp はオーバーフローで saturate する
     #[test]
-    fn test_timestamp_saturating_add_overflow(base in u64::MAX-1000..u64::MAX, offset in 1u64..1000) {
+    fn prop_timestamp_saturating_add_overflow(base in u64::MAX-1000..u64::MAX, offset in 1u64..1000) {
         let ts = Timestamp::from_millis(base);
         let result = ts + offset;
         // saturating_add の動作確認
@@ -264,7 +264,7 @@ proptest! {
 proptest! {
     /// Connecting 状態ではメッセージ送信できない
     #[test]
-    fn test_cannot_send_while_connecting(
+    fn prop_cannot_send_while_connecting(
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         message in "\\PC{1,100}"
     ) {
@@ -281,7 +281,7 @@ proptest! {
 
     /// Disconnected 状態ではメッセージ送信できない
     #[test]
-    fn test_cannot_send_while_disconnected(
+    fn prop_cannot_send_while_disconnected(
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         message in "\\PC{1,100}"
     ) {
@@ -302,7 +302,7 @@ proptest! {
 proptest! {
     /// connect() 後は StateChanged イベント
     #[test]
-    fn test_connect_emits_state_changed(
+    fn prop_connect_emits_state_changed(
         host in "[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
         let options = ClientConnectionOptions::new(&host, "/");
@@ -327,7 +327,7 @@ proptest! {
 proptest! {
     /// 複数回の poll_output() は空になるまで値を返す
     #[test]
-    fn test_poll_output_drains_queue(
+    fn prop_poll_output_drains_queue(
         host in "[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
         let options = ClientConnectionOptions::new(&host, "/");
@@ -355,7 +355,7 @@ proptest! {
 
     /// イベントキューも同様にドレインされる
     #[test]
-    fn test_poll_event_drains_queue(
+    fn prop_poll_event_drains_queue(
         host in "[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
         let options = ClientConnectionOptions::new(&host, "/");
@@ -383,7 +383,7 @@ proptest! {
 proptest! {
     /// 既に接続中の場合は connect() がエラー
     #[test]
-    fn test_double_connect_fails(
+    fn prop_double_connect_fails(
         host in "[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
         let options = ClientConnectionOptions::new(&host, "/");
@@ -406,7 +406,7 @@ proptest! {
 proptest! {
     /// ClientConnectionOptions::new() は正しく初期化される
     #[test]
-    fn test_client_options_new(
+    fn prop_client_options_new(
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         path in "/[a-zA-Z0-9/_-]{0,30}"
     ) {
@@ -417,7 +417,7 @@ proptest! {
 
     /// 複数のプロトコルを追加
     #[test]
-    fn test_client_options_multiple_protocols(
+    fn prop_client_options_multiple_protocols(
         protocols in prop::collection::vec("[a-z]{3,10}", 1..5)
     ) {
         let mut options = ClientConnectionOptions::new("example.com", "/");
@@ -429,7 +429,7 @@ proptest! {
 
     /// 複数のヘッダーを追加
     #[test]
-    fn test_client_options_multiple_headers(
+    fn prop_client_options_multiple_headers(
         headers in prop::collection::vec(("[A-Z][a-zA-Z-]{3,15}", "[a-zA-Z0-9 ]{1,30}"), 1..5)
     ) {
         let mut options = ClientConnectionOptions::new("example.com", "/");
@@ -441,7 +441,7 @@ proptest! {
 
     /// deflate 設定
     #[test]
-    fn test_client_options_deflate(
+    fn prop_client_options_deflate(
         server_bits in 9u8..=15,
         client_bits in 9u8..=15
     ) {
@@ -460,7 +460,7 @@ proptest! {
 proptest! {
     /// 有効なハンドシェイクレスポンスで Connected になる
     #[test]
-    fn test_valid_handshake_connects(
+    fn prop_valid_handshake_connects(
         host in "[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
         let options = ClientConnectionOptions::new(&host, "/");
@@ -471,7 +471,7 @@ proptest! {
 
     /// プロトコル付きハンドシェイク
     #[test]
-    fn test_handshake_with_protocol(
+    fn prop_handshake_with_protocol(
         protocol in "[a-z]{3,15}"
     ) {
         let options = ClientConnectionOptions::new("example.com", "/").protocol(&protocol);
@@ -521,7 +521,7 @@ proptest! {
 proptest! {
     /// Connected 状態でテキストメッセージを送信できる
     #[test]
-    fn test_send_text_message(
+    fn prop_send_text_message(
         text in "[a-zA-Z0-9 ]{1,100}"
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -542,7 +542,7 @@ proptest! {
 
     /// Connected 状態でバイナリメッセージを送信できる
     #[test]
-    fn test_send_binary_message(
+    fn prop_send_binary_message(
         data in prop::collection::vec(any::<u8>(), 1..100)
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -562,7 +562,7 @@ proptest! {
 
     /// サーバーからのテキストフレームを受信
     #[test]
-    fn test_receive_text_frame(
+    fn prop_receive_text_frame(
         text in "[a-zA-Z0-9]{1,50}"
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -589,7 +589,7 @@ proptest! {
 
     /// サーバーからのバイナリフレームを受信
     #[test]
-    fn test_receive_binary_frame(
+    fn prop_receive_binary_frame(
         data in prop::collection::vec(any::<u8>(), 1..50)
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -622,7 +622,7 @@ proptest! {
 proptest! {
     /// サーバーからの Ping に自動で Pong を返す
     #[test]
-    fn test_ping_auto_pong(
+    fn prop_ping_auto_pong(
         ping_data in prop::collection::vec(any::<u8>(), 0..50)
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -662,7 +662,7 @@ proptest! {
 
     /// Pong を受信すると awaiting_pong がクリアされる
     #[test]
-    fn test_pong_clears_awaiting(
+    fn prop_pong_clears_awaiting(
         pong_data in prop::collection::vec(any::<u8>(), 0..50)
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -707,7 +707,7 @@ proptest! {
 proptest! {
     /// close() を呼ぶと Closing 状態になる
     #[test]
-    fn test_close_sends_frame(
+    fn prop_close_sends_frame(
         code in 1000u16..4999,
         reason in "[a-zA-Z0-9 ]{0,50}"
     ) {
@@ -734,7 +734,7 @@ proptest! {
 
     /// サーバーからの Close フレームを受信
     #[test]
-    fn test_close_frame_received(
+    fn prop_close_frame_received(
         code in 1000u16..4999
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -773,7 +773,7 @@ proptest! {
 proptest! {
     /// Ping タイマーイベント
     #[test]
-    fn test_ping_timer_event(
+    fn prop_ping_timer_event(
         ping_interval in 1000u64..60000
     ) {
         let options = ClientConnectionOptions::new("example.com", "/")
@@ -799,7 +799,7 @@ proptest! {
 
     /// Pong タイムアウトで接続がクローズされる
     #[test]
-    fn test_pong_timeout_closes_connection(_dummy in 0u8..1) {
+    fn prop_pong_timeout_closes_connection(_dummy in 0u8..1) {
         let options = ClientConnectionOptions::new("example.com", "/");
         let (mut conn, now) = setup_connected_client(options);
 
@@ -834,7 +834,7 @@ proptest! {
 proptest! {
     /// RSV2 ビットが設定されたフレームは拒否される
     #[test]
-    fn test_rsv2_bit_rejected(_dummy in 0u8..1) {
+    fn prop_rsv2_bit_rejected(_dummy in 0u8..1) {
         let options = ClientConnectionOptions::new("example.com", "/");
         let (mut conn, now) = setup_connected_client(options);
 
@@ -847,7 +847,7 @@ proptest! {
 
     /// RSV3 ビットが設定されたフレームは拒否される
     #[test]
-    fn test_rsv3_bit_rejected(_dummy in 0u8..1) {
+    fn prop_rsv3_bit_rejected(_dummy in 0u8..1) {
         let options = ClientConnectionOptions::new("example.com", "/");
         let (mut conn, now) = setup_connected_client(options);
 
@@ -860,7 +860,7 @@ proptest! {
 
     /// permessage-deflate なしで RSV1 が設定されたフレームは拒否される
     #[test]
-    fn test_rsv1_without_deflate_rejected(_dummy in 0u8..1) {
+    fn prop_rsv1_without_deflate_rejected(_dummy in 0u8..1) {
         let options = ClientConnectionOptions::new("example.com", "/");
         let (mut conn, now) = setup_connected_client(options);
 
@@ -879,7 +879,7 @@ proptest! {
 proptest! {
     /// フラグメントされたテキストメッセージ
     #[test]
-    fn test_fragmented_text_message(
+    fn prop_fragmented_text_message(
         part1 in "[a-zA-Z0-9]{1,30}",
         part2 in "[a-zA-Z0-9]{1,30}"
     ) {
@@ -920,7 +920,7 @@ proptest! {
 proptest! {
     /// データをチャンクで分割して送っても正しく処理される
     #[test]
-    fn test_chunked_frame_reception(
+    fn prop_chunked_frame_reception(
         text in "[\\x20-\\x7E]{10,100}",
         chunk_size in 1usize..20
     ) {
@@ -951,7 +951,7 @@ proptest! {
 
     /// ランダムなバイト列は適切に処理される
     #[test]
-    fn test_random_bytes_handling(
+    fn prop_random_bytes_handling(
         data in prop::collection::vec(any::<u8>(), 1..100)
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -964,7 +964,7 @@ proptest! {
 
     /// ハンドシェイク中にランダムデータを送っても安全
     #[test]
-    fn test_random_bytes_during_handshake(
+    fn prop_random_bytes_during_handshake(
         data in prop::collection::vec(any::<u8>(), 1..100)
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -982,7 +982,7 @@ proptest! {
 
     /// 継続フレームが最初のフレームなしでエラー
     #[test]
-    fn test_continuation_without_initial_fails(_dummy in 0u8..1) {
+    fn prop_continuation_without_initial_fails(_dummy in 0u8..1) {
         let options = ClientConnectionOptions::new("example.com", "/");
         let (mut conn, now) = setup_connected_client(options);
 
@@ -995,7 +995,7 @@ proptest! {
 
     /// サポートされていないプロトコルのハンドシェイク
     #[test]
-    fn test_handshake_unsupported_protocol(
+    fn prop_handshake_unsupported_protocol(
         client_protocol in "[a-z]{3,10}",
         server_protocol in "[a-z]{3,10}"
     ) {

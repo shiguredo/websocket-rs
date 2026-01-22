@@ -16,7 +16,7 @@ const INVALID_OPCODES: [u8; 10] = [0x3, 0x4, 0x5, 0x6, 0x7, 0xB, 0xC, 0xD, 0xE, 
 // ==== from_u8 のテスト ====
 
 #[test]
-fn test_from_u8_valid_opcodes() {
+fn prop_from_u8_valid_opcodes() {
     assert_eq!(Opcode::from_u8(0x0), Some(Opcode::Continuation));
     assert_eq!(Opcode::from_u8(0x1), Some(Opcode::Text));
     assert_eq!(Opcode::from_u8(0x2), Some(Opcode::Binary));
@@ -28,7 +28,7 @@ fn test_from_u8_valid_opcodes() {
 proptest! {
     /// 有効な Opcode は Some を返す
     #[test]
-    fn test_from_u8_valid(
+    fn prop_from_u8_valid(
         opcode in prop::sample::select(VALID_OPCODES.to_vec())
     ) {
         let result = Opcode::from_u8(opcode);
@@ -37,7 +37,7 @@ proptest! {
 
     /// 無効な Opcode は None を返す
     #[test]
-    fn test_from_u8_invalid(
+    fn prop_from_u8_invalid(
         opcode in prop::sample::select(INVALID_OPCODES.to_vec())
     ) {
         let result = Opcode::from_u8(opcode);
@@ -46,14 +46,14 @@ proptest! {
 
     /// 16 以上の値は無効
     #[test]
-    fn test_from_u8_out_of_range(value in 16u8..=u8::MAX) {
+    fn prop_from_u8_out_of_range(value in 16u8..=u8::MAX) {
         let result = Opcode::from_u8(value);
         prop_assert!(result.is_none());
     }
 
     /// from_u8 と as_u8 はラウンドトリップ
     #[test]
-    fn test_roundtrip(
+    fn prop_roundtrip(
         opcode in prop::sample::select(VALID_OPCODES.to_vec())
     ) {
         let op = Opcode::from_u8(opcode).unwrap();
@@ -64,7 +64,7 @@ proptest! {
 // ==== as_u8 のテスト ====
 
 #[test]
-fn test_as_u8_all_variants() {
+fn prop_as_u8_all_variants() {
     assert_eq!(Opcode::Continuation.as_u8(), 0x0);
     assert_eq!(Opcode::Text.as_u8(), 0x1);
     assert_eq!(Opcode::Binary.as_u8(), 0x2);
@@ -76,7 +76,7 @@ fn test_as_u8_all_variants() {
 // ==== is_control のテスト ====
 
 #[test]
-fn test_is_control() {
+fn prop_is_control() {
     // データフレームはコントロールではない
     assert!(!Opcode::Continuation.is_control());
     assert!(!Opcode::Text.is_control());
@@ -91,7 +91,7 @@ fn test_is_control() {
 proptest! {
     /// is_control と is_data は排他的
     #[test]
-    fn test_control_data_exclusive(
+    fn prop_control_data_exclusive(
         opcode in prop::sample::select(VALID_OPCODES.to_vec())
     ) {
         let op = Opcode::from_u8(opcode).unwrap();
@@ -103,7 +103,7 @@ proptest! {
 // ==== is_data のテスト ====
 
 #[test]
-fn test_is_data() {
+fn prop_is_data() {
     // データフレームはデータ
     assert!(Opcode::Continuation.is_data());
     assert!(Opcode::Text.is_data());
@@ -119,7 +119,7 @@ fn test_is_data() {
 
 /// RFC 6455 Section 5.2: コントロールフレームのオペコードは 0x8-0xF
 #[test]
-fn test_rfc6455_control_opcodes() {
+fn prop_rfc6455_control_opcodes() {
     // 0x8, 0x9, 0xA はコントロールフレームとして定義
     for opcode in [0x8, 0x9, 0xA] {
         if let Some(op) = Opcode::from_u8(opcode) {
@@ -130,7 +130,7 @@ fn test_rfc6455_control_opcodes() {
 
 /// RFC 6455 Section 5.2: データフレームのオペコードは 0x0-0x7
 #[test]
-fn test_rfc6455_data_opcodes() {
+fn prop_rfc6455_data_opcodes() {
     // 0x0, 0x1, 0x2 はデータフレームとして定義
     for opcode in [0x0, 0x1, 0x2] {
         if let Some(op) = Opcode::from_u8(opcode) {
@@ -141,7 +141,7 @@ fn test_rfc6455_data_opcodes() {
 
 /// RFC 6455 Section 5.2: 予約オペコードは実装されていない
 #[test]
-fn test_rfc6455_reserved_opcodes() {
+fn prop_rfc6455_reserved_opcodes() {
     // データフレーム用予約（0x3-0x7）
     for opcode in 0x3..=0x7 {
         assert!(
@@ -164,7 +164,7 @@ fn test_rfc6455_reserved_opcodes() {
 // ==== Display のテスト ====
 
 #[test]
-fn test_display() {
+fn prop_display() {
     assert_eq!(format!("{}", Opcode::Continuation), "Continuation");
     assert_eq!(format!("{}", Opcode::Text), "Text");
     assert_eq!(format!("{}", Opcode::Binary), "Binary");
@@ -176,7 +176,7 @@ fn test_display() {
 proptest! {
     /// Display はパニックしない
     #[test]
-    fn test_display_no_panic(
+    fn prop_display_no_panic(
         opcode in prop::sample::select(VALID_OPCODES.to_vec())
     ) {
         let op = Opcode::from_u8(opcode).unwrap();
@@ -189,7 +189,7 @@ proptest! {
 proptest! {
     /// Debug はパニックしない
     #[test]
-    fn test_debug_no_panic(
+    fn prop_debug_no_panic(
         opcode in prop::sample::select(VALID_OPCODES.to_vec())
     ) {
         let op = Opcode::from_u8(opcode).unwrap();
@@ -202,7 +202,7 @@ proptest! {
 proptest! {
     /// Clone と Copy は同じ結果
     #[test]
-    fn test_clone_copy(
+    fn prop_clone_copy(
         opcode in prop::sample::select(VALID_OPCODES.to_vec())
     ) {
         let op = Opcode::from_u8(opcode).unwrap();
@@ -215,7 +215,7 @@ proptest! {
 
     /// 同じ値は同じハッシュを持つ
     #[test]
-    fn test_hash_consistency(
+    fn prop_hash_consistency(
         opcode in prop::sample::select(VALID_OPCODES.to_vec())
     ) {
         use std::collections::hash_map::DefaultHasher;
@@ -237,7 +237,7 @@ proptest! {
 // ==== 網羅性テスト ====
 
 #[test]
-fn test_all_opcodes_categorized() {
+fn prop_all_opcodes_categorized() {
     // すべての有効な Opcode は is_control または is_data のどちらか
     for &opcode in &VALID_OPCODES {
         let op = Opcode::from_u8(opcode).unwrap();

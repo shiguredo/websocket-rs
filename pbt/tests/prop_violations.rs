@@ -12,7 +12,7 @@ use shiguredo_websocket::FrameDecoder;
 proptest! {
     /// 不明なオペコード (0x3-0x7, 0xB-0xF) はエラー
     #[test]
-    fn test_unknown_opcode_rejected(
+    fn prop_unknown_opcode_rejected(
         opcode in prop::sample::select(vec![0x03u8, 0x04, 0x05, 0x06, 0x07, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]),
         payload_len in 0u8..50
     ) {
@@ -33,7 +33,7 @@ proptest! {
 
     /// コントロールフレームが 125 バイトを超えるとエラー
     #[test]
-    fn test_control_frame_too_large(
+    fn prop_control_frame_too_large(
         payload_len in 126u16..500
     ) {
         // Ping フレーム (opcode=9) with payload > 125 bytes
@@ -54,7 +54,7 @@ proptest! {
 
     /// コントロールフレームがフラグメント化されているとエラー (FIN=0)
     #[test]
-    fn test_fragmented_control_frame(
+    fn prop_fragmented_control_frame(
         payload_len in 0u8..50
     ) {
         // Ping フレーム with FIN=0 (fragmented)
@@ -80,7 +80,7 @@ proptest! {
 proptest! {
     /// 1 バイトだけではデコードできない
     #[test]
-    fn test_single_byte_incomplete(byte in any::<u8>()) {
+    fn prop_single_byte_incomplete(byte in any::<u8>()) {
         let mut decoder = FrameDecoder::new();
         decoder.feed(&[byte]);
 
@@ -90,7 +90,7 @@ proptest! {
 
     /// ヘッダーのみ（ペイロードなし）では不完全
     #[test]
-    fn test_header_only_incomplete(
+    fn prop_header_only_incomplete(
         opcode in prop::sample::select(vec![0x01u8, 0x02, 0x08, 0x09, 0x0A]),
         payload_len in 1u8..50
     ) {
@@ -110,7 +110,7 @@ proptest! {
 
     /// 拡張ペイロード長のヘッダーが不完全
     #[test]
-    fn test_extended_length_header_incomplete(_dummy in 0u8..1) {
+    fn prop_extended_length_header_incomplete(_dummy in 0u8..1) {
         // 126 マーカー付きだが拡張長がない
         let frame = vec![
             0x82,       // FIN=1 + Binary
@@ -127,7 +127,7 @@ proptest! {
 
     /// 64-bit ペイロード長のヘッダーが不完全
     #[test]
-    fn test_64bit_length_header_incomplete(partial_bytes in 0usize..8) {
+    fn prop_64bit_length_header_incomplete(partial_bytes in 0usize..8) {
         // 127 マーカー付きだが 8 バイト未満
         let mut frame = vec![
             0x82,       // FIN=1 + Binary
@@ -150,7 +150,7 @@ proptest! {
 proptest! {
     /// マスキングキーが不完全
     #[test]
-    fn test_incomplete_masking_key(partial_key_len in 0usize..4) {
+    fn prop_incomplete_masking_key(partial_key_len in 0usize..4) {
         let mut frame = vec![
             0x82,       // FIN=1 + Binary
             0x80 | 10,  // MASK=1 + length=10
@@ -166,7 +166,7 @@ proptest! {
 
     /// ペイロードが不完全
     #[test]
-    fn test_incomplete_payload(
+    fn prop_incomplete_payload(
         expected_len in 10u8..100,
         actual_len in 0u8..10
     ) {
@@ -194,7 +194,7 @@ proptest! {
 proptest! {
     /// ランダムなバイト列はエラーまたは不完全
     #[test]
-    fn test_random_bytes_handling(
+    fn prop_random_bytes_handling(
         data in prop::collection::vec(any::<u8>(), 1..100)
     ) {
         let mut decoder = FrameDecoder::new();
@@ -207,7 +207,7 @@ proptest! {
 
     /// 空のデータ
     #[test]
-    fn test_empty_data(_dummy in 0u8..1) {
+    fn prop_empty_data(_dummy in 0u8..1) {
         let mut decoder = FrameDecoder::new();
         decoder.feed(&[]);
 
@@ -224,7 +224,7 @@ proptest! {
     /// Close フレームのペイロードが 1 バイトは不正
     /// (コードは 2 バイト必要、または 0 バイト)
     #[test]
-    fn test_close_frame_single_byte_payload(_dummy in 0u8..1) {
+    fn prop_close_frame_single_byte_payload(_dummy in 0u8..1) {
         // Close フレーム with 1-byte payload (invalid)
         let frame = vec![
             0x88,                   // FIN=1 + Close opcode

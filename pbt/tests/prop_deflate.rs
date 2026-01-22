@@ -15,7 +15,7 @@ proptest! {
 
     /// window_bits は 8-15 の範囲
     #[test]
-    fn test_window_bits_range(
+    fn prop_window_bits_range(
         server_bits in 8u8..=15,
         client_bits in 8u8..=15
     ) {
@@ -29,7 +29,7 @@ proptest! {
 
     /// window_bits が範囲外の場合はクランプ
     #[test]
-    fn test_window_bits_clamped(bits in 0u8..=20) {
+    fn prop_window_bits_clamped(bits in 0u8..=20) {
         let config = PerMessageDeflateConfig::new()
             .server_max_window_bits(bits);
 
@@ -39,7 +39,7 @@ proptest! {
 
     /// no_context_takeover フラグの設定
     #[test]
-    fn test_no_context_takeover_flags(
+    fn prop_no_context_takeover_flags(
         server_no_takeover in any::<bool>(),
         client_no_takeover in any::<bool>()
     ) {
@@ -61,7 +61,7 @@ proptest! {
 
     /// Extension ヘッダーのラウンドトリップ
     #[test]
-    fn test_extension_roundtrip(
+    fn prop_extension_roundtrip(
         server_bits in prop::option::of(8u8..=15),
         client_bits in prop::option::of(8u8..=15),
         server_no_takeover in any::<bool>(),
@@ -97,7 +97,7 @@ proptest! {
 
     /// Extension 名は常に "permessage-deflate"
     #[test]
-    fn test_extension_name(
+    fn prop_extension_name(
         server_bits in prop::option::of(8u8..=15)
     ) {
         let mut config = PerMessageDeflateConfig::new();
@@ -121,7 +121,7 @@ mod compression_tests {
     proptest! {
         /// デフォルト設定での Config 生成
         #[test]
-        fn test_default_config(_dummy in 0u8..1) {
+        fn prop_default_config(_dummy in 0u8..1) {
             let config = PerMessageDeflateConfig::default();
             prop_assert!(!config.server_no_context_takeover);
             prop_assert!(!config.client_no_context_takeover);
@@ -131,7 +131,7 @@ mod compression_tests {
 
         /// Clone の一貫性
         #[test]
-        fn test_config_clone(
+        fn prop_config_clone(
             server_bits in prop::option::of(8u8..=15),
             client_bits in prop::option::of(8u8..=15),
             server_no_takeover in any::<bool>(),

@@ -12,14 +12,14 @@ use shiguredo_websocket::Timestamp;
 proptest! {
     /// from_millis と as_millis は逆変換
     #[test]
-    fn test_timestamp_roundtrip(millis in any::<u64>()) {
+    fn prop_timestamp_roundtrip(millis in any::<u64>()) {
         let ts = Timestamp::from_millis(millis);
         prop_assert_eq!(ts.as_millis(), millis);
     }
 }
 
 #[test]
-fn test_timestamp_default() {
+fn prop_timestamp_default() {
     let ts = Timestamp::default();
     assert_eq!(ts.as_millis(), 0);
 }
@@ -29,7 +29,7 @@ fn test_timestamp_default() {
 proptest! {
     /// Timestamp の順序関係は u64 と一致
     #[test]
-    fn test_timestamp_ordering(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_timestamp_ordering(a in any::<u64>(), b in any::<u64>()) {
         let ts_a = Timestamp::from_millis(a);
         let ts_b = Timestamp::from_millis(b);
 
@@ -42,7 +42,7 @@ proptest! {
 
     /// PartialOrd と Ord が一致
     #[test]
-    fn test_timestamp_partial_ord_consistency(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_timestamp_partial_ord_consistency(a in any::<u64>(), b in any::<u64>()) {
         let ts_a = Timestamp::from_millis(a);
         let ts_b = Timestamp::from_millis(b);
 
@@ -55,7 +55,7 @@ proptest! {
 proptest! {
     /// saturating_sub は負にならない
     #[test]
-    fn test_saturating_sub_non_negative(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_saturating_sub_non_negative(a in any::<u64>(), b in any::<u64>()) {
         let ts_a = Timestamp::from_millis(a);
         let ts_b = Timestamp::from_millis(b);
 
@@ -66,7 +66,7 @@ proptest! {
 
     /// saturating_sub は正しい差分を返す
     #[test]
-    fn test_saturating_sub_correct(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_saturating_sub_correct(a in any::<u64>(), b in any::<u64>()) {
         let ts_a = Timestamp::from_millis(a);
         let ts_b = Timestamp::from_millis(b);
 
@@ -81,7 +81,7 @@ proptest! {
 
     /// saturating_sub は a >= b のとき ts_b + result == ts_a
     #[test]
-    fn test_saturating_sub_inverse(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_saturating_sub_inverse(a in any::<u64>(), b in any::<u64>()) {
         // a >= b の場合のみテスト
         if a >= b {
             let ts_a = Timestamp::from_millis(a);
@@ -100,7 +100,7 @@ proptest! {
 proptest! {
     /// add_millis は saturating add
     #[test]
-    fn test_add_millis_saturating(base in any::<u64>(), add in any::<u64>()) {
+    fn prop_add_millis_saturating(base in any::<u64>(), add in any::<u64>()) {
         let ts = Timestamp::from_millis(base);
         let result = ts.add_millis(add);
 
@@ -110,7 +110,7 @@ proptest! {
 
     /// add_millis(0) は変化なし
     #[test]
-    fn test_add_millis_zero(millis in any::<u64>()) {
+    fn prop_add_millis_zero(millis in any::<u64>()) {
         let ts = Timestamp::from_millis(millis);
         let result = ts.add_millis(0);
 
@@ -123,7 +123,7 @@ proptest! {
 proptest! {
     /// Timestamp + u64 は add_millis と同じ
     #[test]
-    fn test_add_trait_equals_add_millis(base in any::<u64>(), add in any::<u64>()) {
+    fn prop_add_trait_equals_add_millis(base in any::<u64>(), add in any::<u64>()) {
         let ts = Timestamp::from_millis(base);
 
         let via_trait = ts + add;
@@ -138,7 +138,7 @@ proptest! {
 proptest! {
     /// Timestamp - Timestamp は saturating_sub と同じ
     #[test]
-    fn test_sub_trait_equals_saturating_sub(a in any::<u64>(), b in any::<u64>()) {
+    fn prop_sub_trait_equals_saturating_sub(a in any::<u64>(), b in any::<u64>()) {
         let ts_a = Timestamp::from_millis(a);
         let ts_b = Timestamp::from_millis(b);
 
@@ -152,21 +152,21 @@ proptest! {
 // ==== オーバーフローのテスト ====
 
 #[test]
-fn test_add_millis_overflow_saturates() {
+fn prop_add_millis_overflow_saturates() {
     let ts = Timestamp::from_millis(u64::MAX);
     let result = ts.add_millis(1);
     assert_eq!(result.as_millis(), u64::MAX);
 }
 
 #[test]
-fn test_add_trait_overflow_saturates() {
+fn prop_add_trait_overflow_saturates() {
     let ts = Timestamp::from_millis(u64::MAX);
     let result = ts + 1;
     assert_eq!(result.as_millis(), u64::MAX);
 }
 
 #[test]
-fn test_saturating_sub_underflow() {
+fn prop_saturating_sub_underflow() {
     let ts_small = Timestamp::from_millis(10);
     let ts_large = Timestamp::from_millis(100);
     let result = ts_small.saturating_sub(ts_large);
@@ -174,7 +174,7 @@ fn test_saturating_sub_underflow() {
 }
 
 #[test]
-fn test_sub_trait_underflow() {
+fn prop_sub_trait_underflow() {
     let ts_small = Timestamp::from_millis(10);
     let ts_large = Timestamp::from_millis(100);
     let result: u64 = ts_small - ts_large;
@@ -186,7 +186,7 @@ fn test_sub_trait_underflow() {
 proptest! {
     /// 極端な値でもパニックしない
     #[test]
-    fn test_extreme_values(
+    fn prop_extreme_values(
         base in prop::sample::select(vec![0, 1, u64::MAX - 1, u64::MAX]),
         add in prop::sample::select(vec![0, 1, u64::MAX - 1, u64::MAX])
     ) {
@@ -206,7 +206,7 @@ proptest! {
 proptest! {
     /// 同じ値は同じハッシュを持つ
     #[test]
-    fn test_hash_consistency(millis in any::<u64>()) {
+    fn prop_hash_consistency(millis in any::<u64>()) {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -228,7 +228,7 @@ proptest! {
 proptest! {
     /// Clone と Copy は同じ結果
     #[test]
-    fn test_clone_copy_consistency(millis in any::<u64>()) {
+    fn prop_clone_copy_consistency(millis in any::<u64>()) {
         let ts = Timestamp::from_millis(millis);
 
         let cloned = ts.clone();
@@ -244,7 +244,7 @@ proptest! {
 proptest! {
     /// Debug 出力がパニックしない
     #[test]
-    fn test_debug_no_panic(millis in any::<u64>()) {
+    fn prop_debug_no_panic(millis in any::<u64>()) {
         let ts = Timestamp::from_millis(millis);
         let _ = format!("{:?}", ts);
     }

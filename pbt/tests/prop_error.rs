@@ -10,7 +10,7 @@ use shiguredo_websocket::{Error, ErrorKind};
 // ==== ErrorKind のテスト ====
 
 #[test]
-fn test_error_kind_variants() {
+fn prop_error_kind_variants() {
     // すべての ErrorKind バリアントがある
     let _ = ErrorKind::InvalidInput;
     let _ = ErrorKind::InvalidData;
@@ -25,7 +25,7 @@ fn test_error_kind_variants() {
 proptest! {
     /// ErrorKind は Clone 可能
     #[test]
-    fn test_error_kind_clone(
+    fn prop_error_kind_clone(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -43,7 +43,7 @@ proptest! {
 
     /// ErrorKind は Copy 可能
     #[test]
-    fn test_error_kind_copy(
+    fn prop_error_kind_copy(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -61,7 +61,7 @@ proptest! {
 
     /// ErrorKind は Debug 表示可能
     #[test]
-    fn test_error_kind_debug(
+    fn prop_error_kind_debug(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -79,7 +79,7 @@ proptest! {
 
     /// ErrorKind は Hash 可能
     #[test]
-    fn test_error_kind_hash(
+    fn prop_error_kind_hash(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -109,7 +109,7 @@ proptest! {
 proptest! {
     /// Error::new は kind を正しく設定する
     #[test]
-    fn test_error_new(
+    fn prop_error_new(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -129,7 +129,7 @@ proptest! {
 
     /// Error::with_reason は kind と reason を正しく設定する
     #[test]
-    fn test_error_with_reason(
+    fn prop_error_with_reason(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -150,7 +150,7 @@ proptest! {
 
     /// Error::with_close_code は close_code を設定する
     #[test]
-    fn test_error_with_close_code(
+    fn prop_error_with_close_code(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -168,7 +168,7 @@ proptest! {
 proptest! {
     /// Error の Display はパニックしない
     #[test]
-    fn test_error_display_no_panic(
+    fn prop_error_display_no_panic(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -188,7 +188,7 @@ proptest! {
 
     /// Error の Debug はパニックしない
     #[test]
-    fn test_error_debug_no_panic(
+    fn prop_error_debug_no_panic(
         kind in prop::sample::select(vec![
             ErrorKind::InvalidInput,
             ErrorKind::InvalidData,
@@ -208,7 +208,7 @@ proptest! {
 
     /// close_code 付きの Error も正しく表示される
     #[test]
-    fn test_error_display_with_close_code(
+    fn prop_error_display_with_close_code(
         kind in prop::sample::select(vec![
             ErrorKind::ProtocolViolation,
         ]),
@@ -224,21 +224,21 @@ proptest! {
 // ==== Display に含まれる情報のテスト ====
 
 #[test]
-fn test_error_display_contains_kind() {
+fn prop_error_display_contains_kind() {
     let error = Error::new(ErrorKind::InvalidInput);
     let display = format!("{}", error);
     assert!(display.contains("InvalidInput"));
 }
 
 #[test]
-fn test_error_display_contains_reason() {
+fn prop_error_display_contains_reason() {
     let error = Error::with_reason(ErrorKind::InvalidData, "test reason");
     let display = format!("{}", error);
     assert!(display.contains("test reason"));
 }
 
 #[test]
-fn test_error_display_contains_location() {
+fn prop_error_display_contains_location() {
     let error = Error::new(ErrorKind::InvalidState);
     let display = format!("{}", error);
     // ファイル名が含まれる
@@ -246,7 +246,7 @@ fn test_error_display_contains_location() {
 }
 
 #[test]
-fn test_error_display_contains_close_code() {
+fn prop_error_display_contains_close_code() {
     let error = Error::new(ErrorKind::ProtocolViolation).with_close_code(1002);
     let display = format!("{}", error);
     assert!(display.contains("1002"));
@@ -255,7 +255,7 @@ fn test_error_display_contains_close_code() {
 // ==== location のテスト ====
 
 #[test]
-fn test_error_location_is_caller() {
+fn prop_error_location_is_caller() {
     let error = Error::new(ErrorKind::InvalidInput);
     // location はこのファイルを指す
     assert!(error.location.file().contains("prop_error.rs"));
@@ -264,7 +264,7 @@ fn test_error_location_is_caller() {
 // ==== std::error::Error 実装のテスト ====
 
 #[test]
-fn test_error_is_std_error() {
+fn prop_error_is_std_error() {
     fn check_error<T: std::error::Error>(_: &T) {}
 
     let error = Error::new(ErrorKind::InvalidInput);
@@ -274,7 +274,7 @@ fn test_error_is_std_error() {
 // ==== ErrorKind 網羅性テスト ====
 
 #[test]
-fn test_all_error_kinds_distinguishable() {
+fn prop_all_error_kinds_distinguishable() {
     use std::collections::HashSet;
 
     let kinds = [
@@ -300,20 +300,20 @@ fn test_all_error_kinds_distinguishable() {
 // ==== reason が Into<String> を受け入れるテスト ====
 
 #[test]
-fn test_error_with_reason_accepts_string() {
+fn prop_error_with_reason_accepts_string() {
     let reason = String::from("owned string");
     let error = Error::with_reason(ErrorKind::InvalidData, reason);
     assert_eq!(error.reason, "owned string");
 }
 
 #[test]
-fn test_error_with_reason_accepts_str() {
+fn prop_error_with_reason_accepts_str() {
     let error = Error::with_reason(ErrorKind::InvalidData, "string slice");
     assert_eq!(error.reason, "string slice");
 }
 
 #[test]
-fn test_error_with_reason_accepts_empty() {
+fn prop_error_with_reason_accepts_empty() {
     let error = Error::with_reason(ErrorKind::InvalidData, "");
     assert!(error.reason.is_empty());
 }
@@ -321,7 +321,7 @@ fn test_error_with_reason_accepts_empty() {
 // ==== 複数の close_code 設定のテスト ====
 
 #[test]
-fn test_error_close_code_can_be_set_multiple_times() {
+fn prop_error_close_code_can_be_set_multiple_times() {
     let error = Error::new(ErrorKind::ProtocolViolation)
         .with_close_code(1000)
         .with_close_code(1002);
@@ -335,7 +335,7 @@ fn test_error_close_code_can_be_set_multiple_times() {
 proptest! {
     /// 非常に長い reason でもパニックしない
     #[test]
-    fn test_error_long_reason(
+    fn prop_error_long_reason(
         reason in "[a-z]{1000,2000}"
     ) {
         let error = Error::with_reason(ErrorKind::InvalidData, &reason);

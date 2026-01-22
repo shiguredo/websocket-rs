@@ -91,7 +91,7 @@ fn setup_connected_client() -> (WebSocketClientConnection, Timestamp, [u8; 16]) 
 // ==== ClientConnectionOptions のテスト ====
 
 #[test]
-fn test_client_options_default() {
+fn prop_client_options_default() {
     let options = ClientConnectionOptions::default();
     assert_eq!(options.path, "/");
     assert_eq!(options.host, "localhost");
@@ -107,7 +107,7 @@ fn test_client_options_default() {
 proptest! {
     /// ClientConnectionOptions::new でホストとパスが設定される
     #[test]
-    fn test_client_options_new(
+    fn prop_client_options_new(
         host in "[a-z]{1,20}\\.[a-z]{2,5}",
         path in "/[a-z0-9/]{0,30}",
     ) {
@@ -118,7 +118,7 @@ proptest! {
 
     /// ClientConnectionOptions::origin が正しく設定される
     #[test]
-    fn test_client_options_origin(
+    fn prop_client_options_origin(
         origin in "https://[a-z]{1,20}\\.[a-z]{2,5}",
     ) {
         let options = ClientConnectionOptions::new("example.com", "/")
@@ -128,7 +128,7 @@ proptest! {
 
     /// ClientConnectionOptions::protocol が複数回呼び出しても正しく蓄積される
     #[test]
-    fn test_client_options_multiple_protocols(
+    fn prop_client_options_multiple_protocols(
         protocols in prop::collection::vec("[a-z]{1,20}", 0..10)
     ) {
         let mut options = ClientConnectionOptions::new("example.com", "/");
@@ -143,7 +143,7 @@ proptest! {
 
     /// ClientConnectionOptions::header が複数回呼び出しても正しく蓄積される
     #[test]
-    fn test_client_options_multiple_headers(
+    fn prop_client_options_multiple_headers(
         headers in prop::collection::vec(("[a-zA-Z-]{1,20}", "[a-zA-Z0-9 ]{0,50}"), 0..10)
     ) {
         let mut options = ClientConnectionOptions::new("example.com", "/");
@@ -155,7 +155,7 @@ proptest! {
 
     /// ping_interval は任意の値を設定可能
     #[test]
-    fn test_client_options_ping_interval(interval in 0u64..=u64::MAX) {
+    fn prop_client_options_ping_interval(interval in 0u64..=u64::MAX) {
         let options = ClientConnectionOptions::new("example.com", "/")
             .ping_interval(interval);
         prop_assert_eq!(options.ping_interval_millis, interval);
@@ -165,21 +165,21 @@ proptest! {
 // ==== 初期状態のテスト ====
 
 #[test]
-fn test_initial_state_is_disconnected() {
+fn prop_initial_state_is_disconnected() {
     let options = ClientConnectionOptions::new("example.com", "/");
     let conn = WebSocketClientConnection::new(options);
     assert_eq!(conn.state(), ConnectionState::Disconnected);
 }
 
 #[test]
-fn test_initial_protocol_is_none() {
+fn prop_initial_protocol_is_none() {
     let options = ClientConnectionOptions::new("example.com", "/");
     let conn = WebSocketClientConnection::new(options);
     assert!(conn.protocol().is_none());
 }
 
 #[test]
-fn test_initial_extensions_is_empty() {
+fn prop_initial_extensions_is_empty() {
     let options = ClientConnectionOptions::new("example.com", "/");
     let conn = WebSocketClientConnection::new(options);
     assert!(conn.extensions().is_empty());
@@ -188,7 +188,7 @@ fn test_initial_extensions_is_empty() {
 // ==== 接続開始テスト ====
 
 #[test]
-fn test_connect_changes_state_to_connecting() {
+fn prop_connect_changes_state_to_connecting() {
     let options = ClientConnectionOptions::new("example.com", "/ws");
     let mut conn = WebSocketClientConnection::new(options);
     let now = Timestamp::from_millis(0);
@@ -198,7 +198,7 @@ fn test_connect_changes_state_to_connecting() {
 }
 
 #[test]
-fn test_connect_sends_handshake_request() {
+fn prop_connect_sends_handshake_request() {
     let options = ClientConnectionOptions::new("example.com", "/ws");
     let mut conn = WebSocketClientConnection::new(options);
     let now = Timestamp::from_millis(0);
@@ -221,7 +221,7 @@ fn test_connect_sends_handshake_request() {
 }
 
 #[test]
-fn test_double_connect_fails() {
+fn prop_double_connect_fails() {
     let options = ClientConnectionOptions::new("example.com", "/ws");
     let mut conn = WebSocketClientConnection::new(options);
     let now = Timestamp::from_millis(0);
@@ -234,7 +234,7 @@ fn test_double_connect_fails() {
 // ==== ハンドシェイク完了テスト ====
 
 #[test]
-fn test_valid_handshake_connects() {
+fn prop_valid_handshake_connects() {
     let (conn, _, _) = setup_connected_client();
     assert_eq!(conn.state(), ConnectionState::Connected);
 }
@@ -242,7 +242,7 @@ fn test_valid_handshake_connects() {
 proptest! {
     /// プロトコル付きのハンドシェイクが正しく処理される
     #[test]
-    fn test_handshake_with_protocol(
+    fn prop_handshake_with_protocol(
         protocol in "[a-z]{1,20}",
     ) {
         let options = ClientConnectionOptions::new("example.com", "/ws")
@@ -282,7 +282,7 @@ proptest! {
 }
 
 #[test]
-fn test_invalid_accept_fails() {
+fn prop_invalid_accept_fails() {
     let options = ClientConnectionOptions::new("example.com", "/ws");
     let mut conn = WebSocketClientConnection::new(options);
     let now = Timestamp::from_millis(0);
@@ -302,7 +302,7 @@ fn test_invalid_accept_fails() {
 proptest! {
     /// テキストメッセージの送信
     #[test]
-    fn test_send_text_message(
+    fn prop_send_text_message(
         text in ".*",
     ) {
         let (mut conn, now, _) = setup_connected_client();
@@ -316,7 +316,7 @@ proptest! {
 
     /// バイナリメッセージの送信
     #[test]
-    fn test_send_binary_message(
+    fn prop_send_binary_message(
         data in prop::collection::vec(any::<u8>(), 0..1000),
     ) {
         let (mut conn, now, _) = setup_connected_client();
@@ -330,7 +330,7 @@ proptest! {
 
     /// テキストフレームの受信（サーバーからはマスクなし）
     #[test]
-    fn test_receive_text_frame(
+    fn prop_receive_text_frame(
         text in "[\\x20-\\x7E]{0,100}",
     ) {
         let (mut conn, now, _) = setup_connected_client();
@@ -353,7 +353,7 @@ proptest! {
 
     /// バイナリフレームの受信
     #[test]
-    fn test_receive_binary_frame(
+    fn prop_receive_binary_frame(
         data in prop::collection::vec(any::<u8>(), 0..1000),
     ) {
         let (mut conn, now, _) = setup_connected_client();
@@ -379,7 +379,7 @@ proptest! {
 proptest! {
     /// Ping を受信すると Pong を自動返信する
     #[test]
-    fn test_ping_auto_pong(
+    fn prop_ping_auto_pong(
         data in prop::collection::vec(any::<u8>(), 0..125),
     ) {
         let (mut conn, now, _) = setup_connected_client();
@@ -411,7 +411,7 @@ proptest! {
 
     /// Pong を受信すると awaiting_pong がリセットされる
     #[test]
-    fn test_pong_clears_awaiting(
+    fn prop_pong_clears_awaiting(
         data in prop::collection::vec(any::<u8>(), 0..125),
     ) {
         let (mut conn, now, _) = setup_connected_client();
@@ -442,7 +442,7 @@ proptest! {
 proptest! {
     /// Close フレームを受信すると Close イベントが発生する
     #[test]
-    fn test_close_frame_received(
+    fn prop_close_frame_received(
         code in 1000u16..=4999,
         reason in "[\\x20-\\x7E]{0,50}".prop_map(|s| s.to_string()),
     ) {
@@ -469,7 +469,7 @@ proptest! {
 
     /// close() を呼び出すと Close フレームが送信される
     #[test]
-    fn test_close_sends_frame(
+    fn prop_close_sends_frame(
         code in prop::sample::select(vec![
             CloseCode::NORMAL,
             CloseCode::GOING_AWAY,
@@ -495,7 +495,7 @@ proptest! {
 }
 
 #[test]
-fn test_close_without_code() {
+fn prop_close_without_code() {
     let (mut conn, now, _) = setup_connected_client();
 
     // コードなしの Close フレーム
@@ -516,7 +516,7 @@ fn test_close_without_code() {
 // ==== タイマー処理のテスト ====
 
 #[test]
-fn test_ping_timer_event() {
+fn prop_ping_timer_event() {
     let (mut conn, now, _) = setup_connected_client();
 
     conn.handle_timer(TimerId::Ping, now).unwrap();
@@ -533,7 +533,7 @@ fn test_ping_timer_event() {
 }
 
 #[test]
-fn test_pong_timeout_closes_connection() {
+fn prop_pong_timeout_closes_connection() {
     let (mut conn, now, _) = setup_connected_client();
 
     // Ping を送信
@@ -560,7 +560,7 @@ fn test_pong_timeout_closes_connection() {
 }
 
 #[test]
-fn test_close_timeout_forces_disconnect() {
+fn prop_close_timeout_forces_disconnect() {
     let (mut conn, now, _) = setup_connected_client();
 
     // Close を送信
@@ -579,7 +579,7 @@ fn test_close_timeout_forces_disconnect() {
 // ==== 状態遷移のテスト ====
 
 #[test]
-fn test_cannot_send_while_disconnected() {
+fn prop_cannot_send_while_disconnected() {
     let options = ClientConnectionOptions::new("example.com", "/ws");
     let mut conn = WebSocketClientConnection::new(options);
     let now = Timestamp::from_millis(0);
@@ -589,7 +589,7 @@ fn test_cannot_send_while_disconnected() {
 }
 
 #[test]
-fn test_cannot_send_while_connecting() {
+fn prop_cannot_send_while_connecting() {
     let options = ClientConnectionOptions::new("example.com", "/ws");
     let mut conn = WebSocketClientConnection::new(options);
     let now = Timestamp::from_millis(0);
@@ -602,7 +602,7 @@ fn test_cannot_send_while_connecting() {
 }
 
 #[test]
-fn test_feed_to_disconnected_fails() {
+fn prop_feed_to_disconnected_fails() {
     let options = ClientConnectionOptions::new("example.com", "/ws");
     let mut conn = WebSocketClientConnection::new(options);
     let now = Timestamp::from_millis(0);
@@ -612,7 +612,7 @@ fn test_feed_to_disconnected_fails() {
 }
 
 #[test]
-fn test_feed_to_closed_fails() {
+fn prop_feed_to_closed_fails() {
     let (mut conn, now, _) = setup_connected_client();
 
     // Close フレームを送受信
@@ -630,7 +630,7 @@ fn test_feed_to_closed_fails() {
 // ==== RSV ビットのテスト ====
 
 #[test]
-fn test_rsv2_bit_rejected() {
+fn prop_rsv2_bit_rejected() {
     let (mut conn, now, _) = setup_connected_client();
 
     // RSV2 ビットが立ったフレーム
@@ -640,7 +640,7 @@ fn test_rsv2_bit_rejected() {
 }
 
 #[test]
-fn test_rsv3_bit_rejected() {
+fn prop_rsv3_bit_rejected() {
     let (mut conn, now, _) = setup_connected_client();
 
     // RSV3 ビットが立ったフレーム
@@ -650,7 +650,7 @@ fn test_rsv3_bit_rejected() {
 }
 
 #[test]
-fn test_rsv1_without_deflate_rejected() {
+fn prop_rsv1_without_deflate_rejected() {
     let (mut conn, now, _) = setup_connected_client();
 
     // RSV1 ビットが立ったフレーム（permessage-deflate なし）
@@ -664,7 +664,7 @@ fn test_rsv1_without_deflate_rejected() {
 proptest! {
     /// フラグメントされたテキストメッセージが正しく再構築される
     #[test]
-    fn test_fragmented_text_message(
+    fn prop_fragmented_text_message(
         parts in prop::collection::vec("[\\x20-\\x7E]{1,50}", 2..5),
     ) {
         let (mut conn, now, _) = setup_connected_client();
@@ -708,7 +708,7 @@ proptest! {
 }
 
 #[test]
-fn test_continuation_without_start_fails() {
+fn prop_continuation_without_start_fails() {
     let (mut conn, now, _) = setup_connected_client();
 
     // 開始フレームなしで Continuation を送る
@@ -719,7 +719,7 @@ fn test_continuation_without_start_fails() {
 
 /// RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
 #[test]
-fn test_new_message_during_fragment_fails() {
+fn prop_new_message_during_fragment_fails() {
     let (mut conn, now, _) = setup_connected_client();
 
     // フラグメント開始（fin=false）
@@ -739,7 +739,7 @@ fn test_new_message_during_fragment_fails() {
 proptest! {
     /// データを小さなチャンクで分割して送っても正しく処理される
     #[test]
-    fn test_chunked_frame_reception(
+    fn prop_chunked_frame_reception(
         text in "[\\x20-\\x7E]{10,100}",
         chunk_size in 1usize..10,
     ) {
@@ -768,7 +768,7 @@ proptest! {
 // ==== deflate 設定のテスト ====
 
 #[test]
-fn test_deflate_option_setting() {
+fn prop_deflate_option_setting() {
     let config = PerMessageDeflateConfig::default();
     let options = ClientConnectionOptions::new("example.com", "/").deflate(config.clone());
 
@@ -780,7 +780,7 @@ fn test_deflate_option_setting() {
 proptest! {
     /// ランダムなバイト列は適切にエラーハンドリングされる
     #[test]
-    fn test_random_bytes_handling(
+    fn prop_random_bytes_handling(
         random_data in prop::collection::vec(any::<u8>(), 0..1000),
     ) {
         let (mut conn, now, _) = setup_connected_client();
@@ -794,7 +794,7 @@ proptest! {
 
     /// ハンドシェイク中にランダムなレスポンスを送っても安全
     #[test]
-    fn test_random_bytes_during_handshake(
+    fn prop_random_bytes_during_handshake(
         random_data in prop::collection::vec(any::<u8>(), 1..500),
     ) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
@@ -815,7 +815,7 @@ proptest! {
 // ==== イベント・出力キューのテスト ====
 
 #[test]
-fn test_event_queue_drains() {
+fn prop_event_queue_drains() {
     let (mut conn, _, _) = setup_connected_client();
 
     // イベントをすべて消費
@@ -826,7 +826,7 @@ fn test_event_queue_drains() {
 }
 
 #[test]
-fn test_output_queue_drains() {
+fn prop_output_queue_drains() {
     let (mut conn, _, _) = setup_connected_client();
 
     // 出力をすべて消費
@@ -839,7 +839,7 @@ fn test_output_queue_drains() {
 // ==== 無効な UTF-8 のテスト ====
 
 #[test]
-fn test_invalid_utf8_text_frame() {
+fn prop_invalid_utf8_text_frame() {
     let (mut conn, now, _) = setup_connected_client();
 
     // 無効な UTF-8 を含むテキストフレーム

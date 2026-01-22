@@ -5,7 +5,7 @@ const DEFLATE_TRAILER: [u8; 4] = [0x00, 0x00, 0xFF, 0xFF];
 
 proptest! {
     #[test]
-    fn test_compress_decompress_roundtrip(
+    fn prop_compress_decompress_roundtrip(
         data in prop::collection::vec(any::<u8>(), 0..10000)
     ) {
         let config = PerMessageDeflateConfig::default();
@@ -18,7 +18,7 @@ proptest! {
     }
 
     #[test]
-    fn test_no_trailer_in_compressed(
+    fn prop_no_trailer_in_compressed(
         data in prop::collection::vec(any::<u8>(), 1..1000)
     ) {
         let config = PerMessageDeflateConfig::default();
@@ -30,7 +30,7 @@ proptest! {
     }
 
     #[test]
-    fn test_repetitive_data_compresses_well(
+    fn prop_repetitive_data_compresses_well(
         pattern in prop::collection::vec(any::<u8>(), 1..50),
         repeats in 10usize..100
     ) {
@@ -55,7 +55,7 @@ proptest! {
     }
 
     #[test]
-    fn test_compression_levels_preserve_data(
+    fn prop_compression_levels_preserve_data(
         data in prop::collection::vec(any::<u8>(), 1..1000),
         level in 0u32..=9
     ) {
@@ -70,7 +70,7 @@ proptest! {
     }
 
     #[test]
-    fn test_multiple_compress_decompress(
+    fn prop_multiple_compress_decompress(
         data in prop::collection::vec(any::<u8>(), 1..500),
         iterations in 2usize..5
     ) {
@@ -87,7 +87,7 @@ proptest! {
     }
 
     #[test]
-    fn test_no_context_takeover(
+    fn prop_no_context_takeover(
         data in prop::collection::vec(any::<u8>(), 1..500)
     ) {
         let config = PerMessageDeflateConfig::new()
@@ -102,7 +102,7 @@ proptest! {
     }
 
     #[test]
-    fn test_window_bits_variations(
+    fn prop_window_bits_variations(
         data in prop::collection::vec(any::<u8>(), 1..500),
         server_bits in 8u8..=15,
         client_bits in 8u8..=15
@@ -119,7 +119,7 @@ proptest! {
     }
 
     #[test]
-    fn test_server_codec(
+    fn prop_server_codec(
         data in prop::collection::vec(any::<u8>(), 1..500)
     ) {
         let config = PerMessageDeflateConfig::default();
@@ -132,7 +132,7 @@ proptest! {
     }
 
     #[test]
-    fn test_should_compress_threshold(
+    fn prop_should_compress_threshold(
         data_len in 0usize..1000,
         threshold in 0usize..1000
     ) {
@@ -149,7 +149,7 @@ proptest! {
 // ==== config() ゲッターのテスト ====
 
 #[test]
-fn test_config_getter() {
+fn prop_config_getter() {
     let config = PerMessageDeflateConfig::new()
         .server_max_window_bits(12)
         .client_max_window_bits(10)

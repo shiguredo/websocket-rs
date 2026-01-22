@@ -15,7 +15,7 @@ use shiguredo_websocket::{
 proptest! {
     /// Extension のパース・エンコードラウンドトリップ
     #[test]
-    fn test_extension_roundtrip(
+    fn prop_extension_roundtrip(
         name in "[a-z][a-z0-9-]{0,20}",
         param_names in prop::collection::vec("[a-z][a-z0-9_]{0,10}", 0..5),
         param_values in prop::collection::vec(prop::option::of("[a-zA-Z0-9]{1,20}"), 0..5)
@@ -34,7 +34,7 @@ proptest! {
 
     /// 複数の Extension のパース
     #[test]
-    fn test_multiple_extensions(
+    fn prop_multiple_extensions(
         names in prop::collection::vec("[a-z][a-z0-9-]{0,10}", 1..5)
     ) {
         let extensions: Vec<Extension> = names.iter()
@@ -56,7 +56,7 @@ proptest! {
 
     /// PerMessageDeflateConfig のラウンドトリップ
     #[test]
-    fn test_permessage_deflate_roundtrip(
+    fn prop_permessage_deflate_roundtrip(
         server_bits in prop::option::of(8u8..=15),
         client_bits in prop::option::of(8u8..=15),
         server_no_takeover in any::<bool>(),
@@ -94,7 +94,7 @@ proptest! {
 
     /// nonce のフォーマット
     #[test]
-    fn test_nonce_format(nonce in any::<[u8; 16]>()) {
+    fn prop_nonce_format(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
         let encoded = request.build(nonce);
         let s = String::from_utf8(encoded).unwrap();
@@ -116,7 +116,7 @@ proptest! {
 proptest! {
     /// HandshakeRequest のビルダーパターン
     #[test]
-    fn test_handshake_request_builder(
+    fn prop_handshake_request_builder(
         path in "/[a-zA-Z0-9/_-]{0,50}",
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         nonce in any::<[u8; 16]>()
@@ -133,7 +133,7 @@ proptest! {
 
     /// HandshakeRequest に origin を設定
     #[test]
-    fn test_handshake_request_with_origin(
+    fn prop_handshake_request_with_origin(
         origin in "https://[a-z]{3,10}\\.[a-z]{2,4}",
         nonce in any::<[u8; 16]>()
     ) {
@@ -147,7 +147,7 @@ proptest! {
 
     /// HandshakeRequest に protocol を設定
     #[test]
-    fn test_handshake_request_with_protocol(
+    fn prop_handshake_request_with_protocol(
         protocol in "[a-z]{3,15}",
         nonce in any::<[u8; 16]>()
     ) {
@@ -161,7 +161,7 @@ proptest! {
 
     /// HandshakeRequest に複数の protocol を設定
     #[test]
-    fn test_handshake_request_with_multiple_protocols(
+    fn prop_handshake_request_with_multiple_protocols(
         protocols in prop::collection::vec("[a-z]{3,10}", 2..4),
         nonce in any::<[u8; 16]>()
     ) {
@@ -178,7 +178,7 @@ proptest! {
 
     /// HandshakeRequest に extension を設定
     #[test]
-    fn test_handshake_request_with_extension(
+    fn prop_handshake_request_with_extension(
         extension in "[a-z][a-z0-9-]{3,20}",
         nonce in any::<[u8; 16]>()
     ) {
@@ -192,7 +192,7 @@ proptest! {
 
     /// HandshakeRequest に追加ヘッダーを設定
     #[test]
-    fn test_handshake_request_with_header(
+    fn prop_handshake_request_with_header(
         header_name in "[A-Z][a-zA-Z-]{3,15}",
         header_value in "[a-zA-Z0-9 ]{1,30}",
         nonce in any::<[u8; 16]>()
@@ -214,7 +214,7 @@ proptest! {
 proptest! {
     /// ServerHandshakeResponse のビルダーパターン
     #[test]
-    fn test_server_response_builder(
+    fn prop_server_response_builder(
         protocol in "[a-z]{3,15}",
         extension in "[a-z]{3,15}",
         header_name in "[A-Z][a-zA-Z-]{3,15}",
@@ -245,7 +245,7 @@ fn generate_valid_ws_key() -> String {
 proptest! {
     /// 有効なハンドシェイクリクエストが正しくパースされる
     #[test]
-    fn test_valid_handshake_request_validation(
+    fn prop_valid_handshake_request_validation(
         path in "/[a-zA-Z0-9/_-]{0,30}",
         host in "[a-z]{3,10}\\.[a-z]{2,4}"
     ) {
@@ -273,7 +273,7 @@ proptest! {
 
     /// 不正なメソッドは拒否される
     #[test]
-    fn test_invalid_method_rejected(
+    fn prop_invalid_method_rejected(
         method in "(POST|PUT|DELETE|PATCH)"
     ) {
         let key = generate_valid_ws_key();
@@ -297,7 +297,7 @@ proptest! {
 
     /// 不正な HTTP バージョンは拒否される
     #[test]
-    fn test_invalid_http_version_rejected(
+    fn prop_invalid_http_version_rejected(
         version in "(HTTP/1.0|HTTP/2.0|HTTP/0.9)"
     ) {
         let key = generate_valid_ws_key();
@@ -321,7 +321,7 @@ proptest! {
 
     /// 不正な Upgrade ヘッダーは拒否される
     #[test]
-    fn test_invalid_upgrade_header_rejected(
+    fn prop_invalid_upgrade_header_rejected(
         upgrade_value in "(http|ftp|ssh|invalid)"
     ) {
         let key = generate_valid_ws_key();
@@ -345,7 +345,7 @@ proptest! {
 
     /// 不正な Connection ヘッダーは拒否される
     #[test]
-    fn test_invalid_connection_header_rejected(
+    fn prop_invalid_connection_header_rejected(
         conn_value in "(Close|Keep-Alive|invalid)"
     ) {
         let key = generate_valid_ws_key();
@@ -369,7 +369,7 @@ proptest! {
 
     /// 不正な Sec-WebSocket-Version は拒否される
     #[test]
-    fn test_invalid_websocket_version_rejected(
+    fn prop_invalid_websocket_version_rejected(
         version in "(8|9|10|11|12|14)"
     ) {
         let key = generate_valid_ws_key();
@@ -393,7 +393,7 @@ proptest! {
 
     /// 不正な Sec-WebSocket-Key は拒否される
     #[test]
-    fn test_invalid_websocket_key_rejected(
+    fn prop_invalid_websocket_key_rejected(
         invalid_key in "[a-zA-Z0-9]{1,10}"
     ) {
         let request = format!(
@@ -437,7 +437,7 @@ fn calculate_expected_accept(nonce: &[u8; 16]) -> String {
 proptest! {
     /// 有効なハンドシェイクレスポンスが正しくパースされる
     #[test]
-    fn test_valid_handshake_response_validation(
+    fn prop_valid_handshake_response_validation(
         nonce in any::<[u8; 16]>()
     ) {
         let accept = calculate_expected_accept(&nonce);
@@ -462,7 +462,7 @@ proptest! {
 
     /// プロトコル付きのレスポンスが正しくパースされる
     #[test]
-    fn test_handshake_response_with_protocol(
+    fn prop_handshake_response_with_protocol(
         nonce in any::<[u8; 16]>(),
         protocol in "[a-z]{3,15}"
     ) {
@@ -488,7 +488,7 @@ proptest! {
 
     /// 不正なステータスコードは拒否される
     #[test]
-    fn test_invalid_status_code_rejected(
+    fn prop_invalid_status_code_rejected(
         nonce in any::<[u8; 16]>(),
         status in prop::sample::select(vec![200, 301, 400, 404, 500])
     ) {
@@ -511,7 +511,7 @@ proptest! {
 
     /// 不正な Sec-WebSocket-Accept は拒否される
     #[test]
-    fn test_invalid_accept_rejected(
+    fn prop_invalid_accept_rejected(
         nonce in any::<[u8; 16]>(),
         invalid_accept in "[a-zA-Z0-9+/]{20,30}="
     ) {
@@ -542,7 +542,7 @@ proptest! {
 // =============================================================================
 
 #[test]
-fn test_missing_host_header_rejected() {
+fn prop_missing_host_header_rejected() {
     let key = generate_valid_ws_key();
     let request = format!(
         "GET / HTTP/1.1\r\n\
@@ -562,7 +562,7 @@ fn test_missing_host_header_rejected() {
 }
 
 #[test]
-fn test_missing_upgrade_header_rejected() {
+fn prop_missing_upgrade_header_rejected() {
     let key = generate_valid_ws_key();
     let request = format!(
         "GET / HTTP/1.1\r\n\
@@ -582,7 +582,7 @@ fn test_missing_upgrade_header_rejected() {
 }
 
 #[test]
-fn test_missing_connection_header_rejected() {
+fn prop_missing_connection_header_rejected() {
     let key = generate_valid_ws_key();
     let request = format!(
         "GET / HTTP/1.1\r\n\
@@ -602,7 +602,7 @@ fn test_missing_connection_header_rejected() {
 }
 
 #[test]
-fn test_missing_websocket_key_rejected() {
+fn prop_missing_websocket_key_rejected() {
     let request = "\
 GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
@@ -619,7 +619,7 @@ Sec-WebSocket-Version: 13\r\n\
 }
 
 #[test]
-fn test_missing_websocket_version_rejected() {
+fn prop_missing_websocket_version_rejected() {
     let key = generate_valid_ws_key();
     let request = format!(
         "GET / HTTP/1.1\r\n\
@@ -643,7 +643,7 @@ fn test_missing_websocket_version_rejected() {
 // =============================================================================
 
 #[test]
-fn test_response_missing_upgrade_rejected() {
+fn prop_response_missing_upgrade_rejected() {
     let nonce = *b"0123456789ABCDEF";
     let accept = calculate_expected_accept(&nonce);
     let response = format!(
@@ -662,7 +662,7 @@ fn test_response_missing_upgrade_rejected() {
 }
 
 #[test]
-fn test_response_missing_connection_rejected() {
+fn prop_response_missing_connection_rejected() {
     let nonce = *b"0123456789ABCDEF";
     let accept = calculate_expected_accept(&nonce);
     let response = format!(
@@ -681,7 +681,7 @@ fn test_response_missing_connection_rejected() {
 }
 
 #[test]
-fn test_response_missing_accept_rejected() {
+fn prop_response_missing_accept_rejected() {
     let nonce = *b"0123456789ABCDEF";
     let response = "\
 HTTP/1.1 101 Switching Protocols\r\n\
@@ -703,7 +703,7 @@ Connection: Upgrade\r\n\
 proptest! {
     /// ハンドシェイクリクエストをチャンクで送っても正しくパースされる
     #[test]
-    fn test_chunked_handshake_request(
+    fn prop_chunked_handshake_request(
         chunk_size in 1usize..20
     ) {
         let key = generate_valid_ws_key();
@@ -729,7 +729,7 @@ proptest! {
 
     /// ハンドシェイクレスポンスをチャンクで送っても正しくパースされる
     #[test]
-    fn test_chunked_handshake_response(
+    fn prop_chunked_handshake_response(
         nonce in any::<[u8; 16]>(),
         chunk_size in 1usize..20
     ) {

@@ -6,7 +6,7 @@ use shiguredo_websocket::{Frame, FrameDecoder, Opcode};
 proptest! {
     /// テキストフレームのエンコード・デコードラウンドトリップ
     #[test]
-    fn test_text_frame_roundtrip(
+    fn prop_text_frame_roundtrip(
         text in "\\PC{0,1000}",
         masking_key in any::<[u8; 4]>()
     ) {
@@ -24,7 +24,7 @@ proptest! {
 
     /// バイナリフレームのエンコード・デコードラウンドトリップ
     #[test]
-    fn test_binary_frame_roundtrip(
+    fn prop_binary_frame_roundtrip(
         data in prop::collection::vec(any::<u8>(), 0..10000),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -42,7 +42,7 @@ proptest! {
 
     /// Ping フレームのラウンドトリップ（ペイロードは125バイト以下）
     #[test]
-    fn test_ping_frame_roundtrip(
+    fn prop_ping_frame_roundtrip(
         data in prop::collection::vec(any::<u8>(), 0..125),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -60,7 +60,7 @@ proptest! {
 
     /// Pong フレームのラウンドトリップ
     #[test]
-    fn test_pong_frame_roundtrip(
+    fn prop_pong_frame_roundtrip(
         data in prop::collection::vec(any::<u8>(), 0..125),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -80,7 +80,7 @@ proptest! {
     /// コントロールフレームは 125 バイト以下、Close は code (2バイト) + reason なので
     /// reason は 123 バイト以下に制限
     #[test]
-    fn test_close_frame_roundtrip(
+    fn prop_close_frame_roundtrip(
         code in 1000u16..5000,
         reason in "[a-zA-Z0-9 ]{0,50}",  // ASCII のみで50文字以下
         masking_key in any::<[u8; 4]>()
@@ -106,7 +106,7 @@ proptest! {
 
     /// パーシャルデータでのデコード
     #[test]
-    fn test_partial_decode(
+    fn prop_partial_decode(
         data in prop::collection::vec(any::<u8>(), 1..1000),
         masking_key in any::<[u8; 4]>(),
         chunk_size in 1usize..50
@@ -127,7 +127,7 @@ proptest! {
 
     /// マスキングキーの一貫性
     #[test]
-    fn test_masking_consistency(
+    fn prop_masking_consistency(
         data in prop::collection::vec(any::<u8>(), 0..1000),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -141,7 +141,7 @@ proptest! {
 
     /// 異なるマスキングキーでの結果
     #[test]
-    fn test_different_masking_keys(
+    fn prop_different_masking_keys(
         data in prop::collection::vec(any::<u8>(), 1..100),
         key1 in any::<[u8; 4]>(),
         key2 in any::<[u8; 4]>()

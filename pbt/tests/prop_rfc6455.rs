@@ -19,7 +19,7 @@ use shiguredo_websocket::{
 proptest! {
     /// Section 1.3: クライアントハンドシェイクは GET リクエストである
     #[test]
-    fn test_section_1_3_client_handshake_is_get_request(
+    fn prop_section_1_3_client_handshake_is_get_request(
         path in "/[a-zA-Z0-9/_-]{0,30}",
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         nonce in any::<[u8; 16]>()
@@ -36,7 +36,7 @@ proptest! {
 
     /// Section 1.3: サーバーハンドシェイクは 101 Switching Protocols
     #[test]
-    fn test_section_1_3_server_handshake_is_101(nonce in any::<[u8; 16]>()) {
+    fn prop_section_1_3_server_handshake_is_101(nonce in any::<[u8; 16]>()) {
         let accept = calculate_accept(&nonce);
         let response = format!(
             "HTTP/1.1 101 Switching Protocols\r\n\
@@ -62,7 +62,7 @@ proptest! {
 proptest! {
     /// Section 4.1.2: HTTP バージョンは 1.1 以上
     #[test]
-    fn test_section_4_1_2_http_version(nonce in any::<[u8; 16]>()) {
+    fn prop_section_4_1_2_http_version(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
         let encoded = request.build(nonce);
         let s = String::from_utf8(encoded).unwrap();
@@ -72,7 +72,7 @@ proptest! {
 
     /// Section 4.1.4: Host ヘッダーは必須
     #[test]
-    fn test_section_4_1_4_host_header_required(
+    fn prop_section_4_1_4_host_header_required(
         host in "[a-z]{3,10}\\.[a-z]{2,4}",
         nonce in any::<[u8; 16]>()
     ) {
@@ -86,7 +86,7 @@ proptest! {
 
     /// Section 4.1.5: Upgrade ヘッダーは "websocket" を含む
     #[test]
-    fn test_section_4_1_5_upgrade_header(nonce in any::<[u8; 16]>()) {
+    fn prop_section_4_1_5_upgrade_header(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
         let encoded = request.build(nonce);
         let s = String::from_utf8(encoded).unwrap();
@@ -96,7 +96,7 @@ proptest! {
 
     /// Section 4.1.6: Connection ヘッダーは "Upgrade" を含む
     #[test]
-    fn test_section_4_1_6_connection_header(nonce in any::<[u8; 16]>()) {
+    fn prop_section_4_1_6_connection_header(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
         let encoded = request.build(nonce);
         let s = String::from_utf8(encoded).unwrap();
@@ -106,7 +106,7 @@ proptest! {
 
     /// Section 4.1.7: Sec-WebSocket-Key は 16 バイトの base64 エンコード
     #[test]
-    fn test_section_4_1_7_websocket_key_format(nonce in any::<[u8; 16]>()) {
+    fn prop_section_4_1_7_websocket_key_format(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
         let encoded = request.build(nonce);
         let s = String::from_utf8(encoded).unwrap();
@@ -124,7 +124,7 @@ proptest! {
 
     /// Section 4.1.9: Sec-WebSocket-Version は 13
     #[test]
-    fn test_section_4_1_9_websocket_version(nonce in any::<[u8; 16]>()) {
+    fn prop_section_4_1_9_websocket_version(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
         let encoded = request.build(nonce);
         let s = String::from_utf8(encoded).unwrap();
@@ -134,7 +134,7 @@ proptest! {
 
     /// Section 4.1.10: Sec-WebSocket-Protocol はオプション
     #[test]
-    fn test_section_4_1_10_websocket_protocol_optional(
+    fn prop_section_4_1_10_websocket_protocol_optional(
         protocol in "[a-z]{3,15}",
         nonce in any::<[u8; 16]>()
     ) {
@@ -176,7 +176,7 @@ fn generate_valid_ws_key() -> String {
 proptest! {
     /// Section 4.2.1: サーバーは GET メソッドのみ受け入れる
     #[test]
-    fn test_section_4_2_1_get_method_only(
+    fn prop_section_4_2_1_get_method_only(
         method in "(POST|PUT|DELETE|PATCH|HEAD)"
     ) {
         let key = generate_valid_ws_key();
@@ -200,7 +200,7 @@ proptest! {
 
     /// Section 4.2.1: サーバーは HTTP/1.1 以上を要求
     #[test]
-    fn test_section_4_2_1_http_version_required(
+    fn prop_section_4_2_1_http_version_required(
         version in "(HTTP/1.0|HTTP/0.9)"
     ) {
         let key = generate_valid_ws_key();
@@ -224,7 +224,7 @@ proptest! {
 
     /// Section 4.2.1: Host ヘッダーは必須
     #[test]
-    fn test_section_4_2_1_host_required(_dummy in 0u8..1) {
+    fn prop_section_4_2_1_host_required(_dummy in 0u8..1) {
         let key = generate_valid_ws_key();
         let request = format!(
             "GET / HTTP/1.1\r\n\
@@ -245,7 +245,7 @@ proptest! {
 
     /// Section 4.2.1: Upgrade ヘッダーは "websocket" (大文字小文字無視)
     #[test]
-    fn test_section_4_2_1_upgrade_case_insensitive(
+    fn prop_section_4_2_1_upgrade_case_insensitive(
         upgrade in "(websocket|WebSocket|WEBSOCKET|WeBsOcKeT)"
     ) {
         let key = generate_valid_ws_key();
@@ -269,7 +269,7 @@ proptest! {
 
     /// Section 4.2.1: Connection ヘッダーは "Upgrade" を含む (大文字小文字無視)
     #[test]
-    fn test_section_4_2_1_connection_case_insensitive(
+    fn prop_section_4_2_1_connection_case_insensitive(
         connection in "(Upgrade|upgrade|UPGRADE)"
     ) {
         let key = generate_valid_ws_key();
@@ -293,7 +293,7 @@ proptest! {
 
     /// Section 4.2.1: Sec-WebSocket-Key は 16 バイトの base64
     #[test]
-    fn test_section_4_2_1_websocket_key_16_bytes(nonce in any::<[u8; 16]>()) {
+    fn prop_section_4_2_1_websocket_key_16_bytes(nonce in any::<[u8; 16]>()) {
         let key = base64::engine::general_purpose::STANDARD.encode(nonce);
         let request = format!(
             "GET / HTTP/1.1\r\n\
@@ -315,7 +315,7 @@ proptest! {
 
     /// Section 4.2.1: Sec-WebSocket-Version は 13
     #[test]
-    fn test_section_4_2_1_version_must_be_13(
+    fn prop_section_4_2_1_version_must_be_13(
         version in "(8|9|10|11|12|14|15)"
     ) {
         let key = generate_valid_ws_key();
@@ -339,7 +339,7 @@ proptest! {
 
     /// Section 4.2.2: Sec-WebSocket-Accept の計算
     #[test]
-    fn test_section_4_2_2_accept_calculation(nonce in any::<[u8; 16]>()) {
+    fn prop_section_4_2_2_accept_calculation(nonce in any::<[u8; 16]>()) {
         let accept = calculate_accept(&nonce);
         let response = format!(
             "HTTP/1.1 101 Switching Protocols\r\n\
@@ -359,7 +359,7 @@ proptest! {
 
     /// Section 4.2.2: 不正な Sec-WebSocket-Accept は拒否される
     #[test]
-    fn test_section_4_2_2_invalid_accept_rejected(
+    fn prop_section_4_2_2_invalid_accept_rejected(
         nonce in any::<[u8; 16]>(),
         wrong_nonce in any::<[u8; 16]>()
     ) {
@@ -391,7 +391,7 @@ proptest! {
 proptest! {
     /// Section 5.1: フレームは FIN ビットを持つ
     #[test]
-    fn test_section_5_1_frame_has_fin_bit(
+    fn prop_section_5_1_frame_has_fin_bit(
         payload in prop::collection::vec(any::<u8>(), 0..1000),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -404,7 +404,7 @@ proptest! {
 
     /// Section 5.1: クライアントからサーバーへのフレームは必ずマスクされる
     #[test]
-    fn test_section_5_1_client_frames_are_masked(
+    fn prop_section_5_1_client_frames_are_masked(
         payload in prop::collection::vec(any::<u8>(), 0..500),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -423,7 +423,7 @@ proptest! {
 proptest! {
     /// Section 5.2: ペイロード長 0-125 は 1 バイトエンコード
     #[test]
-    fn test_section_5_2_payload_length_7bit(
+    fn prop_section_5_2_payload_length_7bit(
         len in 0usize..126,
         masking_key in any::<[u8; 4]>()
     ) {
@@ -438,7 +438,7 @@ proptest! {
 
     /// Section 5.2: ペイロード長 126-65535 は 16 ビットエンコード (126 を使用)
     #[test]
-    fn test_section_5_2_payload_length_16bit(
+    fn prop_section_5_2_payload_length_16bit(
         len in 126usize..65536,
         masking_key in any::<[u8; 4]>()
     ) {
@@ -456,7 +456,7 @@ proptest! {
 
     /// Section 5.2: ペイロード長 65536 以上は 64 ビットエンコード (127 を使用)
     #[test]
-    fn test_section_5_2_payload_length_64bit(
+    fn prop_section_5_2_payload_length_64bit(
         // メモリ節約のため 65536-70000 の範囲でテスト
         len in 65536usize..70000,
         masking_key in any::<[u8; 4]>()
@@ -478,7 +478,7 @@ proptest! {
 
     /// Section 5.2: RSV ビットはデフォルトで 0
     #[test]
-    fn test_section_5_2_rsv_bits_default_zero(
+    fn prop_section_5_2_rsv_bits_default_zero(
         payload in prop::collection::vec(any::<u8>(), 0..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -491,7 +491,7 @@ proptest! {
 
     /// Section 5.2: RSV ビットのエンコード
     #[test]
-    fn test_section_5_2_rsv_bits_encoding(
+    fn prop_section_5_2_rsv_bits_encoding(
         rsv1 in any::<bool>(),
         rsv2 in any::<bool>(),
         rsv3 in any::<bool>(),
@@ -511,7 +511,7 @@ proptest! {
 
     /// Section 5.2: オペコードは 4 ビット
     #[test]
-    fn test_section_5_2_opcode_4bits(
+    fn prop_section_5_2_opcode_4bits(
         payload in prop::collection::vec(any::<u8>(), 0..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -539,7 +539,7 @@ proptest! {
 proptest! {
     /// Section 5.3: マスキングは XOR 演算
     #[test]
-    fn test_section_5_3_masking_xor_operation(
+    fn prop_section_5_3_masking_xor_operation(
         payload in prop::collection::vec(any::<u8>(), 1..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -560,7 +560,7 @@ proptest! {
 
     /// Section 5.3: マスキングキーは 4 バイト
     #[test]
-    fn test_section_5_3_masking_key_is_4_bytes(
+    fn prop_section_5_3_masking_key_is_4_bytes(
         payload in prop::collection::vec(any::<u8>(), 1..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -577,7 +577,7 @@ proptest! {
 
     /// Section 5.3: マスキングは可逆的（同じ操作でアンマスク）
     #[test]
-    fn test_section_5_3_masking_is_reversible(
+    fn prop_section_5_3_masking_is_reversible(
         payload in prop::collection::vec(any::<u8>(), 1..1000),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -600,7 +600,7 @@ proptest! {
 proptest! {
     /// Section 5.4: 非分割メッセージは FIN=1 でオペコード != 0
     #[test]
-    fn test_section_5_4_unfragmented_message(
+    fn prop_section_5_4_unfragmented_message(
         payload in prop::collection::vec(any::<u8>(), 0..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -615,7 +615,7 @@ proptest! {
 
     /// Section 5.4: フラグメント開始は FIN=0 でオペコード != 0
     #[test]
-    fn test_section_5_4_fragment_start(
+    fn prop_section_5_4_fragment_start(
         payload in prop::collection::vec(any::<u8>(), 0..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -631,7 +631,7 @@ proptest! {
 
     /// Section 5.4: 継続フレームはオペコード 0
     #[test]
-    fn test_section_5_4_continuation_opcode(
+    fn prop_section_5_4_continuation_opcode(
         payload in prop::collection::vec(any::<u8>(), 0..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -645,7 +645,7 @@ proptest! {
 
     /// Section 5.4: フラグメント終了は FIN=1 でオペコード 0
     #[test]
-    fn test_section_5_4_fragment_end(
+    fn prop_section_5_4_fragment_end(
         payload in prop::collection::vec(any::<u8>(), 0..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -667,7 +667,7 @@ proptest! {
 proptest! {
     /// Section 5.5: コントロールフレームのペイロードは 125 バイト以下
     #[test]
-    fn test_section_5_5_control_frame_max_125_bytes(
+    fn prop_section_5_5_control_frame_max_125_bytes(
         data in prop::collection::vec(any::<u8>(), 0..125),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -684,7 +684,7 @@ proptest! {
 
     /// Section 5.5: コントロールフレームは FIN=1 (分割禁止)
     #[test]
-    fn test_section_5_5_control_frames_must_be_final(
+    fn prop_section_5_5_control_frames_must_be_final(
         data in prop::collection::vec(any::<u8>(), 0..50),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -704,7 +704,7 @@ proptest! {
 
     /// Section 5.5.1: Close フレームのオペコードは 0x8
     #[test]
-    fn test_section_5_5_1_close_opcode(
+    fn prop_section_5_5_1_close_opcode(
         code in 1000u16..4999,
         reason in "[a-zA-Z0-9 ]{0,50}",
         masking_key in any::<[u8; 4]>()
@@ -717,7 +717,7 @@ proptest! {
 
     /// Section 5.5.1: Close フレームのペイロード構造
     #[test]
-    fn test_section_5_5_1_close_payload_structure(
+    fn prop_section_5_5_1_close_payload_structure(
         code in 1000u16..4999,
         reason in "[a-zA-Z0-9]{0,100}",
         masking_key in any::<[u8; 4]>()
@@ -743,7 +743,7 @@ proptest! {
 
     /// Section 5.5.1: Close フレームはコードなしも可能
     #[test]
-    fn test_section_5_5_1_close_without_code(masking_key in any::<[u8; 4]>()) {
+    fn prop_section_5_5_1_close_without_code(masking_key in any::<[u8; 4]>()) {
         let close = Frame::close(None, "");
         let encoded = close.encode(masking_key);
 
@@ -756,7 +756,7 @@ proptest! {
 
     /// Section 5.5.2: Ping フレームのオペコードは 0x9
     #[test]
-    fn test_section_5_5_2_ping_opcode(
+    fn prop_section_5_5_2_ping_opcode(
         data in prop::collection::vec(any::<u8>(), 0..50),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -768,7 +768,7 @@ proptest! {
 
     /// Section 5.5.3: Pong フレームのオペコードは 0xA
     #[test]
-    fn test_section_5_5_3_pong_opcode(
+    fn prop_section_5_5_3_pong_opcode(
         data in prop::collection::vec(any::<u8>(), 0..50),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -786,7 +786,7 @@ proptest! {
 proptest! {
     /// Section 5.6: テキストフレームのオペコードは 0x1
     #[test]
-    fn test_section_5_6_text_opcode(
+    fn prop_section_5_6_text_opcode(
         text in "\\PC{0,100}",
         masking_key in any::<[u8; 4]>()
     ) {
@@ -798,7 +798,7 @@ proptest! {
 
     /// Section 5.6: バイナリフレームのオペコードは 0x2
     #[test]
-    fn test_section_5_6_binary_opcode(
+    fn prop_section_5_6_binary_opcode(
         data in prop::collection::vec(any::<u8>(), 0..100),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -810,7 +810,7 @@ proptest! {
 
     /// Section 5.6: テキストフレームのペイロードは UTF-8
     #[test]
-    fn test_section_5_6_text_payload_is_utf8(
+    fn prop_section_5_6_text_payload_is_utf8(
         text in "\\PC{0,500}",
         masking_key in any::<[u8; 4]>()
     ) {
@@ -835,7 +835,7 @@ proptest! {
 proptest! {
     /// Section 7.4.1: 1000 (NORMAL) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1000_normal(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1000_normal(_dummy in 0u8..1) {
         let close_code = CloseCode::NORMAL;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -844,7 +844,7 @@ proptest! {
 
     /// Section 7.4.1: 1001 (GOING_AWAY) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1001_going_away(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1001_going_away(_dummy in 0u8..1) {
         let close_code = CloseCode::GOING_AWAY;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -853,7 +853,7 @@ proptest! {
 
     /// Section 7.4.1: 1002 (PROTOCOL_ERROR) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1002_protocol_error(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1002_protocol_error(_dummy in 0u8..1) {
         let close_code = CloseCode::PROTOCOL_ERROR;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -862,7 +862,7 @@ proptest! {
 
     /// Section 7.4.1: 1003 (UNSUPPORTED_DATA) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1003_unsupported_data(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1003_unsupported_data(_dummy in 0u8..1) {
         let close_code = CloseCode::UNSUPPORTED_DATA;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -871,7 +871,7 @@ proptest! {
 
     /// Section 7.4.1: 1005 (NO_STATUS_RECEIVED) は送信禁止
     #[test]
-    fn test_section_7_4_1_code_1005_not_sendable(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1005_not_sendable(_dummy in 0u8..1) {
         let close_code = CloseCode::NO_STATUS_RECEIVED;
         prop_assert!(!close_code.is_sendable());
         prop_assert_eq!(close_code.as_u16(), 1005);
@@ -879,7 +879,7 @@ proptest! {
 
     /// Section 7.4.1: 1006 (ABNORMAL_CLOSURE) は送信禁止
     #[test]
-    fn test_section_7_4_1_code_1006_not_sendable(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1006_not_sendable(_dummy in 0u8..1) {
         let close_code = CloseCode::ABNORMAL_CLOSURE;
         prop_assert!(!close_code.is_sendable());
         prop_assert_eq!(close_code.as_u16(), 1006);
@@ -887,7 +887,7 @@ proptest! {
 
     /// Section 7.4.1: 1007 (INVALID_PAYLOAD) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1007_invalid_payload(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1007_invalid_payload(_dummy in 0u8..1) {
         let close_code = CloseCode::INVALID_PAYLOAD;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -896,7 +896,7 @@ proptest! {
 
     /// Section 7.4.1: 1008 (POLICY_VIOLATION) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1008_policy_violation(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1008_policy_violation(_dummy in 0u8..1) {
         let close_code = CloseCode::POLICY_VIOLATION;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -905,7 +905,7 @@ proptest! {
 
     /// Section 7.4.1: 1009 (MESSAGE_TOO_BIG) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1009_message_too_big(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1009_message_too_big(_dummy in 0u8..1) {
         let close_code = CloseCode::MESSAGE_TOO_BIG;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -914,7 +914,7 @@ proptest! {
 
     /// Section 7.4.1: 1010 (MANDATORY_EXTENSION) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1010_mandatory_extension(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1010_mandatory_extension(_dummy in 0u8..1) {
         let close_code = CloseCode::MANDATORY_EXTENSION;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -923,7 +923,7 @@ proptest! {
 
     /// Section 7.4.1: 1011 (INTERNAL_ERROR) は有効なクローズコード
     #[test]
-    fn test_section_7_4_1_code_1011_internal_error(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1011_internal_error(_dummy in 0u8..1) {
         let close_code = CloseCode::INTERNAL_ERROR;
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -932,7 +932,7 @@ proptest! {
 
     /// Section 7.4.1: 1015 (TLS_HANDSHAKE) は送信禁止
     #[test]
-    fn test_section_7_4_1_code_1015_not_sendable(_dummy in 0u8..1) {
+    fn prop_section_7_4_1_code_1015_not_sendable(_dummy in 0u8..1) {
         let close_code = CloseCode::TLS_HANDSHAKE;
         prop_assert!(!close_code.is_sendable());
         prop_assert_eq!(close_code.as_u16(), 1015);
@@ -940,7 +940,7 @@ proptest! {
 
     /// Section 7.4.2: 0-999 は無効なクローズコード
     #[test]
-    fn test_section_7_4_2_codes_0_999_invalid(code in 0u16..1000) {
+    fn prop_section_7_4_2_codes_0_999_invalid(code in 0u16..1000) {
         let close_code = CloseCode::new(code);
         prop_assert!(!close_code.is_valid());
         prop_assert!(!close_code.is_sendable());
@@ -948,7 +948,7 @@ proptest! {
 
     /// Section 7.4.2: 3000-3999 はライブラリ/フレームワーク用
     #[test]
-    fn test_section_7_4_2_library_codes(code in 3000u16..4000) {
+    fn prop_section_7_4_2_library_codes(code in 3000u16..4000) {
         let close_code = CloseCode::new(code);
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -956,7 +956,7 @@ proptest! {
 
     /// Section 7.4.2: 4000-4999 はアプリケーション用
     #[test]
-    fn test_section_7_4_2_application_codes(code in 4000u16..5000) {
+    fn prop_section_7_4_2_application_codes(code in 4000u16..5000) {
         let close_code = CloseCode::new(code);
         prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
@@ -970,7 +970,7 @@ proptest! {
 proptest! {
     /// フレームのエンコード/デコードは可逆的
     #[test]
-    fn test_frame_roundtrip(
+    fn prop_frame_roundtrip(
         payload in prop::collection::vec(any::<u8>(), 0..5000),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -988,7 +988,7 @@ proptest! {
 
     /// テキストフレームのラウンドトリップ
     #[test]
-    fn test_text_frame_roundtrip(
+    fn prop_text_frame_roundtrip(
         text in "\\PC{0,1000}",
         masking_key in any::<[u8; 4]>()
     ) {
@@ -1006,7 +1006,7 @@ proptest! {
 
     /// 任意のチャンクサイズでフィードしても正しくデコードされる
     #[test]
-    fn test_decoder_arbitrary_chunks(
+    fn prop_decoder_arbitrary_chunks(
         payload in prop::collection::vec(any::<u8>(), 1..5000),
         masking_key in any::<[u8; 4]>(),
         chunk_sizes in prop::collection::vec(1usize..100, 1..50)
@@ -1037,7 +1037,7 @@ proptest! {
 
     /// 連続フレームのデコード
     #[test]
-    fn test_multiple_frames_decode(
+    fn prop_multiple_frames_decode(
         payloads in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..100), 2..5),
         masking_key in any::<[u8; 4]>()
     ) {
@@ -1064,7 +1064,7 @@ proptest! {
 proptest! {
     /// 空のペイロード
     #[test]
-    fn test_empty_payload(masking_key in any::<[u8; 4]>()) {
+    fn prop_empty_payload(masking_key in any::<[u8; 4]>()) {
         let frame = Frame::binary(vec![]);
         let encoded = frame.encode(masking_key);
 
@@ -1077,7 +1077,7 @@ proptest! {
 
     /// 125 バイト境界 (7-bit → 16-bit 境界)
     #[test]
-    fn test_payload_boundary_125(masking_key in any::<[u8; 4]>()) {
+    fn prop_payload_boundary_125(masking_key in any::<[u8; 4]>()) {
         for len in [124, 125, 126] {
             let payload = vec![0xAB; len];
             let frame = Frame::binary(payload.clone());
@@ -1093,7 +1093,7 @@ proptest! {
 
     /// 65535 バイト境界 (16-bit → 64-bit 境界)
     #[test]
-    fn test_payload_boundary_65535(masking_key in any::<[u8; 4]>()) {
+    fn prop_payload_boundary_65535(masking_key in any::<[u8; 4]>()) {
         for len in [65534, 65535, 65536] {
             let payload = vec![0xCD; len];
             let frame = Frame::binary(payload.clone());
@@ -1115,7 +1115,7 @@ proptest! {
 proptest! {
     /// ハンドシェイクリクエストをチャンクで送っても正しくパースされる
     #[test]
-    fn test_chunked_handshake_request(chunk_size in 1usize..20) {
+    fn prop_chunked_handshake_request(chunk_size in 1usize..20) {
         let key = generate_valid_ws_key();
         let request = format!(
             "GET / HTTP/1.1\r\n\
@@ -1139,7 +1139,7 @@ proptest! {
 
     /// ハンドシェイクレスポンスをチャンクで送っても正しくパースされる
     #[test]
-    fn test_chunked_handshake_response(
+    fn prop_chunked_handshake_response(
         nonce in any::<[u8; 16]>(),
         chunk_size in 1usize..20
     ) {
@@ -1170,7 +1170,7 @@ proptest! {
 proptest! {
     /// ServerHandshakeResponse のビルダーパターン
     #[test]
-    fn test_server_response_builder(
+    fn prop_server_response_builder(
         protocol in "[a-z]{3,15}",
         extension in "[a-z]{3,15}",
         header_name in "[A-Z][a-zA-Z-]{3,15}",
