@@ -6,6 +6,7 @@
 use std::collections::VecDeque;
 
 use crate::Timestamp;
+use crate::deflate::PerMessageDeflate;
 use crate::error::Error;
 use crate::websocket_close::CloseCode;
 use crate::websocket_extension::{Extension, PerMessageDeflateConfig};
@@ -87,6 +88,8 @@ struct FragmentBuffer {
     opcode: Option<Opcode>,
     /// 収集中のペイロード
     payload: Vec<u8>,
+    /// メッセージが圧縮されているか (最初のフレームの RSV1)
+    compressed: bool,
 }
 
 impl FragmentBuffer {
@@ -98,24 +101,28 @@ impl FragmentBuffer {
         self.opcode.is_none()
     }
 
-    fn start(&mut self, opcode: Opcode, payload: Vec<u8>) {
+    fn start(&mut self, opcode: Opcode, payload: Vec<u8>, compressed: bool) {
         self.opcode = Some(opcode);
         self.payload = payload;
+        self.compressed = compressed;
     }
 
     fn append(&mut self, payload: &[u8]) {
         self.payload.extend_from_slice(payload);
     }
 
-    fn take(&mut self) -> (Opcode, Vec<u8>) {
+    fn take(&mut self) -> (Opcode, Vec<u8>, bool) {
         let opcode = self.opcode.take().unwrap_or(Opcode::Binary);
         let payload = std::mem::take(&mut self.payload);
-        (opcode, payload)
+        let compressed = self.compressed;
+        self.compressed = false;
+        (opcode, payload, compressed)
     }
 
     fn clear(&mut self) {
         self.opcode = None;
         self.payload.clear();
+        self.compressed = false;
     }
 }
 
@@ -142,8 +149,8 @@ pub struct WebSocketServerConnection {
     negotiated_protocol: Option<String>,
     /// ネゴシエートされた拡張
     negotiated_extensions: Vec<String>,
-    /// ネゴシエートされた deflate 設定
-    negotiated_deflate: Option<PerMessageDeflateConfig>,
+    /// permessage-deflate コーデック
+    deflate: Option<PerMessageDeflate>,
 
     /// クローズフレームを送信したか
     close_sent: bool,
@@ -174,7 +181,7 @@ impl WebSocketServerConnection {
             fragment_buffer: FragmentBuffer::new(),
             negotiated_protocol: None,
             negotiated_extensions: Vec::new(),
-            negotiated_deflate: None,
+            deflate: None,
             close_sent: false,
             close_received: false,
             last_ping_time: None,
@@ -310,12 +317,16 @@ impl WebSocketServerConnection {
 
         self.negotiated_protocol = response.protocol.clone();
         self.negotiated_extensions = response.extensions.clone();
-        self.negotiated_deflate = None;
+
+        // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
+        self.deflate = None;
         for ext_str in &response.extensions {
             let extensions = Extension::parse(ext_str);
             for ext in extensions {
-                if ext.name == "permessage-deflate" {
-                    self.negotiated_deflate = PerMessageDeflateConfig::from_extension(&ext);
+                if ext.name == "permessage-deflate"
+                    && let Some(config) = PerMessageDeflateConfig::from_extension(&ext)
+                {
+                    self.deflate = Some(PerMessageDeflate::new_server(config));
                 }
             }
         }
@@ -366,21 +377,40 @@ impl WebSocketServerConnection {
     /// テキストメッセージを送信
     pub fn send_text(&mut self, text: &str, _now: Timestamp) -> Result<(), Error> {
         self.check_connected()?;
-
-        let frame = Frame::text(text);
-        self.send_frame(frame);
-
-        Ok(())
+        self.send_data_frame(Opcode::Text, text.as_bytes().to_vec())
     }
 
     /// バイナリメッセージを送信
     pub fn send_binary(&mut self, data: &[u8], _now: Timestamp) -> Result<(), Error> {
         self.check_connected()?;
+        self.send_data_frame(Opcode::Binary, data.to_vec())
+    }
 
-        let frame = Frame::binary(data.to_vec());
+    /// データフレームを送信（圧縮対応）
+    fn send_data_frame(&mut self, opcode: Opcode, payload: Vec<u8>) -> Result<(), Error> {
+        let (payload, compressed) = self.compress_if_enabled(payload)?;
+
+        let mut frame = Frame::new(opcode, payload);
+        frame.rsv1 = compressed;
+
         self.send_frame(frame);
-
         Ok(())
+    }
+
+    /// 圧縮が有効な場合、ペイロードを圧縮する
+    fn compress_if_enabled(&mut self, payload: Vec<u8>) -> Result<(Vec<u8>, bool), Error> {
+        if let Some(deflate) = &mut self.deflate {
+            // 小さなメッセージは圧縮しない（圧縮のオーバーヘッドが大きくなる可能性）
+            const COMPRESSION_THRESHOLD: usize = 64;
+            if deflate.should_compress(&payload, COMPRESSION_THRESHOLD) {
+                let compressed = deflate.compress(&payload)?;
+                Ok((compressed, true))
+            } else {
+                Ok((payload, false))
+            }
+        } else {
+            Ok((payload, false))
+        }
     }
 
     /// Ping を送信
@@ -537,7 +567,7 @@ impl WebSocketServerConnection {
         if frame.rsv2 || frame.rsv3 {
             return Err(Error::protocol_violation("reserved bits set"));
         }
-        if frame.rsv1 && self.negotiated_deflate.is_none() {
+        if frame.rsv1 && self.deflate.is_none() {
             return Err(Error::protocol_violation(
                 "rsv1 set without permessage-deflate",
             ));
@@ -564,10 +594,12 @@ impl WebSocketServerConnection {
 
         if frame.fin {
             // 完全なメッセージ
-            self.emit_message(frame.opcode, frame.payload, now)?;
+            let payload = self.decompress_if_needed(frame.payload, frame.rsv1)?;
+            self.emit_message(frame.opcode, payload, now)?;
         } else {
-            // フラグメント開始
-            self.fragment_buffer.start(frame.opcode, frame.payload);
+            // フラグメント開始 (RSV1 は最初のフレームにのみ設定される)
+            self.fragment_buffer
+                .start(frame.opcode, frame.payload, frame.rsv1);
         }
         Ok(())
     }
@@ -582,11 +614,31 @@ impl WebSocketServerConnection {
         self.fragment_buffer.append(&frame.payload);
 
         if frame.fin {
-            let (opcode, payload) = self.fragment_buffer.take();
+            let (opcode, payload, compressed) = self.fragment_buffer.take();
+            let payload = self.decompress_if_needed(payload, compressed)?;
             self.emit_message(opcode, payload, now)?;
         }
 
         Ok(())
+    }
+
+    /// 必要に応じてペイロードを解凍する
+    fn decompress_if_needed(
+        &mut self,
+        payload: Vec<u8>,
+        compressed: bool,
+    ) -> Result<Vec<u8>, Error> {
+        if compressed {
+            if let Some(deflate) = &mut self.deflate {
+                deflate.decompress(&payload)
+            } else {
+                Err(Error::protocol_violation(
+                    "received compressed frame without permessage-deflate",
+                ))
+            }
+        } else {
+            Ok(payload)
+        }
     }
 
     fn emit_message(
