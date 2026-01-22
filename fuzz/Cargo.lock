@@ -102,6 +102,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fuzz"
+version = "0.0.0"
+dependencies = [
+ "libfuzzer-sys",
+ "shiguredo_websocket",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -184,7 +192,7 @@ checksum = "b005120623e2c64f7273561c06b5dfa4152a02015b5dddaf672483134239dac8"
 
 [[package]]
 name = "shiguredo_websocket"
-version = "2026.0.0"
+version = "2026.1.0-canary.0"
 dependencies = [
  "base64",
  "flate2",
@@ -224,14 +232,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
 dependencies = [
  "wit-bindgen",
-]
-
-[[package]]
-name = "websocket_fuzz"
-version = "0.0.0"
-dependencies = [
- "libfuzzer-sys",
- "shiguredo_websocket",
 ]
 
 [[package]]
