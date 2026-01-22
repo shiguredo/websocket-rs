@@ -79,9 +79,14 @@ proptest! {
     /// Close フレームのラウンドトリップ
     /// コントロールフレームは 125 バイト以下、Close は code (2バイト) + reason なので
     /// reason は 123 バイト以下に制限
+    /// 有効な Close コード: 1000-1003, 1007-1011, 3000-4999
     #[test]
     fn prop_close_frame_roundtrip(
-        code in 1000u16..5000,
+        code in prop_oneof![
+            1000u16..=1003,
+            1007u16..=1011,
+            3000u16..5000
+        ],
         reason in "[a-zA-Z0-9 ]{0,50}",  // ASCII のみで50文字以下
         masking_key in any::<[u8; 4]>()
     ) {

@@ -537,73 +537,78 @@ proptest! {
     }
 }
 
-// =============================================================================
-// 欠損ヘッダーのテスト
-// =============================================================================
+proptest! {
+    // =============================================================================
+    // 欠損ヘッダーのテスト
+    // =============================================================================
 
-#[test]
-fn prop_missing_host_header_rejected() {
-    let key = generate_valid_ws_key();
-    let request = format!(
-        "GET / HTTP/1.1\r\n\
-         Upgrade: websocket\r\n\
-         Connection: Upgrade\r\n\
-         Sec-WebSocket-Key: {}\r\n\
-         Sec-WebSocket-Version: 13\r\n\
-         \r\n",
-        key
-    );
+    /// Host ヘッダーが欠損している場合は拒否される
+    #[test]
+    fn prop_missing_host_header_rejected(_dummy in 0u8..1) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             \r\n",
+            key
+        );
 
-    let mut validator = HandshakeRequestValidator::new();
-    validator.feed(request.as_bytes());
-    let result = validator.validate();
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
 
-    assert!(result.is_err());
-}
+        prop_assert!(result.is_err());
+    }
 
-#[test]
-fn prop_missing_upgrade_header_rejected() {
-    let key = generate_valid_ws_key();
-    let request = format!(
-        "GET / HTTP/1.1\r\n\
-         Host: example.com\r\n\
-         Connection: Upgrade\r\n\
-         Sec-WebSocket-Key: {}\r\n\
-         Sec-WebSocket-Version: 13\r\n\
-         \r\n",
-        key
-    );
+    /// Upgrade ヘッダーが欠損している場合は拒否される
+    #[test]
+    fn prop_missing_upgrade_header_rejected(_dummy in 0u8..1) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             \r\n",
+            key
+        );
 
-    let mut validator = HandshakeRequestValidator::new();
-    validator.feed(request.as_bytes());
-    let result = validator.validate();
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
 
-    assert!(result.is_err());
-}
+        prop_assert!(result.is_err());
+    }
 
-#[test]
-fn prop_missing_connection_header_rejected() {
-    let key = generate_valid_ws_key();
-    let request = format!(
-        "GET / HTTP/1.1\r\n\
-         Host: example.com\r\n\
-         Upgrade: websocket\r\n\
-         Sec-WebSocket-Key: {}\r\n\
-         Sec-WebSocket-Version: 13\r\n\
-         \r\n",
-        key
-    );
+    /// Connection ヘッダーが欠損している場合は拒否される
+    #[test]
+    fn prop_missing_connection_header_rejected(_dummy in 0u8..1) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             \r\n",
+            key
+        );
 
-    let mut validator = HandshakeRequestValidator::new();
-    validator.feed(request.as_bytes());
-    let result = validator.validate();
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
 
-    assert!(result.is_err());
-}
+        prop_assert!(result.is_err());
+    }
 
-#[test]
-fn prop_missing_websocket_key_rejected() {
-    let request = "\
+    /// Sec-WebSocket-Key ヘッダーが欠損している場合は拒否される
+    #[test]
+    fn prop_missing_websocket_key_rejected(_dummy in 0u8..1) {
+        let request = "\
 GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
 Upgrade: websocket\r\n\
@@ -611,89 +616,91 @@ Connection: Upgrade\r\n\
 Sec-WebSocket-Version: 13\r\n\
 \r\n";
 
-    let mut validator = HandshakeRequestValidator::new();
-    validator.feed(request.as_bytes());
-    let result = validator.validate();
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
 
-    assert!(result.is_err());
-}
+        prop_assert!(result.is_err());
+    }
 
-#[test]
-fn prop_missing_websocket_version_rejected() {
-    let key = generate_valid_ws_key();
-    let request = format!(
-        "GET / HTTP/1.1\r\n\
-         Host: example.com\r\n\
-         Upgrade: websocket\r\n\
-         Connection: Upgrade\r\n\
-         Sec-WebSocket-Key: {}\r\n\
-         \r\n",
-        key
-    );
+    /// Sec-WebSocket-Version ヘッダーが欠損している場合は拒否される
+    #[test]
+    fn prop_missing_websocket_version_rejected(_dummy in 0u8..1) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             \r\n",
+            key
+        );
 
-    let mut validator = HandshakeRequestValidator::new();
-    validator.feed(request.as_bytes());
-    let result = validator.validate();
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
 
-    assert!(result.is_err());
-}
+        prop_assert!(result.is_err());
+    }
 
-// =============================================================================
-// HandshakeValidator の欠損ヘッダーテスト
-// =============================================================================
+    // =============================================================================
+    // HandshakeValidator の欠損ヘッダーテスト
+    // =============================================================================
 
-#[test]
-fn prop_response_missing_upgrade_rejected() {
-    let nonce = *b"0123456789ABCDEF";
-    let accept = calculate_expected_accept(&nonce);
-    let response = format!(
-        "HTTP/1.1 101 Switching Protocols\r\n\
-         Connection: Upgrade\r\n\
-         Sec-WebSocket-Accept: {}\r\n\
-         \r\n",
-        accept
-    );
+    /// レスポンスで Upgrade ヘッダーが欠損している場合は拒否される
+    #[test]
+    fn prop_response_missing_upgrade_rejected(nonce in any::<[u8; 16]>()) {
+        let accept = calculate_expected_accept(&nonce);
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             \r\n",
+            accept
+        );
 
-    let mut validator = HandshakeValidator::new(nonce);
-    validator.feed(response.as_bytes());
-    let result = validator.validate();
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
 
-    assert!(result.is_err());
-}
+        prop_assert!(result.is_err());
+    }
 
-#[test]
-fn prop_response_missing_connection_rejected() {
-    let nonce = *b"0123456789ABCDEF";
-    let accept = calculate_expected_accept(&nonce);
-    let response = format!(
-        "HTTP/1.1 101 Switching Protocols\r\n\
-         Upgrade: websocket\r\n\
-         Sec-WebSocket-Accept: {}\r\n\
-         \r\n",
-        accept
-    );
+    /// レスポンスで Connection ヘッダーが欠損している場合は拒否される
+    #[test]
+    fn prop_response_missing_connection_rejected(nonce in any::<[u8; 16]>()) {
+        let accept = calculate_expected_accept(&nonce);
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             \r\n",
+            accept
+        );
 
-    let mut validator = HandshakeValidator::new(nonce);
-    validator.feed(response.as_bytes());
-    let result = validator.validate();
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
 
-    assert!(result.is_err());
-}
+        prop_assert!(result.is_err());
+    }
 
-#[test]
-fn prop_response_missing_accept_rejected() {
-    let nonce = *b"0123456789ABCDEF";
-    let response = "\
+    /// レスポンスで Sec-WebSocket-Accept ヘッダーが欠損している場合は拒否される
+    #[test]
+    fn prop_response_missing_accept_rejected(nonce in any::<[u8; 16]>()) {
+        let response = "\
 HTTP/1.1 101 Switching Protocols\r\n\
 Upgrade: websocket\r\n\
 Connection: Upgrade\r\n\
 \r\n";
 
-    let mut validator = HandshakeValidator::new(nonce);
-    validator.feed(response.as_bytes());
-    let result = validator.validate();
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
 
-    assert!(result.is_err());
+        prop_assert!(result.is_err());
+    }
 }
 
 // =============================================================================

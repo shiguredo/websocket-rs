@@ -16,12 +16,13 @@ proptest! {
         let ts = Timestamp::from_millis(millis);
         prop_assert_eq!(ts.as_millis(), millis);
     }
-}
 
-#[test]
-fn prop_timestamp_default() {
-    let ts = Timestamp::default();
-    assert_eq!(ts.as_millis(), 0);
+    /// default は 0 ミリ秒
+    #[test]
+    fn prop_timestamp_default(_dummy in 0u8..1) {
+        let ts = Timestamp::default();
+        prop_assert_eq!(ts.as_millis(), 0);
+    }
 }
 
 // ==== Timestamp 比較のテスト ====
@@ -149,36 +150,48 @@ proptest! {
     }
 }
 
-// ==== オーバーフローのテスト ====
+proptest! {
+    // ==== オーバーフローのテスト ====
 
-#[test]
-fn prop_add_millis_overflow_saturates() {
-    let ts = Timestamp::from_millis(u64::MAX);
-    let result = ts.add_millis(1);
-    assert_eq!(result.as_millis(), u64::MAX);
-}
+    /// add_millis はオーバーフロー時に飽和する
+    #[test]
+    fn prop_add_millis_overflow_saturates(add in 1u64..=u64::MAX) {
+        let ts = Timestamp::from_millis(u64::MAX);
+        let result = ts.add_millis(add);
+        prop_assert_eq!(result.as_millis(), u64::MAX);
+    }
 
-#[test]
-fn prop_add_trait_overflow_saturates() {
-    let ts = Timestamp::from_millis(u64::MAX);
-    let result = ts + 1;
-    assert_eq!(result.as_millis(), u64::MAX);
-}
+    /// + 演算子はオーバーフロー時に飽和する
+    #[test]
+    fn prop_add_trait_overflow_saturates(add in 1u64..=u64::MAX) {
+        let ts = Timestamp::from_millis(u64::MAX);
+        let result = ts + add;
+        prop_assert_eq!(result.as_millis(), u64::MAX);
+    }
 
-#[test]
-fn prop_saturating_sub_underflow() {
-    let ts_small = Timestamp::from_millis(10);
-    let ts_large = Timestamp::from_millis(100);
-    let result = ts_small.saturating_sub(ts_large);
-    assert_eq!(result, 0);
-}
+    /// saturating_sub はアンダーフロー時に 0 を返す
+    #[test]
+    fn prop_saturating_sub_underflow(
+        small in 0u64..1000,
+        large in 1001u64..10000
+    ) {
+        let ts_small = Timestamp::from_millis(small);
+        let ts_large = Timestamp::from_millis(large);
+        let result = ts_small.saturating_sub(ts_large);
+        prop_assert_eq!(result, 0);
+    }
 
-#[test]
-fn prop_sub_trait_underflow() {
-    let ts_small = Timestamp::from_millis(10);
-    let ts_large = Timestamp::from_millis(100);
-    let result: u64 = ts_small - ts_large;
-    assert_eq!(result, 0);
+    /// - 演算子はアンダーフロー時に 0 を返す
+    #[test]
+    fn prop_sub_trait_underflow(
+        small in 0u64..1000,
+        large in 1001u64..10000
+    ) {
+        let ts_small = Timestamp::from_millis(small);
+        let ts_large = Timestamp::from_millis(large);
+        let result: u64 = ts_small - ts_large;
+        prop_assert_eq!(result, 0);
+    }
 }
 
 // ==== 境界値のテスト ====

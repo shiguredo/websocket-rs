@@ -704,11 +704,21 @@ proptest! {
 // Close テスト
 // =============================================================================
 
+/// 有効な Close コードを生成する strategy
+fn valid_close_code() -> impl Strategy<Value = u16> {
+    prop_oneof![
+        1000u16..=1003, // 正常終了系
+        1007u16..=1011, // エラー系
+        3000u16..4000,  // ライブラリ用
+        4000u16..5000,  // アプリケーション用
+    ]
+}
+
 proptest! {
     /// close() を呼ぶと Closing 状態になる
     #[test]
     fn prop_close_sends_frame(
-        code in 1000u16..4999,
+        code in valid_close_code(),
         reason in "[a-zA-Z0-9 ]{0,50}"
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
@@ -735,7 +745,7 @@ proptest! {
     /// サーバーからの Close フレームを受信
     #[test]
     fn prop_close_frame_received(
-        code in 1000u16..4999
+        code in valid_close_code()
     ) {
         let options = ClientConnectionOptions::new("example.com", "/");
         let (mut conn, now) = setup_connected_client(options);
@@ -1036,10 +1046,10 @@ proptest! {
                  \r\n",
                 accept, server_protocol
             );
-            conn.feed_recv_buf(response.as_bytes(), now).unwrap();
 
-            // 接続は成功するが、プロトコルはサーバーのものになる
-            prop_assert_eq!(conn.protocol(), Some(server_protocol.as_str()));
+            // RFC 6455 準拠: クライアントが要求していないプロトコルはエラー
+            let result = conn.feed_recv_buf(response.as_bytes(), now);
+            prop_assert!(result.is_err(), "Server returned unsolicited protocol should be rejected");
         }
     }
 }

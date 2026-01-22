@@ -705,7 +705,11 @@ proptest! {
     /// Section 5.5.1: Close フレームのオペコードは 0x8
     #[test]
     fn prop_section_5_5_1_close_opcode(
-        code in 1000u16..4999,
+        code in prop_oneof![
+            1000u16..=1003,
+            1007u16..=1011,
+            3000u16..5000
+        ],
         reason in "[a-zA-Z0-9 ]{0,50}",
         masking_key in any::<[u8; 4]>()
     ) {
@@ -718,7 +722,11 @@ proptest! {
     /// Section 5.5.1: Close フレームのペイロード構造
     #[test]
     fn prop_section_5_5_1_close_payload_structure(
-        code in 1000u16..4999,
+        code in prop_oneof![
+            1000u16..=1003,
+            1007u16..=1011,
+            3000u16..5000
+        ],
         reason in "[a-zA-Z0-9]{0,100}",
         masking_key in any::<[u8; 4]>()
     ) {

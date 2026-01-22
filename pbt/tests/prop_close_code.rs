@@ -135,39 +135,58 @@ proptest! {
     }
 }
 
-// ==== Display の説明文テスト ====
+/// 定義済み CloseCode 定数の値
+const DEFINED_CLOSE_CODES: [(u16, &str); 13] = [
+    (1000, "Normal Closure"),
+    (1001, "Going Away"),
+    (1002, "Protocol Error"),
+    (1003, "Unsupported Data"),
+    (1004, "Reserved"),
+    (1005, "No Status Received"),
+    (1006, "Abnormal Closure"),
+    (1007, "Invalid Payload"),
+    (1008, "Policy Violation"),
+    (1009, "Message Too Big"),
+    (1010, "Mandatory Extension"),
+    (1011, "Internal Error"),
+    (1015, "TLS Handshake"),
+];
 
-#[test]
-fn prop_display_descriptions() {
-    assert!(format!("{}", CloseCode::NORMAL).contains("Normal Closure"));
-    assert!(format!("{}", CloseCode::GOING_AWAY).contains("Going Away"));
-    assert!(format!("{}", CloseCode::PROTOCOL_ERROR).contains("Protocol Error"));
-    assert!(format!("{}", CloseCode::UNSUPPORTED_DATA).contains("Unsupported Data"));
-    assert!(format!("{}", CloseCode::RESERVED).contains("Reserved"));
-    assert!(format!("{}", CloseCode::NO_STATUS_RECEIVED).contains("No Status Received"));
-    assert!(format!("{}", CloseCode::ABNORMAL_CLOSURE).contains("Abnormal Closure"));
-    assert!(format!("{}", CloseCode::INVALID_PAYLOAD).contains("Invalid Payload"));
-    assert!(format!("{}", CloseCode::POLICY_VIOLATION).contains("Policy Violation"));
-    assert!(format!("{}", CloseCode::MESSAGE_TOO_BIG).contains("Message Too Big"));
-    assert!(format!("{}", CloseCode::MANDATORY_EXTENSION).contains("Mandatory Extension"));
-    assert!(format!("{}", CloseCode::INTERNAL_ERROR).contains("Internal Error"));
-    assert!(format!("{}", CloseCode::TLS_HANDSHAKE).contains("TLS Handshake"));
-}
+proptest! {
+    // ==== Display の説明文テスト ====
 
-#[test]
-fn prop_display_library_range() {
-    let code = CloseCode::new(3500);
-    assert!(format!("{}", code).contains("Library/Framework"));
-}
+    /// 定義済み CloseCode は正しい説明文を含む
+    #[test]
+    fn prop_display_descriptions(
+        idx in 0usize..13
+    ) {
+        let (code, expected_text) = DEFINED_CLOSE_CODES[idx];
+        let close_code = CloseCode::new(code);
+        let display = format!("{}", close_code);
+        prop_assert!(display.contains(expected_text), "code {} should contain '{}'", code, expected_text);
+    }
 
-#[test]
-fn prop_display_application_range() {
-    let code = CloseCode::new(4500);
-    assert!(format!("{}", code).contains("Application"));
-}
+    /// Library/Framework 範囲 (3000-3999) の Display
+    #[test]
+    fn prop_display_library_range(code in 3000u16..4000) {
+        let close_code = CloseCode::new(code);
+        let display = format!("{}", close_code);
+        prop_assert!(display.contains("Library/Framework"));
+    }
 
-#[test]
-fn prop_display_unknown_range() {
-    let code = CloseCode::new(999);
-    assert!(format!("{}", code).contains("Unknown"));
+    /// Application 範囲 (4000-4999) の Display
+    #[test]
+    fn prop_display_application_range(code in 4000u16..5000) {
+        let close_code = CloseCode::new(code);
+        let display = format!("{}", close_code);
+        prop_assert!(display.contains("Application"));
+    }
+
+    /// Unknown 範囲 (0-999) の Display
+    #[test]
+    fn prop_display_unknown_range(code in 0u16..1000) {
+        let close_code = CloseCode::new(code);
+        let display = format!("{}", close_code);
+        prop_assert!(display.contains("Unknown"));
+    }
 }

@@ -146,18 +146,36 @@ proptest! {
     }
 }
 
-// ==== config() ゲッターのテスト ====
+proptest! {
+    // ==== config() ゲッターのテスト ====
 
-#[test]
-fn prop_config_getter() {
-    let config = PerMessageDeflateConfig::new()
-        .server_max_window_bits(12)
-        .client_max_window_bits(10)
-        .client_no_context_takeover();
-    let codec = PerMessageDeflate::new_client(config.clone());
+    #[test]
+    fn prop_config_getter(
+        server_bits in prop::option::of(8u8..=15),
+        client_bits in prop::option::of(8u8..=15),
+        server_no_takeover in any::<bool>(),
+        client_no_takeover in any::<bool>()
+    ) {
+        let mut config = PerMessageDeflateConfig::new();
+        if let Some(bits) = server_bits {
+            config = config.server_max_window_bits(bits);
+        }
+        if let Some(bits) = client_bits {
+            config = config.client_max_window_bits(bits);
+        }
+        if server_no_takeover {
+            config = config.server_no_context_takeover();
+        }
+        if client_no_takeover {
+            config = config.client_no_context_takeover();
+        }
 
-    let retrieved = codec.config();
-    assert_eq!(retrieved.server_max_window_bits, Some(12));
-    assert_eq!(retrieved.client_max_window_bits, Some(10));
-    assert!(retrieved.client_no_context_takeover);
+        let codec = PerMessageDeflate::new_client(config.clone());
+        let retrieved = codec.config();
+
+        prop_assert_eq!(retrieved.server_max_window_bits, config.server_max_window_bits);
+        prop_assert_eq!(retrieved.client_max_window_bits, config.client_max_window_bits);
+        prop_assert_eq!(retrieved.server_no_context_takeover, config.server_no_context_takeover);
+        prop_assert_eq!(retrieved.client_no_context_takeover, config.client_no_context_takeover);
+    }
 }
