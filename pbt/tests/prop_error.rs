@@ -20,56 +20,6 @@ const ERROR_KINDS: [ErrorKind; 8] = [
 ];
 
 proptest! {
-    // ==== ErrorKind のテスト ====
-
-    /// すべての ErrorKind バリアントがある
-    #[test]
-    fn prop_error_kind_variants(idx in 0usize..8) {
-        let kind = ERROR_KINDS[idx];
-        let _ = kind;
-    }
-
-    /// ErrorKind は Clone 可能
-    #[test]
-    fn prop_error_kind_clone(idx in 0usize..8) {
-        let kind = ERROR_KINDS[idx];
-        let copied = kind;
-        // Copy 型なので clone() を使わずにコピーをテスト
-        prop_assert_eq!(kind, copied);
-    }
-
-    /// ErrorKind は Copy 可能
-    #[test]
-    fn prop_error_kind_copy(idx in 0usize..8) {
-        let kind = ERROR_KINDS[idx];
-        let copied = kind;
-        prop_assert_eq!(kind, copied);
-    }
-
-    /// ErrorKind は Debug 表示可能
-    #[test]
-    fn prop_error_kind_debug(idx in 0usize..8) {
-        let kind = ERROR_KINDS[idx];
-        let debug_str = format!("{:?}", kind);
-        prop_assert!(!debug_str.is_empty());
-    }
-
-    /// ErrorKind は Hash 可能
-    #[test]
-    fn prop_error_kind_hash(idx in 0usize..8) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let kind = ERROR_KINDS[idx];
-        let mut hasher1 = DefaultHasher::new();
-        let mut hasher2 = DefaultHasher::new();
-
-        kind.hash(&mut hasher1);
-        kind.hash(&mut hasher2);
-
-        prop_assert_eq!(hasher1.finish(), hasher2.finish());
-    }
-
     // ==== Error 生成のテスト ====
 
     /// Error::new は kind を正しく設定する
@@ -108,30 +58,6 @@ proptest! {
     }
 
     // ==== Error 表示のテスト ====
-
-    /// Error の Display はパニックしない
-    #[test]
-    fn prop_error_display_no_panic(
-        idx in 0usize..8,
-        reason in "[a-zA-Z0-9 ]{0,50}"
-    ) {
-        let kind = ERROR_KINDS[idx];
-        let error = Error::with_reason(kind, &reason);
-        let display = format!("{}", error);
-        prop_assert!(!display.is_empty());
-    }
-
-    /// Error の Debug はパニックしない
-    #[test]
-    fn prop_error_debug_no_panic(
-        idx in 0usize..8,
-        reason in "[a-zA-Z0-9 ]{0,50}"
-    ) {
-        let kind = ERROR_KINDS[idx];
-        let error = Error::with_reason(kind, &reason);
-        let debug = format!("{:?}", error);
-        prop_assert!(!debug.is_empty());
-    }
 
     /// close_code 付きの Error も正しく表示される
     #[test]

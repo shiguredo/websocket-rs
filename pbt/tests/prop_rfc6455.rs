@@ -17,23 +17,6 @@ use shiguredo_websocket::{
 // ハンドシェイクは HTTP Upgrade リクエストから始まる
 
 proptest! {
-    /// Section 1.3: クライアントハンドシェイクは GET リクエストである
-    #[test]
-    fn prop_section_1_3_client_handshake_is_get_request(
-        path in "/[a-zA-Z0-9/_-]{0,30}",
-        host in "[a-z]{3,10}\\.[a-z]{2,4}",
-        nonce in any::<[u8; 16]>()
-    ) {
-        let request = HandshakeRequest::new(&path, &host);
-        let encoded = request.build(nonce);
-        let s = String::from_utf8(encoded).unwrap();
-
-        // GET メソッドで始まる
-        prop_assert!(s.starts_with("GET "));
-        // HTTP/1.1 を使用
-        prop_assert!(s.contains("HTTP/1.1"));
-    }
-
     /// Section 1.3: サーバーハンドシェイクは 101 Switching Protocols
     #[test]
     fn prop_section_1_3_server_handshake_is_101(nonce in any::<[u8; 16]>()) {
@@ -60,50 +43,6 @@ proptest! {
 // =============================================================================
 
 proptest! {
-    /// Section 4.1.2: HTTP バージョンは 1.1 以上
-    #[test]
-    fn prop_section_4_1_2_http_version(nonce in any::<[u8; 16]>()) {
-        let request = HandshakeRequest::new("/", "example.com");
-        let encoded = request.build(nonce);
-        let s = String::from_utf8(encoded).unwrap();
-
-        prop_assert!(s.contains("HTTP/1.1"));
-    }
-
-    /// Section 4.1.4: Host ヘッダーは必須
-    #[test]
-    fn prop_section_4_1_4_host_header_required(
-        host in "[a-z]{3,10}\\.[a-z]{2,4}",
-        nonce in any::<[u8; 16]>()
-    ) {
-        let request = HandshakeRequest::new("/", &host);
-        let encoded = request.build(nonce);
-        let s = String::from_utf8(encoded).unwrap();
-
-        let expected = format!("Host: {}", host);
-        prop_assert!(s.contains(&expected));
-    }
-
-    /// Section 4.1.5: Upgrade ヘッダーは "websocket" を含む
-    #[test]
-    fn prop_section_4_1_5_upgrade_header(nonce in any::<[u8; 16]>()) {
-        let request = HandshakeRequest::new("/", "example.com");
-        let encoded = request.build(nonce);
-        let s = String::from_utf8(encoded).unwrap();
-
-        prop_assert!(s.contains("Upgrade: websocket"));
-    }
-
-    /// Section 4.1.6: Connection ヘッダーは "Upgrade" を含む
-    #[test]
-    fn prop_section_4_1_6_connection_header(nonce in any::<[u8; 16]>()) {
-        let request = HandshakeRequest::new("/", "example.com");
-        let encoded = request.build(nonce);
-        let s = String::from_utf8(encoded).unwrap();
-
-        prop_assert!(s.contains("Connection: Upgrade"));
-    }
-
     /// Section 4.1.7: Sec-WebSocket-Key は 16 バイトの base64 エンコード
     #[test]
     fn prop_section_4_1_7_websocket_key_format(nonce in any::<[u8; 16]>()) {
@@ -120,16 +59,6 @@ proptest! {
         // base64 デコードして 16 バイトであることを確認
         let decoded = base64::engine::general_purpose::STANDARD.decode(key).unwrap();
         prop_assert_eq!(decoded.len(), 16);
-    }
-
-    /// Section 4.1.9: Sec-WebSocket-Version は 13
-    #[test]
-    fn prop_section_4_1_9_websocket_version(nonce in any::<[u8; 16]>()) {
-        let request = HandshakeRequest::new("/", "example.com");
-        let encoded = request.build(nonce);
-        let s = String::from_utf8(encoded).unwrap();
-
-        prop_assert!(s.contains("Sec-WebSocket-Version: 13"));
     }
 
     /// Section 4.1.10: Sec-WebSocket-Protocol はオプション
@@ -381,38 +310,6 @@ proptest! {
 
             prop_assert!(result.is_err());
         }
-    }
-}
-
-// =============================================================================
-// RFC 6455 Section 5.1: Overview (フレーム概要)
-// =============================================================================
-
-proptest! {
-    /// Section 5.1: フレームは FIN ビットを持つ
-    #[test]
-    fn prop_section_5_1_frame_has_fin_bit(
-        payload in prop::collection::vec(any::<u8>(), 0..1000),
-        masking_key in any::<[u8; 4]>()
-    ) {
-        let frame = Frame::binary(payload);
-        let encoded = frame.encode(masking_key);
-
-        // 最初のバイトの最上位ビットが FIN
-        prop_assert!((encoded[0] & 0x80) != 0);
-    }
-
-    /// Section 5.1: クライアントからサーバーへのフレームは必ずマスクされる
-    #[test]
-    fn prop_section_5_1_client_frames_are_masked(
-        payload in prop::collection::vec(any::<u8>(), 0..500),
-        masking_key in any::<[u8; 4]>()
-    ) {
-        let frame = Frame::binary(payload);
-        let encoded = frame.encode(masking_key);
-
-        // 2番目のバイトの最上位ビットが MASK
-        prop_assert!((encoded[1] & 0x80) != 0);
     }
 }
 

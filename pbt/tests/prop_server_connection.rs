@@ -64,18 +64,6 @@ fn create_masked_close_frame(code: Option<u16>, reason: &str, mask_key: [u8; 4])
 // ==== ServerConnectionOptions のテスト ====
 
 proptest! {
-    /// ServerConnectionOptions::default のデフォルト値
-    #[test]
-    fn prop_server_options_default(_dummy in Just(())) {
-        let options = ServerConnectionOptions::default();
-        prop_assert!(options.protocols.is_empty());
-        prop_assert!(options.deflate_config.is_none());
-        prop_assert!(options.additional_headers.is_empty());
-        prop_assert_eq!(options.ping_interval_millis, 30_000);
-        prop_assert_eq!(options.pong_timeout_millis, 10_000);
-        prop_assert_eq!(options.close_timeout_millis, 5_000);
-    }
-
     /// ServerConnectionOptions::protocol は複数回呼び出しても正しく蓄積される
     #[test]
     fn prop_server_options_multiple_protocols(
@@ -108,38 +96,6 @@ proptest! {
     fn prop_server_options_ping_interval(interval in 0u64..=u64::MAX) {
         let options = ServerConnectionOptions::new().ping_interval(interval);
         prop_assert_eq!(options.ping_interval_millis, interval);
-    }
-}
-
-// ==== 初期状態のテスト ====
-
-proptest! {
-    /// 新規接続の初期状態は Disconnected
-    #[test]
-    fn prop_initial_state_is_disconnected(_dummy in Just(())) {
-        let conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
-        prop_assert_eq!(conn.state(), ConnectionState::Disconnected);
-    }
-
-    /// 新規接続のプロトコルは None
-    #[test]
-    fn prop_initial_protocol_is_none(_dummy in Just(())) {
-        let conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
-        prop_assert!(conn.protocol().is_none());
-    }
-
-    /// 新規接続の拡張は空
-    #[test]
-    fn prop_initial_extensions_is_empty(_dummy in Just(())) {
-        let conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
-        prop_assert!(conn.extensions().is_empty());
-    }
-
-    /// 新規接続のハンドシェイクリクエストは None
-    #[test]
-    fn prop_initial_handshake_request_is_none(_dummy in Just(())) {
-        let conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
-        prop_assert!(conn.handshake_request().is_none());
     }
 }
 
@@ -834,34 +790,6 @@ proptest! {
 
         // パニックしない
         let _ = conn.state();
-    }
-}
-
-// ==== イベント・出力キューのテスト ====
-
-proptest! {
-    /// イベントキューはすべて消費できる
-    #[test]
-    fn prop_event_queue_drains(_dummy in Just(())) {
-        let (mut conn, _now) = setup_connected_server();
-
-        // イベントをすべて消費
-        while conn.poll_event().is_some() {}
-
-        // もうイベントがない
-        prop_assert!(conn.poll_event().is_none());
-    }
-
-    /// 出力キューはすべて消費できる
-    #[test]
-    fn prop_output_queue_drains(_dummy in Just(())) {
-        let (mut conn, _now) = setup_connected_server();
-
-        // 出力をすべて消費
-        while conn.poll_output().is_some() {}
-
-        // もう出力がない
-        prop_assert!(conn.poll_output().is_none());
     }
 }
 

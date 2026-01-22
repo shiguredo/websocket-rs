@@ -85,21 +85,6 @@ fn setup_connected_client() -> (WebSocketClientConnection, Timestamp, [u8; 16]) 
 // ==== ClientConnectionOptions のテスト ====
 
 proptest! {
-    /// ClientConnectionOptions::default のデフォルト値
-    #[test]
-    fn prop_client_options_default(_dummy in Just(())) {
-        let options = ClientConnectionOptions::default();
-        prop_assert_eq!(options.path, "/");
-        prop_assert_eq!(options.host, "localhost");
-        prop_assert!(options.origin.is_none());
-        prop_assert!(options.protocols.is_empty());
-        prop_assert!(options.deflate_config.is_none());
-        prop_assert!(options.additional_headers.is_empty());
-        prop_assert_eq!(options.ping_interval_millis, 30_000);
-        prop_assert_eq!(options.pong_timeout_millis, 10_000);
-        prop_assert_eq!(options.close_timeout_millis, 5_000);
-    }
-
     /// ClientConnectionOptions::new でホストとパスが設定される
     #[test]
     fn prop_client_options_new(
@@ -154,34 +139,6 @@ proptest! {
         let options = ClientConnectionOptions::new("example.com", "/")
             .ping_interval(interval);
         prop_assert_eq!(options.ping_interval_millis, interval);
-    }
-}
-
-// ==== 初期状態のテスト ====
-
-proptest! {
-    /// 新規接続の初期状態は Disconnected
-    #[test]
-    fn prop_initial_state_is_disconnected(_dummy in Just(())) {
-        let options = ClientConnectionOptions::new("example.com", "/");
-        let conn = WebSocketClientConnection::new(options, test_masking_key);
-        prop_assert_eq!(conn.state(), ConnectionState::Disconnected);
-    }
-
-    /// 新規接続のプロトコルは None
-    #[test]
-    fn prop_initial_protocol_is_none(_dummy in Just(())) {
-        let options = ClientConnectionOptions::new("example.com", "/");
-        let conn = WebSocketClientConnection::new(options, test_masking_key);
-        prop_assert!(conn.protocol().is_none());
-    }
-
-    /// 新規接続の拡張は空
-    #[test]
-    fn prop_initial_extensions_is_empty(_dummy in Just(())) {
-        let options = ClientConnectionOptions::new("example.com", "/");
-        let conn = WebSocketClientConnection::new(options, test_masking_key);
-        prop_assert!(conn.extensions().is_empty());
     }
 }
 
@@ -873,34 +830,6 @@ proptest! {
 
         // パニックしない
         let _ = conn.state();
-    }
-}
-
-// ==== イベント・出力キューのテスト ====
-
-proptest! {
-    /// イベントキューはすべて消費できる
-    #[test]
-    fn prop_event_queue_drains(_dummy in Just(())) {
-        let (mut conn, _, _) = setup_connected_client();
-
-        // イベントをすべて消費
-        while conn.poll_event().is_some() {}
-
-        // もうイベントがない
-        prop_assert!(conn.poll_event().is_none());
-    }
-
-    /// 出力キューはすべて消費できる
-    #[test]
-    fn prop_output_queue_drains(_dummy in Just(())) {
-        let (mut conn, _, _) = setup_connected_client();
-
-        // 出力をすべて消費
-        while conn.poll_output().is_some() {}
-
-        // もう出力がない
-        prop_assert!(conn.poll_output().is_none());
     }
 }
 

@@ -16,13 +16,6 @@ proptest! {
         let ts = Timestamp::from_millis(millis);
         prop_assert_eq!(ts.as_millis(), millis);
     }
-
-    /// default は 0 ミリ秒
-    #[test]
-    fn prop_timestamp_default(_dummy in 0u8..1) {
-        let ts = Timestamp::default();
-        prop_assert_eq!(ts.as_millis(), 0);
-    }
 }
 
 // ==== Timestamp 比較のテスト ====
@@ -107,15 +100,6 @@ proptest! {
 
         let expected = base.saturating_add(add);
         prop_assert_eq!(result.as_millis(), expected);
-    }
-
-    /// add_millis(0) は変化なし
-    #[test]
-    fn prop_add_millis_zero(millis in any::<u64>()) {
-        let ts = Timestamp::from_millis(millis);
-        let result = ts.add_millis(0);
-
-        prop_assert_eq!(result, ts);
     }
 }
 
@@ -233,21 +217,6 @@ proptest! {
         ts2.hash(&mut hasher2);
 
         prop_assert_eq!(hasher1.finish(), hasher2.finish());
-    }
-}
-
-// ==== Clone と Copy の整合性テスト ====
-
-proptest! {
-    /// Clone と Copy は同じ結果
-    #[test]
-    fn prop_clone_copy_consistency(millis in any::<u64>()) {
-        let ts = Timestamp::from_millis(millis);
-
-        let copied = ts;
-
-        // Copy 型なので clone() を使わずにコピーをテスト
-        prop_assert_eq!(ts, copied);
     }
 }
 

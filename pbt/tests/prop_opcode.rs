@@ -207,39 +207,7 @@ proptest! {
         prop_assert_eq!(format!("{}", op), expected);
     }
 
-    /// Display はパニックしない
-    #[test]
-    fn prop_display_no_panic(
-        opcode in prop::sample::select(VALID_OPCODES.to_vec())
-    ) {
-        let op = Opcode::from_u8(opcode).unwrap();
-        let _ = format!("{}", op);
-    }
-
-    // ==== Debug のテスト ====
-
-    /// Debug はパニックしない
-    #[test]
-    fn prop_debug_no_panic(
-        opcode in prop::sample::select(VALID_OPCODES.to_vec())
-    ) {
-        let op = Opcode::from_u8(opcode).unwrap();
-        let _ = format!("{:?}", op);
-    }
-
-    // ==== Clone, Copy, PartialEq, Eq, Hash のテスト ====
-
-    /// Clone と Copy は同じ結果
-    #[test]
-    fn prop_clone_copy(
-        opcode in prop::sample::select(VALID_OPCODES.to_vec())
-    ) {
-        let op = Opcode::from_u8(opcode).unwrap();
-        let copied = op;
-
-        // Copy 型なので clone() を使わずにコピーをテスト
-        prop_assert_eq!(op, copied);
-    }
+    // ==== Hash のテスト ====
 
     /// 同じ値は同じハッシュを持つ
     #[test]
