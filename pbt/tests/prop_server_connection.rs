@@ -699,9 +699,9 @@ proptest! {
         conn.feed_recv_buf(&first_frame, now).unwrap();
 
         // 中間のフラグメント（opcode=Continuation, fin=false）
-        for i in 1..parts.len()-1 {
+        for (i, part) in parts.iter().enumerate().take(parts.len() - 1).skip(1) {
             let mask_idx = i.min(mask_keys.len() - 1);
-            let mut frame = Frame::new(shiguredo_websocket::Opcode::Continuation, parts[i].as_bytes().to_vec());
+            let mut frame = Frame::new(shiguredo_websocket::Opcode::Continuation, part.as_bytes().to_vec());
             frame.fin = false;
             let encoded = frame.encode(mask_keys[mask_idx]);
             conn.feed_recv_buf(&encoded, now).unwrap();

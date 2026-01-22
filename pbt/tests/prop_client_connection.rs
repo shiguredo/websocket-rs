@@ -61,7 +61,7 @@ fn test_masking_key() -> [u8; 4] {
 /// 接続を作成して Connected 状態まで進める
 fn setup_connected_client() -> (WebSocketClientConnection, Timestamp, [u8; 16]) {
     let options = ClientConnectionOptions::new("example.com", "/ws");
-    let mut conn = WebSocketClientConnection::new(options);
+    let mut conn = WebSocketClientConnection::new(options, test_masking_key);
     let now = Timestamp::from_millis(0);
     let nonce = test_nonce();
 
@@ -164,7 +164,7 @@ proptest! {
     #[test]
     fn prop_initial_state_is_disconnected(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/");
-        let conn = WebSocketClientConnection::new(options);
+        let conn = WebSocketClientConnection::new(options, test_masking_key);
         prop_assert_eq!(conn.state(), ConnectionState::Disconnected);
     }
 
@@ -172,7 +172,7 @@ proptest! {
     #[test]
     fn prop_initial_protocol_is_none(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/");
-        let conn = WebSocketClientConnection::new(options);
+        let conn = WebSocketClientConnection::new(options, test_masking_key);
         prop_assert!(conn.protocol().is_none());
     }
 
@@ -180,7 +180,7 @@ proptest! {
     #[test]
     fn prop_initial_extensions_is_empty(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/");
-        let conn = WebSocketClientConnection::new(options);
+        let conn = WebSocketClientConnection::new(options, test_masking_key);
         prop_assert!(conn.extensions().is_empty());
     }
 }
@@ -192,7 +192,7 @@ proptest! {
     #[test]
     fn prop_connect_changes_state_to_connecting(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
 
         conn.connect(test_nonce()).unwrap();
         prop_assert_eq!(conn.state(), ConnectionState::Connecting);
@@ -202,7 +202,7 @@ proptest! {
     #[test]
     fn prop_connect_sends_handshake_request(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
 
         conn.connect(test_nonce()).unwrap();
 
@@ -225,7 +225,7 @@ proptest! {
     #[test]
     fn prop_double_connect_fails(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
 
         conn.connect(test_nonce()).unwrap();
         let result = conn.connect(test_nonce());
@@ -252,7 +252,7 @@ proptest! {
     ) {
         let options = ClientConnectionOptions::new("example.com", "/ws")
             .protocol(&protocol);
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
         let now = Timestamp::from_millis(0);
 
         conn.connect(test_nonce()).unwrap();
@@ -289,7 +289,7 @@ proptest! {
     #[test]
     fn prop_invalid_accept_fails(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
         let now = Timestamp::from_millis(0);
 
         conn.connect(test_nonce()).unwrap();
@@ -313,7 +313,7 @@ proptest! {
 
         let options = ClientConnectionOptions::new("example.com", "/ws")
             .protocol(&client_protocol);
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
         let now = Timestamp::from_millis(0);
         let nonce = test_nonce();
 
@@ -340,7 +340,7 @@ proptest! {
     ) {
         let (mut conn, _, _) = setup_connected_client();
 
-        let result = conn.send_text(&text, test_masking_key());
+        let result = conn.send_text(&text);
         prop_assert!(result.is_ok());
 
         let output = conn.poll_output();
@@ -354,7 +354,7 @@ proptest! {
     ) {
         let (mut conn, _, _) = setup_connected_client();
 
-        let result = conn.send_binary(&data, test_masking_key());
+        let result = conn.send_binary(&data);
         prop_assert!(result.is_ok());
 
         let output = conn.poll_output();
@@ -418,8 +418,6 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         let ping = Frame::ping(data.clone()).encode_unmasked();
-        // Pong 自動返信のための masking_key を追加
-        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&ping, now).unwrap();
 
         // Ping イベントが発生
@@ -452,7 +450,7 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // まず Ping を送信
-        conn.send_ping(&[], now, test_masking_key()).unwrap();
+        conn.send_ping(&[], now).unwrap();
         while conn.poll_output().is_some() {}
 
         // Pong を受信
@@ -494,8 +492,6 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         let close = Frame::close(Some(code), &reason).encode_unmasked();
-        // Close 応答のための masking_key を追加
-        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&close, now).unwrap();
 
         // Close イベントが発生
@@ -526,7 +522,7 @@ proptest! {
     ) {
         let (mut conn, _, _) = setup_connected_client();
 
-        conn.close(code, &reason, test_masking_key()).unwrap();
+        conn.close(code, &reason).unwrap();
 
         prop_assert_eq!(conn.state(), ConnectionState::Closing);
 
@@ -547,8 +543,6 @@ proptest! {
 
         // コードなしの Close フレーム
         let close = Frame::close(None, "").encode_unmasked();
-        // Close 応答のための masking_key を追加
-        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&close, now).unwrap();
 
         let mut found = false;
@@ -571,8 +565,6 @@ proptest! {
     fn prop_ping_timer_event(_dummy in Just(())) {
         let (mut conn, now, _) = setup_connected_client();
 
-        // Ping 送信のための masking_key を追加
-        conn.push_masking_key(test_masking_key());
         conn.handle_timer(TimerId::Ping, now).unwrap();
 
         // Ping が送信されるはず
@@ -592,12 +584,11 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // Ping を送信
-        conn.send_ping(&[], now, test_masking_key()).unwrap();
+        conn.send_ping(&[], now).unwrap();
         while conn.poll_output().is_some() {}
         while conn.poll_event().is_some() {}
 
-        // Pong タイムアウトをトリガー（Close 送信のための masking_key を追加）
-        conn.push_masking_key(test_masking_key());
+        // Pong タイムアウトをトリガー
         conn.handle_timer(TimerId::PongTimeout, now).unwrap();
 
         // エラーイベントが発生
@@ -621,7 +612,7 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // Close を送信
-        conn.close(CloseCode::NORMAL, "", test_masking_key()).unwrap();
+        conn.close(CloseCode::NORMAL, "").unwrap();
         while conn.poll_output().is_some() {}
         while conn.poll_event().is_some() {}
 
@@ -641,9 +632,9 @@ proptest! {
     #[test]
     fn prop_cannot_send_while_disconnected(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
 
-        let result = conn.send_text("hello", test_masking_key());
+        let result = conn.send_text("hello");
         prop_assert!(result.is_err());
     }
 
@@ -651,12 +642,12 @@ proptest! {
     #[test]
     fn prop_cannot_send_while_connecting(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
 
         conn.connect(test_nonce()).unwrap();
         prop_assert_eq!(conn.state(), ConnectionState::Connecting);
 
-        let result = conn.send_text("hello", test_masking_key());
+        let result = conn.send_text("hello");
         prop_assert!(result.is_err());
     }
 }
@@ -666,7 +657,7 @@ proptest! {
     #[test]
     fn prop_feed_to_disconnected_fails(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
         let now = Timestamp::from_millis(0);
 
         let result = conn.feed_recv_buf(b"data", now);
@@ -678,9 +669,8 @@ proptest! {
     fn prop_feed_to_closed_fails(_dummy in Just(())) {
         let (mut conn, now, _) = setup_connected_client();
 
-        // Close フレームを送受信（Close 応答のための masking_key を追加）
+        // Close フレームを送受信
         let close = Frame::close(Some(1000), "").encode_unmasked();
-        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&close, now).unwrap();
 
         prop_assert_eq!(conn.state(), ConnectionState::Closed);
@@ -750,8 +740,8 @@ proptest! {
         conn.feed_recv_buf(&first_frame, now).unwrap();
 
         // 中間のフラグメント
-        for i in 1..parts.len()-1 {
-            let mut frame = Frame::new(Opcode::Continuation, parts[i].as_bytes().to_vec());
+        for part in parts.iter().take(parts.len() - 1).skip(1) {
+            let mut frame = Frame::new(Opcode::Continuation, part.as_bytes().to_vec());
             frame.fin = false;
             let encoded = frame.encode_unmasked();
             conn.feed_recv_buf(&encoded, now).unwrap();
@@ -872,7 +862,7 @@ proptest! {
         random_data in prop::collection::vec(any::<u8>(), 1..500),
     ) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
         let now = Timestamp::from_millis(0);
 
         conn.connect(test_nonce()).unwrap();
@@ -926,8 +916,6 @@ proptest! {
         let invalid_utf8 = vec![0xFF, 0xFE, 0x00, 0x01];
         let frame = Frame::new(Opcode::Text, invalid_utf8).encode_unmasked();
 
-        // Close 送信のための masking_key を追加
-        conn.push_masking_key(test_masking_key());
         // RFC 6455 準拠: 無効な UTF-8 は即座にエラーを返す
         let result = conn.feed_recv_buf(&frame, now);
         prop_assert!(result.is_err(), "Invalid UTF-8 should return error");

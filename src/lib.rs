@@ -21,8 +21,15 @@
 //! // WebSocket 接続オプション
 //! let options = ClientConnectionOptions::new("example.com", "/");
 //!
+//! // Masking key 生成関数（実際には乱数を使用）
+//! let mut counter = 0u32;
+//! let masking_key_generator = move || {
+//!     counter = counter.wrapping_add(1);
+//!     counter.to_le_bytes()
+//! };
+//!
 //! // WebSocket 接続作成
-//! let mut ws = WebSocketClientConnection::new(options);
+//! let mut ws = WebSocketClientConnection::new(options, masking_key_generator);
 //!
 //! // ハンドシェイク用の nonce を生成（実際には乱数を使用）
 //! let nonce: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];

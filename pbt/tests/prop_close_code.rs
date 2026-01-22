@@ -102,10 +102,9 @@ proptest! {
     #[test]
     fn prop_clone_copy(code in any::<u16>()) {
         let close_code = CloseCode::new(code);
-        let cloned = close_code.clone();
         let copied = close_code;
 
-        prop_assert_eq!(close_code, cloned);
+        // Copy 型なので clone() を使わずにコピーをテスト
         prop_assert_eq!(close_code, copied);
     }
 

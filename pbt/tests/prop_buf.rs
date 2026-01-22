@@ -56,7 +56,7 @@ proptest! {
         let mut buf = s.as_bytes().to_vec();
         buf.extend_from_slice(&extra);
         let mut slice = buf.as_slice();
-        let got = slice.read_utf8(s.as_bytes().len()).unwrap();
+        let got = slice.read_utf8(s.len()).unwrap();
         prop_assert_eq!(got, s);
         prop_assert_eq!(slice, extra.as_slice());
     }

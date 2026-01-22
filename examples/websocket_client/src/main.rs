@@ -297,7 +297,7 @@ async fn main() -> io::Result<()> {
         .deflate(PerMessageDeflateConfig::new());
 
     // WebSocket 接続を作成
-    let mut ws = WebSocketClientConnection::new(options);
+    let mut ws = WebSocketClientConnection::new(options, generate_masking_key);
 
     // ハンドシェイク開始
     ws.connect(generate_nonce()).unwrap();
@@ -353,7 +353,7 @@ async fn main() -> io::Result<()> {
     // テストメッセージを送信
     let test_message = "Hello, WebSocket!";
     println!("\nSending: {}", test_message);
-    ws.send_text(test_message, generate_masking_key()).unwrap();
+    ws.send_text(test_message).unwrap();
 
     while let Some(output) = ws.poll_output() {
         if let ConnectionOutput::SendData(data) = output {
@@ -370,8 +370,6 @@ async fn main() -> io::Result<()> {
                 break;
             }
 
-            // 自動応答（Pong など）用の masking_key を事前に追加
-            ws.push_masking_key(generate_masking_key());
             ws.feed_recv_buf(&buf[..n], now()).unwrap();
 
             while let Some(event) = ws.poll_event() {
@@ -427,8 +425,7 @@ async fn main() -> io::Result<()> {
 
     // クローズ
     println!("\nClosing connection...");
-    ws.close(CloseCode::NORMAL, "goodbye", generate_masking_key())
-        .unwrap();
+    ws.close(CloseCode::NORMAL, "goodbye").unwrap();
 
     while let Some(output) = ws.poll_output() {
         match output {
@@ -451,8 +448,6 @@ async fn main() -> io::Result<()> {
                 break;
             }
 
-            // 自動応答用の masking_key を事前に追加
-            ws.push_masking_key(generate_masking_key());
             ws.feed_recv_buf(&buf[..n], now()).unwrap();
 
             while let Some(event) = ws.poll_event() {

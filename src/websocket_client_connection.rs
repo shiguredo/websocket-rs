@@ -248,17 +248,42 @@ pub struct WebSocketClientConnection {
     /// 出力キュー
     output_queue: VecDeque<ConnectionOutput>,
 
-    /// 内部自動応答用 masking_key キュー
-    pending_masking_keys: VecDeque<[u8; 4]>,
+    /// Masking key 生成関数
+    masking_key_generator: Box<dyn FnMut() -> [u8; 4] + Send>,
 }
 
 impl WebSocketClientConnection {
     /// 新しい接続を作成
-    pub fn new(options: ClientConnectionOptions) -> Self {
+    ///
+    /// # Arguments
+    /// * `options` - 接続オプション
+    /// * `masking_key_generator` - フレームマスキング用の 4 バイト乱数を生成する関数
+    ///
+    /// # Example
+    /// ```ignore
+    /// // 本番環境: 真の乱数を使用
+    /// let ws = WebSocketClientConnection::new(options, || {
+    ///     let mut key = [0u8; 4];
+    ///     getrandom::fill(&mut key).unwrap();
+    ///     key
+    /// });
+    ///
+    /// // テスト環境: 固定シードの PRNG を使用
+    /// let mut rng = StdRng::seed_from_u64(12345);
+    /// let ws = WebSocketClientConnection::new(options, move || {
+    ///     let mut key = [0u8; 4];
+    ///     rng.fill(&mut key);
+    ///     key
+    /// });
+    /// ```
+    pub fn new<F>(options: ClientConnectionOptions, masking_key_generator: F) -> Self
+    where
+        F: FnMut() -> [u8; 4] + Send + 'static,
+    {
         Self {
             state: ConnectionState::Disconnected,
             options,
-            nonce: [0u8; 16], // connect() で生成
+            nonce: [0u8; 16], // connect() で設定
             handshake_validator: None,
             frame_decoder: FrameDecoder::new(),
             fragment_buffer: FragmentBuffer::new(),
@@ -271,7 +296,7 @@ impl WebSocketClientConnection {
             awaiting_pong: false,
             event_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            pending_masking_keys: VecDeque::new(),
+            masking_key_generator: Box::new(masking_key_generator),
         }
     }
 
@@ -350,38 +375,25 @@ impl WebSocketClientConnection {
     }
 
     /// テキストメッセージを送信
-    ///
-    /// # Arguments
-    /// * `text` - 送信するテキストメッセージ
-    /// * `masking_key` - フレームマスキング用の 4 バイト乱数（外部から提供）
-    pub fn send_text(&mut self, text: &str, masking_key: [u8; 4]) -> Result<(), Error> {
+    pub fn send_text(&mut self, text: &str) -> Result<(), Error> {
         self.check_connected()?;
-        self.send_data_frame(Opcode::Text, text.as_bytes().to_vec(), masking_key)
+        self.send_data_frame(Opcode::Text, text.as_bytes().to_vec())
     }
 
     /// バイナリメッセージを送信
-    ///
-    /// # Arguments
-    /// * `data` - 送信するバイナリデータ
-    /// * `masking_key` - フレームマスキング用の 4 バイト乱数（外部から提供）
-    pub fn send_binary(&mut self, data: &[u8], masking_key: [u8; 4]) -> Result<(), Error> {
+    pub fn send_binary(&mut self, data: &[u8]) -> Result<(), Error> {
         self.check_connected()?;
-        self.send_data_frame(Opcode::Binary, data.to_vec(), masking_key)
+        self.send_data_frame(Opcode::Binary, data.to_vec())
     }
 
     /// データフレームを送信（圧縮対応）
-    fn send_data_frame(
-        &mut self,
-        opcode: Opcode,
-        payload: Vec<u8>,
-        masking_key: [u8; 4],
-    ) -> Result<(), Error> {
+    fn send_data_frame(&mut self, opcode: Opcode, payload: Vec<u8>) -> Result<(), Error> {
         let (payload, compressed) = self.compress_if_enabled(payload)?;
 
         let mut frame = Frame::new(opcode, payload);
         frame.rsv1 = compressed;
 
-        self.send_frame_with_key(frame, masking_key)
+        self.send_frame(frame)
     }
 
     /// 圧縮が有効な場合、ペイロードを圧縮する
@@ -401,21 +413,11 @@ impl WebSocketClientConnection {
     }
 
     /// Ping を送信
-    ///
-    /// # Arguments
-    /// * `data` - Ping ペイロード
-    /// * `now` - 現在時刻
-    /// * `masking_key` - フレームマスキング用の 4 バイト乱数（外部から提供）
-    pub fn send_ping(
-        &mut self,
-        data: &[u8],
-        now: Timestamp,
-        masking_key: [u8; 4],
-    ) -> Result<(), Error> {
+    pub fn send_ping(&mut self, data: &[u8], now: Timestamp) -> Result<(), Error> {
         self.check_connected()?;
 
         let frame = Frame::ping(data.to_vec());
-        self.send_frame_with_key(frame, masking_key)?;
+        self.send_frame(frame)?;
 
         self.last_ping_time = Some(now);
         self.awaiting_pong = true;
@@ -430,24 +432,14 @@ impl WebSocketClientConnection {
     }
 
     /// 接続をクローズ
-    ///
-    /// # Arguments
-    /// * `code` - クローズコード
-    /// * `reason` - クローズ理由
-    /// * `masking_key` - フレームマスキング用の 4 バイト乱数（外部から提供）
-    pub fn close(
-        &mut self,
-        code: CloseCode,
-        reason: &str,
-        masking_key: [u8; 4],
-    ) -> Result<(), Error> {
+    pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
         if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
             return Err(Error::invalid_state("connection is already closed"));
         }
 
         if !self.close_sent {
             let frame = Frame::close(Some(code.as_u16()), reason);
-            self.send_frame_with_key(frame, masking_key)?;
+            self.send_frame(frame)?;
             self.close_sent = true;
 
             // クローズタイムアウト設定
@@ -462,30 +454,12 @@ impl WebSocketClientConnection {
         Ok(())
     }
 
-    /// 内部自動応答（Pong、Close 応答）用の masking_key を追加
-    ///
-    /// 内部で自動的に送信される応答フレーム（Pong、Close 応答）に使用する
-    /// masking_key をキューに追加します。
-    pub fn push_masking_key(&mut self, masking_key: [u8; 4]) {
-        self.pending_masking_keys.push_back(masking_key);
-    }
-
     /// タイマーイベントを処理
-    ///
-    /// 内部自動応答（Ping、Close）に必要な masking_key は事前に
-    /// `push_masking_key` で追加しておく必要があります。
     pub fn handle_timer(&mut self, timer_id: TimerId, now: Timestamp) -> Result<(), Error> {
         match timer_id {
             TimerId::Ping => {
                 if self.state == ConnectionState::Connected && !self.awaiting_pong {
-                    // 空の Ping を送信（pending_masking_keys から取得）
-                    if let Some(masking_key) = self.pending_masking_keys.pop_front() {
-                        self.send_ping(&[], now, masking_key)?;
-                    } else {
-                        return Err(Error::invalid_state(
-                            "no masking key available for automatic ping",
-                        ));
-                    }
+                    self.send_ping(&[], now)?;
                 }
                 // 次の Ping タイマー設定
                 if self.options.ping_interval_millis > 0 {
@@ -500,9 +474,7 @@ impl WebSocketClientConnection {
                     // Pong タイムアウト - 接続を閉じる
                     self.event_queue
                         .push_back(ConnectionEvent::Error("pong timeout".to_string()));
-                    if let Some(masking_key) = self.pending_masking_keys.pop_front() {
-                        self.close(CloseCode::POLICY_VIOLATION, "pong timeout", masking_key)?;
-                    }
+                    self.close(CloseCode::POLICY_VIOLATION, "pong timeout")?;
                 }
             }
             TimerId::CloseTimeout => {
@@ -544,23 +516,16 @@ impl WebSocketClientConnection {
         Ok(())
     }
 
-    /// 内部自動応答用のフレーム送信（pending_masking_keys から取得）
-    fn send_frame_internal(&mut self, frame: Frame) -> Result<(), Error> {
-        let masking_key = self.pending_masking_keys.pop_front().ok_or_else(|| {
-            Error::invalid_state("no masking key available for internal response")
-        })?;
-        self.send_frame_with_key(frame, masking_key)
-    }
-
-    /// 指定された masking_key でフレーム送信
-    fn send_frame_with_key(&mut self, frame: Frame, masking_key: [u8; 4]) -> Result<(), Error> {
+    /// フレームを送信（masking_key は自動生成）
+    fn send_frame(&mut self, frame: Frame) -> Result<(), Error> {
+        let masking_key = (self.masking_key_generator)();
         let encoded = frame.encode(masking_key);
         self.output_queue
             .push_back(ConnectionOutput::SendData(encoded));
         Ok(())
     }
 
-    /// 内部エラー処理用のクローズ（pending_masking_keys から取得）
+    /// 内部エラー処理用のクローズ
     fn close_internal(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
         if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
             return Ok(());
@@ -568,7 +533,7 @@ impl WebSocketClientConnection {
 
         if !self.close_sent {
             let frame = Frame::close(Some(code.as_u16()), reason);
-            self.send_frame_internal(frame)?;
+            self.send_frame(frame)?;
             self.close_sent = true;
 
             // クローズタイムアウト設定
@@ -865,7 +830,7 @@ impl WebSocketClientConnection {
             // クローズフレームを返送
             let reply_code = code.map(|c| c.as_u16()).unwrap_or(1000);
             let reply_frame = Frame::close(Some(reply_code), "");
-            self.send_frame_internal(reply_frame)?;
+            self.send_frame(reply_frame)?;
             self.close_sent = true;
         }
 
@@ -891,7 +856,7 @@ impl WebSocketClientConnection {
 
         // Pong を自動返信
         let pong = Frame::pong(frame.payload);
-        self.send_frame_internal(pong)?;
+        self.send_frame(pong)?;
 
         Ok(())
     }
@@ -944,7 +909,7 @@ mod tests {
     // テスト用ヘルパー: 接続を作成してハンドシェイク完了まで進める
     fn create_connected_client_connection() -> WebSocketClientConnection {
         let options = ClientConnectionOptions::new("example.com", "/chat");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
         let now = Timestamp::from_millis(0);
 
         conn.connect(test_nonce()).unwrap();
@@ -972,14 +937,14 @@ mod tests {
     #[test]
     fn test_connection_new() {
         let options = ClientConnectionOptions::new("example.com", "/chat");
-        let conn = WebSocketClientConnection::new(options);
+        let conn = WebSocketClientConnection::new(options, test_masking_key);
         assert_eq!(conn.state(), ConnectionState::Disconnected);
     }
 
     #[test]
     fn test_connection_connect() {
         let options = ClientConnectionOptions::new("example.com", "/chat");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
 
         conn.connect(test_nonce()).unwrap();
 
@@ -1008,7 +973,7 @@ mod tests {
     #[test]
     fn test_connection_handshake() {
         let options = ClientConnectionOptions::new("example.com", "/chat");
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
         let now = Timestamp::from_millis(0);
 
         conn.connect(test_nonce()).unwrap();
@@ -1050,7 +1015,7 @@ mod tests {
         let mut conn = create_connected_client_connection();
 
         // テキスト送信
-        conn.send_text("Hello", test_masking_key()).unwrap();
+        conn.send_text("Hello").unwrap();
 
         let output = conn.poll_output().unwrap();
         match output {
@@ -1084,16 +1049,13 @@ mod tests {
         let now = Timestamp::from_millis(0);
 
         // クローズ送信
-        conn.close(CloseCode::NORMAL, "goodbye", test_masking_key())
-            .unwrap();
+        conn.close(CloseCode::NORMAL, "goodbye").unwrap();
 
         assert_eq!(conn.state(), ConnectionState::Closing);
 
         // サーバーからクローズ応答
         // FIN=1, opcode=close(8), length=2, code=1000
         let close_frame = [0x88, 0x02, 0x03, 0xE8];
-        // Close 応答のための masking_key を追加
-        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&close_frame, now).unwrap();
 
         assert_eq!(conn.state(), ConnectionState::Closed);
@@ -1107,8 +1069,6 @@ mod tests {
         // サーバーから Ping
         // FIN=1, opcode=ping(9), length=4, "ping"
         let ping_frame = [0x89, 0x04, b'p', b'i', b'n', b'g'];
-        // Pong 自動返信のための masking_key を追加
-        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&ping_frame, now).unwrap();
 
         // Ping イベント
@@ -1130,7 +1090,7 @@ mod tests {
     fn create_connected_client_with_deflate() -> WebSocketClientConnection {
         let options = ClientConnectionOptions::new("example.com", "/chat")
             .deflate(PerMessageDeflateConfig::new());
-        let mut conn = WebSocketClientConnection::new(options);
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
         let now = Timestamp::from_millis(0);
 
         conn.connect(test_nonce()).unwrap();
@@ -1174,7 +1134,7 @@ mod tests {
 
         // 圧縮しきい値以上の長いテキストを送信
         let long_text = "Hello, WebSocket with permessage-deflate! ".repeat(10);
-        conn.send_text(&long_text, test_masking_key()).unwrap();
+        conn.send_text(&long_text).unwrap();
 
         let output = conn.poll_output().unwrap();
         match output {
@@ -1218,7 +1178,7 @@ mod tests {
         let mut conn = create_connected_client_with_deflate();
 
         // 圧縮しきい値未満の短いテキストを送信
-        conn.send_text("Hi", test_masking_key()).unwrap();
+        conn.send_text("Hi").unwrap();
 
         let output = conn.poll_output().unwrap();
         match output {

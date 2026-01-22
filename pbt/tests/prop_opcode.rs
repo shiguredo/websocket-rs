@@ -235,10 +235,9 @@ proptest! {
         opcode in prop::sample::select(VALID_OPCODES.to_vec())
     ) {
         let op = Opcode::from_u8(opcode).unwrap();
-        let cloned = op.clone();
         let copied = op;
 
-        prop_assert_eq!(op, cloned);
+        // Copy 型なので clone() を使わずにコピーをテスト
         prop_assert_eq!(op, copied);
     }
 

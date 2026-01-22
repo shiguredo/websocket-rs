@@ -33,8 +33,9 @@ proptest! {
     #[test]
     fn prop_error_kind_clone(idx in 0usize..8) {
         let kind = ERROR_KINDS[idx];
-        let cloned = kind.clone();
-        prop_assert_eq!(kind, cloned);
+        let copied = kind;
+        // Copy 型なので clone() を使わずにコピーをテスト
+        prop_assert_eq!(kind, copied);
     }
 
     /// ErrorKind は Copy 可能

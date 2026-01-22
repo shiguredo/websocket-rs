@@ -244,10 +244,9 @@ proptest! {
     fn prop_clone_copy_consistency(millis in any::<u64>()) {
         let ts = Timestamp::from_millis(millis);
 
-        let cloned = ts.clone();
         let copied = ts;
 
-        prop_assert_eq!(ts, cloned);
+        // Copy 型なので clone() を使わずにコピーをテスト
         prop_assert_eq!(ts, copied);
     }
 }
