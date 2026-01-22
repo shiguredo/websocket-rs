@@ -835,6 +835,14 @@ impl WebSocketClientConnection {
         }
 
         // 両方向でクローズが完了
+        // Ping/Pong 関連の状態とタイマーをクリア
+        self.awaiting_pong = false;
+        self.output_queue.push_back(ConnectionOutput::ClearTimer {
+            id: TimerId::PongTimeout,
+        });
+        self.output_queue.push_back(ConnectionOutput::ClearTimer {
+            id: TimerId::Ping,
+        });
         self.output_queue.push_back(ConnectionOutput::ClearTimer {
             id: TimerId::CloseTimeout,
         });
