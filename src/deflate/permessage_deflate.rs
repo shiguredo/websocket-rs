@@ -19,25 +19,16 @@ const DEFLATE_TRAILER: [u8; 4] = [0x00, 0x00, 0xFF, 0xFF];
 pub struct Compressor {
     /// 圧縮レベル (0-9)
     level: u32,
-    /// コンテキスト引き継ぎなし
-    no_context_takeover: bool,
-    /// 圧縮状態（コンテキスト引き継ぎ用）
-    state: Option<Vec<u8>>,
 }
 
 impl Compressor {
     /// 新しいコンプレッサーを生成
-    pub fn new(config: &PerMessageDeflateConfig, is_client: bool) -> Self {
-        let no_context_takeover = if is_client {
-            config.client_no_context_takeover
-        } else {
-            config.server_no_context_takeover
-        };
-
+    ///
+    /// 注: RFC 7692 のコンテキスト引き継ぎは現在サポートされていません。
+    /// 常に no_context_takeover と同等の動作をします。
+    pub fn new(_config: &PerMessageDeflateConfig, _is_client: bool) -> Self {
         Self {
             level: 6, // デフォルト圧縮レベル
-            no_context_takeover,
-            state: None,
         }
     }
 
@@ -66,39 +57,20 @@ impl Compressor {
             compressed.truncate(compressed.len() - 4);
         }
 
-        // コンテキスト引き継ぎ
-        if !self.no_context_takeover {
-            // 現在の実装では毎回新しいエンコーダーを使用するため、
-            // コンテキスト引き継ぎは限定的
-            self.state = Some(compressed.clone());
-        }
-
         Ok(compressed)
     }
 }
 
 /// permessage-deflate デコンプレッサー
-pub struct Decompressor {
-    /// コンテキスト引き継ぎなし
-    no_context_takeover: bool,
-    /// 解凍状態（コンテキスト引き継ぎ用）
-    state: Option<Vec<u8>>,
-}
+pub struct Decompressor;
 
 impl Decompressor {
     /// 新しいデコンプレッサーを生成
-    pub fn new(config: &PerMessageDeflateConfig, is_client: bool) -> Self {
-        // クライアントは受信時にサーバーの設定を使用
-        let no_context_takeover = if is_client {
-            config.server_no_context_takeover
-        } else {
-            config.client_no_context_takeover
-        };
-
-        Self {
-            no_context_takeover,
-            state: None,
-        }
+    ///
+    /// 注: RFC 7692 のコンテキスト引き継ぎは現在サポートされていません。
+    /// 常に no_context_takeover と同等の動作をします。
+    pub fn new(_config: &PerMessageDeflateConfig, _is_client: bool) -> Self {
+        Self
     }
 
     /// データを解凍
@@ -116,17 +88,12 @@ impl Decompressor {
             .read_to_end(&mut decompressed)
             .map_err(|e| Error::invalid_data(format!("decompression failed: {}", e)))?;
 
-        // コンテキスト引き継ぎ
-        if !self.no_context_takeover {
-            self.state = Some(decompressed.clone());
-        }
-
         Ok(decompressed)
     }
 
-    /// コンテキストをリセット
+    /// コンテキストをリセット（互換性のために残す）
     pub fn reset(&mut self) {
-        self.state = None;
+        // no-op: 毎回新しいデコーダーを使用するため
     }
 }
 
@@ -300,5 +267,24 @@ mod tests {
         let decompressed9 = codec9.decompress(&compressed9).unwrap();
         assert_eq!(decompressed1, original);
         assert_eq!(decompressed9, original);
+    }
+
+    #[test]
+    fn test_multiple_messages() {
+        // 複数のメッセージを連続して圧縮・解凍
+        let config = PerMessageDeflateConfig::new();
+        let mut codec = PerMessageDeflate::new_client(config);
+
+        let messages = [
+            "Hello, this is the first message.",
+            "Hello, this is the second message.",
+            "Hello, this is the third message.",
+        ];
+
+        for msg in &messages {
+            let compressed = codec.compress(msg.as_bytes()).unwrap();
+            let decompressed = codec.decompress(&compressed).unwrap();
+            assert_eq!(decompressed, msg.as_bytes());
+        }
     }
 }

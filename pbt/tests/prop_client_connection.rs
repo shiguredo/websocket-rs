@@ -48,33 +48,27 @@ fn create_valid_handshake_response(
     response.into_bytes()
 }
 
+/// テスト用の固定 nonce を生成
+fn test_nonce() -> [u8; 16] {
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+}
+
+/// テスト用の固定 masking_key を生成
+fn test_masking_key() -> [u8; 4] {
+    [0xAB, 0xCD, 0xEF, 0x12]
+}
+
 /// 接続を作成して Connected 状態まで進める
 fn setup_connected_client() -> (WebSocketClientConnection, Timestamp, [u8; 16]) {
     let options = ClientConnectionOptions::new("example.com", "/ws");
     let mut conn = WebSocketClientConnection::new(options);
     let now = Timestamp::from_millis(0);
+    let nonce = test_nonce();
 
-    conn.connect(now).unwrap();
+    conn.connect(nonce).unwrap();
 
-    // nonce を取得するために、出力からハンドシェイクリクエストを解析
-    let output = conn.poll_output().unwrap();
-    let request_data = match output {
-        ConnectionOutput::SendData(data) => data,
-        _ => panic!("expected SendData"),
-    };
-
-    // リクエストから Sec-WebSocket-Key を抽出
-    let request_str = String::from_utf8_lossy(&request_data);
-    let key_line = request_str
-        .lines()
-        .find(|l| l.starts_with("Sec-WebSocket-Key:"))
-        .unwrap();
-    let key = key_line.split(": ").nth(1).unwrap().trim();
-
-    // キーをデコードして nonce を取得
-    let nonce_vec = STANDARD.decode(key).unwrap();
-    let mut nonce = [0u8; 16];
-    nonce.copy_from_slice(&nonce_vec);
+    // 出力を消費（ハンドシェイクリクエスト）
+    while conn.poll_output().is_some() {}
 
     // Accept を計算してレスポンスを送信
     let accept = compute_accept(&nonce);
@@ -199,9 +193,8 @@ proptest! {
     fn prop_connect_changes_state_to_connecting(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options);
-        let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
         prop_assert_eq!(conn.state(), ConnectionState::Connecting);
     }
 
@@ -210,9 +203,8 @@ proptest! {
     fn prop_connect_sends_handshake_request(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options);
-        let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
 
         let output = conn.poll_output().unwrap();
         match output {
@@ -234,10 +226,9 @@ proptest! {
     fn prop_double_connect_fails(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options);
-        let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
-        let result = conn.connect(now);
+        conn.connect(test_nonce()).unwrap();
+        let result = conn.connect(test_nonce());
         prop_assert!(result.is_err());
     }
 }
@@ -264,7 +255,7 @@ proptest! {
         let mut conn = WebSocketClientConnection::new(options);
         let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
 
         // リクエストから nonce を取得
         let output = conn.poll_output().unwrap();
@@ -301,7 +292,7 @@ proptest! {
         let mut conn = WebSocketClientConnection::new(options);
         let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
         while conn.poll_output().is_some() {}
 
         // 無効な Accept
@@ -309,6 +300,33 @@ proptest! {
         let result = conn.feed_recv_buf(&response, now);
 
         prop_assert!(result.is_err());
+    }
+
+    /// サポートされていないプロトコルのハンドシェイク (RFC 6455 準拠)
+    #[test]
+    fn prop_handshake_unsupported_protocol(
+        client_protocol in "[a-z]{3,10}",
+        server_protocol in "[a-z]{3,10}"
+    ) {
+        // 異なるプロトコルの場合のみテスト
+        prop_assume!(client_protocol != server_protocol);
+
+        let options = ClientConnectionOptions::new("example.com", "/ws")
+            .protocol(&client_protocol);
+        let mut conn = WebSocketClientConnection::new(options);
+        let now = Timestamp::from_millis(0);
+        let nonce = test_nonce();
+
+        conn.connect(nonce).unwrap();
+        while conn.poll_output().is_some() {}
+
+        // サーバーがクライアントの要求と異なるプロトコルを返す
+        let accept = compute_accept(&nonce);
+        let response = create_valid_handshake_response(&accept, Some(&server_protocol), None);
+        let result = conn.feed_recv_buf(&response, now);
+
+        // RFC 6455: クライアントが要求していないプロトコルは拒否
+        prop_assert!(result.is_err(), "Server returned unsolicited protocol should be rejected");
     }
 }
 
@@ -320,9 +338,9 @@ proptest! {
     fn prop_send_text_message(
         text in ".*",
     ) {
-        let (mut conn, now, _) = setup_connected_client();
+        let (mut conn, _, _) = setup_connected_client();
 
-        let result = conn.send_text(&text, now);
+        let result = conn.send_text(&text, test_masking_key());
         prop_assert!(result.is_ok());
 
         let output = conn.poll_output();
@@ -334,9 +352,9 @@ proptest! {
     fn prop_send_binary_message(
         data in prop::collection::vec(any::<u8>(), 0..1000),
     ) {
-        let (mut conn, now, _) = setup_connected_client();
+        let (mut conn, _, _) = setup_connected_client();
 
-        let result = conn.send_binary(&data, now);
+        let result = conn.send_binary(&data, test_masking_key());
         prop_assert!(result.is_ok());
 
         let output = conn.poll_output();
@@ -400,6 +418,8 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         let ping = Frame::ping(data.clone()).encode_unmasked();
+        // Pong 自動返信のための masking_key を追加
+        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&ping, now).unwrap();
 
         // Ping イベントが発生
@@ -432,7 +452,7 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // まず Ping を送信
-        conn.send_ping(&[], now).unwrap();
+        conn.send_ping(&[], now, test_masking_key()).unwrap();
         while conn.poll_output().is_some() {}
 
         // Pong を受信
@@ -474,6 +494,8 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         let close = Frame::close(Some(code), &reason).encode_unmasked();
+        // Close 応答のための masking_key を追加
+        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&close, now).unwrap();
 
         // Close イベントが発生
@@ -502,9 +524,9 @@ proptest! {
         ]),
         reason in "[\\x20-\\x7E]{0,50}".prop_map(|s| s.to_string()),
     ) {
-        let (mut conn, now, _) = setup_connected_client();
+        let (mut conn, _, _) = setup_connected_client();
 
-        conn.close(code, &reason, now).unwrap();
+        conn.close(code, &reason, test_masking_key()).unwrap();
 
         prop_assert_eq!(conn.state(), ConnectionState::Closing);
 
@@ -525,6 +547,8 @@ proptest! {
 
         // コードなしの Close フレーム
         let close = Frame::close(None, "").encode_unmasked();
+        // Close 応答のための masking_key を追加
+        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&close, now).unwrap();
 
         let mut found = false;
@@ -547,6 +571,8 @@ proptest! {
     fn prop_ping_timer_event(_dummy in Just(())) {
         let (mut conn, now, _) = setup_connected_client();
 
+        // Ping 送信のための masking_key を追加
+        conn.push_masking_key(test_masking_key());
         conn.handle_timer(TimerId::Ping, now).unwrap();
 
         // Ping が送信されるはず
@@ -566,11 +592,12 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // Ping を送信
-        conn.send_ping(&[], now).unwrap();
+        conn.send_ping(&[], now, test_masking_key()).unwrap();
         while conn.poll_output().is_some() {}
         while conn.poll_event().is_some() {}
 
-        // Pong タイムアウトをトリガー
+        // Pong タイムアウトをトリガー（Close 送信のための masking_key を追加）
+        conn.push_masking_key(test_masking_key());
         conn.handle_timer(TimerId::PongTimeout, now).unwrap();
 
         // エラーイベントが発生
@@ -594,7 +621,7 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // Close を送信
-        conn.close(CloseCode::NORMAL, "", now).unwrap();
+        conn.close(CloseCode::NORMAL, "", test_masking_key()).unwrap();
         while conn.poll_output().is_some() {}
         while conn.poll_event().is_some() {}
 
@@ -615,9 +642,8 @@ proptest! {
     fn prop_cannot_send_while_disconnected(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options);
-        let now = Timestamp::from_millis(0);
 
-        let result = conn.send_text("hello", now);
+        let result = conn.send_text("hello", test_masking_key());
         prop_assert!(result.is_err());
     }
 
@@ -626,12 +652,11 @@ proptest! {
     fn prop_cannot_send_while_connecting(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options);
-        let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
         prop_assert_eq!(conn.state(), ConnectionState::Connecting);
 
-        let result = conn.send_text("hello", now);
+        let result = conn.send_text("hello", test_masking_key());
         prop_assert!(result.is_err());
     }
 }
@@ -653,8 +678,9 @@ proptest! {
     fn prop_feed_to_closed_fails(_dummy in Just(())) {
         let (mut conn, now, _) = setup_connected_client();
 
-        // Close フレームを送受信
+        // Close フレームを送受信（Close 応答のための masking_key を追加）
         let close = Frame::close(Some(1000), "").encode_unmasked();
+        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&close, now).unwrap();
 
         prop_assert_eq!(conn.state(), ConnectionState::Closed);
@@ -849,7 +875,7 @@ proptest! {
         let mut conn = WebSocketClientConnection::new(options);
         let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
         while conn.poll_output().is_some() {}
 
         // ランダムなレスポンスを送信
@@ -900,6 +926,8 @@ proptest! {
         let invalid_utf8 = vec![0xFF, 0xFE, 0x00, 0x01];
         let frame = Frame::new(Opcode::Text, invalid_utf8).encode_unmasked();
 
+        // Close 送信のための masking_key を追加
+        conn.push_masking_key(test_masking_key());
         // RFC 6455 準拠: 無効な UTF-8 は即座にエラーを返す
         let result = conn.feed_recv_buf(&frame, now);
         prop_assert!(result.is_err(), "Invalid UTF-8 should return error");

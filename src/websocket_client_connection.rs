@@ -209,14 +209,6 @@ impl FragmentBuffer {
     }
 }
 
-/// 暗号学的に安全な乱数を生成
-fn random_bytes<const N: usize>() -> Result<[u8; N], Error> {
-    let mut buf = [0u8; N];
-    getrandom::fill(&mut buf)
-        .map_err(|e| Error::invalid_state(format!("failed to generate random bytes: {}", e)))?;
-    Ok(buf)
-}
-
 /// WebSocket 接続
 pub struct WebSocketClientConnection {
     /// 状態
@@ -255,6 +247,9 @@ pub struct WebSocketClientConnection {
     event_queue: VecDeque<ConnectionEvent>,
     /// 出力キュー
     output_queue: VecDeque<ConnectionOutput>,
+
+    /// 内部自動応答用 masking_key キュー
+    pending_masking_keys: VecDeque<[u8; 4]>,
 }
 
 impl WebSocketClientConnection {
@@ -276,6 +271,7 @@ impl WebSocketClientConnection {
             awaiting_pong: false,
             event_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            pending_masking_keys: VecDeque::new(),
         }
     }
 
@@ -295,13 +291,16 @@ impl WebSocketClientConnection {
     }
 
     /// 接続を開始
-    pub fn connect(&mut self, _now: Timestamp) -> Result<(), Error> {
+    ///
+    /// # Arguments
+    /// * `nonce` - ハンドシェイク用の 16 バイト乱数（外部から提供）
+    pub fn connect(&mut self, nonce: [u8; 16]) -> Result<(), Error> {
         if self.state != ConnectionState::Disconnected {
             return Err(Error::invalid_state("already connected or connecting"));
         }
 
-        // ハンドシェイク用の nonce を生成
-        self.nonce = random_bytes()?;
+        // ハンドシェイク用の nonce を設定
+        self.nonce = nonce;
 
         // ハンドシェイクリクエストを構築
         let mut request = HandshakeRequest::new(&self.options.path, &self.options.host);
@@ -351,25 +350,38 @@ impl WebSocketClientConnection {
     }
 
     /// テキストメッセージを送信
-    pub fn send_text(&mut self, text: &str, _now: Timestamp) -> Result<(), Error> {
+    ///
+    /// # Arguments
+    /// * `text` - 送信するテキストメッセージ
+    /// * `masking_key` - フレームマスキング用の 4 バイト乱数（外部から提供）
+    pub fn send_text(&mut self, text: &str, masking_key: [u8; 4]) -> Result<(), Error> {
         self.check_connected()?;
-        self.send_data_frame(Opcode::Text, text.as_bytes().to_vec())
+        self.send_data_frame(Opcode::Text, text.as_bytes().to_vec(), masking_key)
     }
 
     /// バイナリメッセージを送信
-    pub fn send_binary(&mut self, data: &[u8], _now: Timestamp) -> Result<(), Error> {
+    ///
+    /// # Arguments
+    /// * `data` - 送信するバイナリデータ
+    /// * `masking_key` - フレームマスキング用の 4 バイト乱数（外部から提供）
+    pub fn send_binary(&mut self, data: &[u8], masking_key: [u8; 4]) -> Result<(), Error> {
         self.check_connected()?;
-        self.send_data_frame(Opcode::Binary, data.to_vec())
+        self.send_data_frame(Opcode::Binary, data.to_vec(), masking_key)
     }
 
     /// データフレームを送信（圧縮対応）
-    fn send_data_frame(&mut self, opcode: Opcode, payload: Vec<u8>) -> Result<(), Error> {
+    fn send_data_frame(
+        &mut self,
+        opcode: Opcode,
+        payload: Vec<u8>,
+        masking_key: [u8; 4],
+    ) -> Result<(), Error> {
         let (payload, compressed) = self.compress_if_enabled(payload)?;
 
         let mut frame = Frame::new(opcode, payload);
         frame.rsv1 = compressed;
 
-        self.send_frame(frame)
+        self.send_frame_with_key(frame, masking_key)
     }
 
     /// 圧縮が有効な場合、ペイロードを圧縮する
@@ -389,11 +401,21 @@ impl WebSocketClientConnection {
     }
 
     /// Ping を送信
-    pub fn send_ping(&mut self, data: &[u8], now: Timestamp) -> Result<(), Error> {
+    ///
+    /// # Arguments
+    /// * `data` - Ping ペイロード
+    /// * `now` - 現在時刻
+    /// * `masking_key` - フレームマスキング用の 4 バイト乱数（外部から提供）
+    pub fn send_ping(
+        &mut self,
+        data: &[u8],
+        now: Timestamp,
+        masking_key: [u8; 4],
+    ) -> Result<(), Error> {
         self.check_connected()?;
 
         let frame = Frame::ping(data.to_vec());
-        self.send_frame(frame)?;
+        self.send_frame_with_key(frame, masking_key)?;
 
         self.last_ping_time = Some(now);
         self.awaiting_pong = true;
@@ -408,14 +430,24 @@ impl WebSocketClientConnection {
     }
 
     /// 接続をクローズ
-    pub fn close(&mut self, code: CloseCode, reason: &str, _now: Timestamp) -> Result<(), Error> {
+    ///
+    /// # Arguments
+    /// * `code` - クローズコード
+    /// * `reason` - クローズ理由
+    /// * `masking_key` - フレームマスキング用の 4 バイト乱数（外部から提供）
+    pub fn close(
+        &mut self,
+        code: CloseCode,
+        reason: &str,
+        masking_key: [u8; 4],
+    ) -> Result<(), Error> {
         if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
             return Err(Error::invalid_state("connection is already closed"));
         }
 
         if !self.close_sent {
             let frame = Frame::close(Some(code.as_u16()), reason);
-            self.send_frame(frame)?;
+            self.send_frame_with_key(frame, masking_key)?;
             self.close_sent = true;
 
             // クローズタイムアウト設定
@@ -430,13 +462,30 @@ impl WebSocketClientConnection {
         Ok(())
     }
 
+    /// 内部自動応答（Pong、Close 応答）用の masking_key を追加
+    ///
+    /// 内部で自動的に送信される応答フレーム（Pong、Close 応答）に使用する
+    /// masking_key をキューに追加します。
+    pub fn push_masking_key(&mut self, masking_key: [u8; 4]) {
+        self.pending_masking_keys.push_back(masking_key);
+    }
+
     /// タイマーイベントを処理
+    ///
+    /// 内部自動応答（Ping、Close）に必要な masking_key は事前に
+    /// `push_masking_key` で追加しておく必要があります。
     pub fn handle_timer(&mut self, timer_id: TimerId, now: Timestamp) -> Result<(), Error> {
         match timer_id {
             TimerId::Ping => {
                 if self.state == ConnectionState::Connected && !self.awaiting_pong {
-                    // 空の Ping を送信
-                    self.send_ping(&[], now)?;
+                    // 空の Ping を送信（pending_masking_keys から取得）
+                    if let Some(masking_key) = self.pending_masking_keys.pop_front() {
+                        self.send_ping(&[], now, masking_key)?;
+                    } else {
+                        return Err(Error::invalid_state(
+                            "no masking key available for automatic ping",
+                        ));
+                    }
                 }
                 // 次の Ping タイマー設定
                 if self.options.ping_interval_millis > 0 {
@@ -451,7 +500,9 @@ impl WebSocketClientConnection {
                     // Pong タイムアウト - 接続を閉じる
                     self.event_queue
                         .push_back(ConnectionEvent::Error("pong timeout".to_string()));
-                    self.close(CloseCode::POLICY_VIOLATION, "pong timeout", now)?;
+                    if let Some(masking_key) = self.pending_masking_keys.pop_front() {
+                        self.close(CloseCode::POLICY_VIOLATION, "pong timeout", masking_key)?;
+                    }
                 }
             }
             TimerId::CloseTimeout => {
@@ -493,11 +544,42 @@ impl WebSocketClientConnection {
         Ok(())
     }
 
-    fn send_frame(&mut self, frame: Frame) -> Result<(), Error> {
-        let masking_key: [u8; 4] = random_bytes()?;
+    /// 内部自動応答用のフレーム送信（pending_masking_keys から取得）
+    fn send_frame_internal(&mut self, frame: Frame) -> Result<(), Error> {
+        let masking_key = self.pending_masking_keys.pop_front().ok_or_else(|| {
+            Error::invalid_state("no masking key available for internal response")
+        })?;
+        self.send_frame_with_key(frame, masking_key)
+    }
+
+    /// 指定された masking_key でフレーム送信
+    fn send_frame_with_key(&mut self, frame: Frame, masking_key: [u8; 4]) -> Result<(), Error> {
         let encoded = frame.encode(masking_key);
         self.output_queue
             .push_back(ConnectionOutput::SendData(encoded));
+        Ok(())
+    }
+
+    /// 内部エラー処理用のクローズ（pending_masking_keys から取得）
+    fn close_internal(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
+        if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
+            return Ok(());
+        }
+
+        if !self.close_sent {
+            let frame = Frame::close(Some(code.as_u16()), reason);
+            self.send_frame_internal(frame)?;
+            self.close_sent = true;
+
+            // クローズタイムアウト設定
+            self.output_queue.push_back(ConnectionOutput::SetTimer {
+                id: TimerId::CloseTimeout,
+                duration_millis: self.options.close_timeout_millis,
+            });
+
+            self.set_state(ConnectionState::Closing);
+        }
+
         Ok(())
     }
 
@@ -625,10 +707,25 @@ impl WebSocketClientConnection {
         if frame.rsv2 || frame.rsv3 {
             return Err(Error::protocol_violation("reserved bits set"));
         }
-        if frame.rsv1 && self.deflate.is_none() {
-            return Err(Error::protocol_violation(
-                "rsv1 set without permessage-deflate",
-            ));
+        // RFC 7692 Section 6: RSV1 検証
+        if frame.rsv1 {
+            if self.deflate.is_none() {
+                return Err(Error::protocol_violation(
+                    "rsv1 set without permessage-deflate",
+                ));
+            }
+            // コントロールフレームでは RSV1=0 必須
+            if frame.opcode.is_control() {
+                return Err(Error::protocol_violation(
+                    "rsv1 must not be set on control frames",
+                ));
+            }
+            // 継続フレームでは RSV1=0 必須
+            if frame.opcode == Opcode::Continuation {
+                return Err(Error::protocol_violation(
+                    "rsv1 must not be set on continuation frames",
+                ));
+            }
         }
 
         match frame.opcode {
@@ -703,7 +800,7 @@ impl WebSocketClientConnection {
         &mut self,
         opcode: Opcode,
         payload: Vec<u8>,
-        now: Timestamp,
+        _now: Timestamp,
     ) -> Result<(), Error> {
         match opcode {
             Opcode::Text => match String::from_utf8(payload) {
@@ -717,7 +814,7 @@ impl WebSocketClientConnection {
                         "invalid UTF-8 in text message: {}",
                         e
                     )));
-                    self.close(CloseCode::INVALID_PAYLOAD, "invalid UTF-8", now)?;
+                    self.close_internal(CloseCode::INVALID_PAYLOAD, "invalid UTF-8")?;
                     return Err(Error::protocol_violation("invalid UTF-8 in text message"));
                 }
             },
@@ -768,7 +865,7 @@ impl WebSocketClientConnection {
             // クローズフレームを返送
             let reply_code = code.map(|c| c.as_u16()).unwrap_or(1000);
             let reply_frame = Frame::close(Some(reply_code), "");
-            self.send_frame(reply_frame)?;
+            self.send_frame_internal(reply_frame)?;
             self.close_sent = true;
         }
 
@@ -794,7 +891,7 @@ impl WebSocketClientConnection {
 
         // Pong を自動返信
         let pong = Frame::pong(frame.payload);
-        self.send_frame(pong)?;
+        self.send_frame_internal(pong)?;
 
         Ok(())
     }
@@ -834,13 +931,23 @@ impl WebSocketClientConnection {
 mod tests {
     use super::*;
 
+    /// テスト用の固定 nonce を生成
+    fn test_nonce() -> [u8; 16] {
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    }
+
+    /// テスト用の固定 masking_key を生成
+    fn test_masking_key() -> [u8; 4] {
+        [0xAB, 0xCD, 0xEF, 0x12]
+    }
+
     // テスト用ヘルパー: 接続を作成してハンドシェイク完了まで進める
     fn create_connected_client_connection() -> WebSocketClientConnection {
         let options = ClientConnectionOptions::new("example.com", "/chat");
         let mut conn = WebSocketClientConnection::new(options);
         let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
 
         // nonce から期待される Accept を計算
         let expected_accept = conn.compute_expected_accept();
@@ -873,9 +980,8 @@ mod tests {
     fn test_connection_connect() {
         let options = ClientConnectionOptions::new("example.com", "/chat");
         let mut conn = WebSocketClientConnection::new(options);
-        let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
 
         assert_eq!(conn.state(), ConnectionState::Connecting);
 
@@ -905,7 +1011,7 @@ mod tests {
         let mut conn = WebSocketClientConnection::new(options);
         let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
 
         // nonce から期待される Accept を計算
         let expected_accept = conn.compute_expected_accept();
@@ -942,10 +1048,9 @@ mod tests {
     #[test]
     fn test_send_text() {
         let mut conn = create_connected_client_connection();
-        let now = Timestamp::from_millis(0);
 
         // テキスト送信
-        conn.send_text("Hello", now).unwrap();
+        conn.send_text("Hello", test_masking_key()).unwrap();
 
         let output = conn.poll_output().unwrap();
         match output {
@@ -979,13 +1084,16 @@ mod tests {
         let now = Timestamp::from_millis(0);
 
         // クローズ送信
-        conn.close(CloseCode::NORMAL, "goodbye", now).unwrap();
+        conn.close(CloseCode::NORMAL, "goodbye", test_masking_key())
+            .unwrap();
 
         assert_eq!(conn.state(), ConnectionState::Closing);
 
         // サーバーからクローズ応答
         // FIN=1, opcode=close(8), length=2, code=1000
         let close_frame = [0x88, 0x02, 0x03, 0xE8];
+        // Close 応答のための masking_key を追加
+        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&close_frame, now).unwrap();
 
         assert_eq!(conn.state(), ConnectionState::Closed);
@@ -999,6 +1107,8 @@ mod tests {
         // サーバーから Ping
         // FIN=1, opcode=ping(9), length=4, "ping"
         let ping_frame = [0x89, 0x04, b'p', b'i', b'n', b'g'];
+        // Pong 自動返信のための masking_key を追加
+        conn.push_masking_key(test_masking_key());
         conn.feed_recv_buf(&ping_frame, now).unwrap();
 
         // Ping イベント
@@ -1023,7 +1133,7 @@ mod tests {
         let mut conn = WebSocketClientConnection::new(options);
         let now = Timestamp::from_millis(0);
 
-        conn.connect(now).unwrap();
+        conn.connect(test_nonce()).unwrap();
 
         // nonce から期待される Accept を計算
         let expected_accept = conn.compute_expected_accept();
@@ -1061,11 +1171,10 @@ mod tests {
     #[test]
     fn test_send_compressed_text() {
         let mut conn = create_connected_client_with_deflate();
-        let now = Timestamp::from_millis(0);
 
         // 圧縮しきい値以上の長いテキストを送信
         let long_text = "Hello, WebSocket with permessage-deflate! ".repeat(10);
-        conn.send_text(&long_text, now).unwrap();
+        conn.send_text(&long_text, test_masking_key()).unwrap();
 
         let output = conn.poll_output().unwrap();
         match output {
@@ -1107,10 +1216,9 @@ mod tests {
     #[test]
     fn test_small_message_not_compressed() {
         let mut conn = create_connected_client_with_deflate();
-        let now = Timestamp::from_millis(0);
 
         // 圧縮しきい値未満の短いテキストを送信
-        conn.send_text("Hi", now).unwrap();
+        conn.send_text("Hi", test_masking_key()).unwrap();
 
         let output = conn.poll_output().unwrap();
         match output {

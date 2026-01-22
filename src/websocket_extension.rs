@@ -155,6 +155,8 @@ impl PerMessageDeflateConfig {
     }
 
     /// Extension からパースする
+    ///
+    /// RFC 7692 に従い、8-15 範囲外の window_bits 値は拒否する
     pub fn from_extension(ext: &Extension) -> Option<Self> {
         if ext.name != "permessage-deflate" {
             return None;
@@ -171,16 +173,28 @@ impl PerMessageDeflateConfig {
                     config.client_no_context_takeover = true;
                 }
                 "server_max_window_bits" => {
-                    if let Some(value) = &param.value
-                        && let Ok(bits) = value.parse::<u8>()
-                    {
-                        config.server_max_window_bits = Some(bits.clamp(8, 15));
+                    if let Some(value) = &param.value {
+                        if let Ok(bits) = value.parse::<u8>() {
+                            // RFC 7692: 8-15 の範囲外は拒否
+                            if !(8..=15).contains(&bits) {
+                                return None;
+                            }
+                            config.server_max_window_bits = Some(bits);
+                        } else {
+                            return None;
+                        }
                     }
                 }
                 "client_max_window_bits" => {
                     if let Some(value) = &param.value {
                         if let Ok(bits) = value.parse::<u8>() {
-                            config.client_max_window_bits = Some(bits.clamp(8, 15));
+                            // RFC 7692: 8-15 の範囲外は拒否
+                            if !(8..=15).contains(&bits) {
+                                return None;
+                            }
+                            config.client_max_window_bits = Some(bits);
+                        } else {
+                            return None;
                         }
                     } else {
                         // 値なしの場合はデフォルト (15) を使用
@@ -192,6 +206,39 @@ impl PerMessageDeflateConfig {
         }
 
         Some(config)
+    }
+
+    /// クライアント要求とサーバー設定をマージして交渉結果を生成
+    ///
+    /// RFC 7692 に従い、両者の制約を満たす設定を返す
+    pub fn negotiate(client_request: &Self, server_config: &Self) -> Self {
+        Self {
+            // server_max_window_bits: クライアント要求があればそれを尊重（サーバー設定以下に制限）
+            server_max_window_bits: match (
+                client_request.server_max_window_bits,
+                server_config.server_max_window_bits,
+            ) {
+                (Some(client), Some(server)) => Some(client.min(server)),
+                (Some(client), None) => Some(client),
+                (None, Some(server)) => Some(server),
+                (None, None) => None,
+            },
+            // client_max_window_bits: サーバー設定があればそれを優先
+            client_max_window_bits: match (
+                client_request.client_max_window_bits,
+                server_config.client_max_window_bits,
+            ) {
+                (Some(client), Some(server)) => Some(client.min(server)),
+                (Some(client), None) => Some(client),
+                (None, Some(server)) => Some(server),
+                (None, None) => None,
+            },
+            // no_context_takeover: どちらかが要求すれば有効
+            server_no_context_takeover: client_request.server_no_context_takeover
+                || server_config.server_no_context_takeover,
+            client_no_context_takeover: client_request.client_no_context_takeover
+                || server_config.client_no_context_takeover,
+        }
     }
 }
 

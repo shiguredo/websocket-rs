@@ -24,13 +24,11 @@
 //! // WebSocket 接続作成
 //! let mut ws = WebSocketClientConnection::new(options);
 //!
-//! // 現在時刻を取得する関数 (実装は利用者が提供)
-//! fn now() -> Timestamp {
-//!     Timestamp::from_millis(0) // 実際には現在時刻を返す
-//! }
+//! // ハンドシェイク用の nonce を生成（実際には乱数を使用）
+//! let nonce: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 //!
 //! // 接続開始
-//! ws.connect(now()).unwrap();
+//! ws.connect(nonce).unwrap();
 //!
 //! // 出力データを取得してソケットに送信
 //! while let Some(output) = ws.poll_output() {

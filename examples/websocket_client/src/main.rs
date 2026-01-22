@@ -94,6 +94,20 @@ fn now() -> Timestamp {
     Timestamp::from_millis(millis)
 }
 
+/// ハンドシェイク用の nonce を生成
+fn generate_nonce() -> [u8; 16] {
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce).expect("failed to generate nonce");
+    nonce
+}
+
+/// フレームマスキング用のキーを生成
+fn generate_masking_key() -> [u8; 4] {
+    let mut key = [0u8; 4];
+    getrandom::fill(&mut key).expect("failed to generate masking key");
+    key
+}
+
 fn parse_args() -> Result<ClientOptions, Box<dyn std::error::Error>> {
     let mut args = noargs::raw_args();
     args.metadata_mut().app_name = env!("CARGO_PKG_NAME");
@@ -286,7 +300,7 @@ async fn main() -> io::Result<()> {
     let mut ws = WebSocketClientConnection::new(options);
 
     // ハンドシェイク開始
-    ws.connect(now()).unwrap();
+    ws.connect(generate_nonce()).unwrap();
 
     // 出力を送信
     while let Some(output) = ws.poll_output() {
@@ -339,7 +353,7 @@ async fn main() -> io::Result<()> {
     // テストメッセージを送信
     let test_message = "Hello, WebSocket!";
     println!("\nSending: {}", test_message);
-    ws.send_text(test_message, now()).unwrap();
+    ws.send_text(test_message, generate_masking_key()).unwrap();
 
     while let Some(output) = ws.poll_output() {
         if let ConnectionOutput::SendData(data) = output {
@@ -356,6 +370,8 @@ async fn main() -> io::Result<()> {
                 break;
             }
 
+            // 自動応答（Pong など）用の masking_key を事前に追加
+            ws.push_masking_key(generate_masking_key());
             ws.feed_recv_buf(&buf[..n], now()).unwrap();
 
             while let Some(event) = ws.poll_event() {
@@ -411,7 +427,8 @@ async fn main() -> io::Result<()> {
 
     // クローズ
     println!("\nClosing connection...");
-    ws.close(CloseCode::NORMAL, "goodbye", now()).unwrap();
+    ws.close(CloseCode::NORMAL, "goodbye", generate_masking_key())
+        .unwrap();
 
     while let Some(output) = ws.poll_output() {
         match output {
@@ -434,6 +451,8 @@ async fn main() -> io::Result<()> {
                 break;
             }
 
+            // 自動応答用の masking_key を事前に追加
+            ws.push_masking_key(generate_masking_key());
             ws.feed_recv_buf(&buf[..n], now()).unwrap();
 
             while let Some(event) = ws.poll_event() {

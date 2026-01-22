@@ -54,6 +54,20 @@ fn now() -> Timestamp {
     Timestamp::from_millis(millis)
 }
 
+/// ハンドシェイク用の nonce を生成
+fn generate_nonce() -> [u8; 16] {
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce).expect("failed to generate nonce");
+    nonce
+}
+
+/// フレームマスキング用のキーを生成
+fn generate_masking_key() -> [u8; 4] {
+    let mut key = [0u8; 4];
+    getrandom::fill(&mut key).expect("failed to generate masking key");
+    key
+}
+
 fn now_timestamp() -> String {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -432,7 +446,7 @@ where
     let mut upstream_ws = WebSocketClientConnection::new(client_options);
 
     // アップストリームへハンドシェイクを送信
-    upstream_ws.connect(now())?;
+    upstream_ws.connect(generate_nonce())?;
 
     while let Some(output) = upstream_ws.poll_output() {
         if let ConnectionOutput::SendData(data) = output {
@@ -535,7 +549,7 @@ where
                     log_debug(debug, "クライアント切断");
                     // クライアントが切断したらアップストリームも閉じる
                     if upstream_ws.state() == ConnectionState::Connected {
-                        upstream_ws.close(CloseCode::NORMAL, "", now())?;
+                        upstream_ws.close(CloseCode::NORMAL, "", generate_masking_key())?;
                         send_output(upstream_stream, upstream_ws).await?;
                     }
                     break;
@@ -548,19 +562,19 @@ where
                     match event {
                         ConnectionEvent::TextMessage(text) => {
                             log_debug(debug, &format!("クライアント -> アップストリーム (text): {} bytes", text.len()));
-                            upstream_ws.send_text(&text, now())?;
+                            upstream_ws.send_text(&text, generate_masking_key())?;
                         }
                         ConnectionEvent::BinaryMessage(data) => {
                             log_debug(debug, &format!("クライアント -> アップストリーム (binary): {} bytes", data.len()));
-                            upstream_ws.send_binary(&data, now())?;
+                            upstream_ws.send_binary(&data, generate_masking_key())?;
                         }
                         ConnectionEvent::Ping(data) => {
                             log_debug(debug, "クライアント -> アップストリーム (ping)");
-                            upstream_ws.send_ping(&data, now())?;
+                            upstream_ws.send_ping(&data, now(), generate_masking_key())?;
                         }
                         ConnectionEvent::Close { code, reason } => {
                             log_debug(debug, &format!("クライアントから Close: {:?} {}", code, reason));
-                            upstream_ws.close(code.unwrap_or(CloseCode::NORMAL), &reason, now())?;
+                            upstream_ws.close(code.unwrap_or(CloseCode::NORMAL), &reason, generate_masking_key())?;
                         }
                         ConnectionEvent::Error(err) => {
                             log_debug(debug, &format!("クライアントエラー: {}", err));
@@ -593,6 +607,8 @@ where
                     break;
                 }
 
+                // 自動応答（Pong など）用の masking_key を事前に追加
+                upstream_ws.push_masking_key(generate_masking_key());
                 upstream_ws.feed_recv_buf(&upstream_buf[..n], now())?;
 
                 // アップストリームからのイベントを処理してクライアントへ転送

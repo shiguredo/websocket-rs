@@ -567,10 +567,25 @@ impl WebSocketServerConnection {
         if frame.rsv2 || frame.rsv3 {
             return Err(Error::protocol_violation("reserved bits set"));
         }
-        if frame.rsv1 && self.deflate.is_none() {
-            return Err(Error::protocol_violation(
-                "rsv1 set without permessage-deflate",
-            ));
+        // RFC 7692 Section 6: RSV1 検証
+        if frame.rsv1 {
+            if self.deflate.is_none() {
+                return Err(Error::protocol_violation(
+                    "rsv1 set without permessage-deflate",
+                ));
+            }
+            // コントロールフレームでは RSV1=0 必須
+            if frame.opcode.is_control() {
+                return Err(Error::protocol_violation(
+                    "rsv1 must not be set on control frames",
+                ));
+            }
+            // 継続フレームでは RSV1=0 必須
+            if frame.opcode == Opcode::Continuation {
+                return Err(Error::protocol_violation(
+                    "rsv1 must not be set on continuation frames",
+                ));
+            }
         }
 
         match frame.opcode {
@@ -766,11 +781,19 @@ impl WebSocketServerConnection {
     }
 
     fn select_deflate(&self, request: &ServerHandshakeRequest) -> Option<PerMessageDeflateConfig> {
-        let config = self.options.deflate_config.clone()?;
+        let server_config = self.options.deflate_config.clone()?;
         for ext_str in &request.extensions {
             for ext in Extension::parse(ext_str) {
                 if ext.name == "permessage-deflate" {
-                    return Some(config);
+                    // クライアント要求をパース
+                    if let Some(client_request) = PerMessageDeflateConfig::from_extension(&ext) {
+                        // クライアント要求とサーバー設定をマージ
+                        return Some(PerMessageDeflateConfig::negotiate(
+                            &client_request,
+                            &server_config,
+                        ));
+                    }
+                    // パースに失敗した場合（不正なパラメータ）は無視して次を試す
                 }
             }
         }
