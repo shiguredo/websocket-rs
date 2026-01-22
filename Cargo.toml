@@ -23,5 +23,10 @@ getrandom = "0.3"
 shiguredo_http11 = { version = "2026.1.0-canary.0" }
 
 [workspace]
-members = ["examples/websocket_client", "examples/websocket_server", "examples/websocket_reverse_proxy", "pbt"]
-exclude = ["fuzz"]
+members = [
+    "examples/websocket_client",
+    "examples/websocket_server",
+    "examples/websocket_reverse_proxy",
+    "pbt",
+    "fuzz",
+]
