@@ -203,10 +203,11 @@ impl FragmentBuffer {
 }
 
 /// 暗号学的に安全な乱数を生成
-fn random_bytes<const N: usize>() -> [u8; N] {
+fn random_bytes<const N: usize>() -> Result<[u8; N], Error> {
     let mut buf = [0u8; N];
-    getrandom::fill(&mut buf).expect("getrandom failed");
-    buf
+    getrandom::fill(&mut buf)
+        .map_err(|e| Error::invalid_state(format!("failed to generate random bytes: {}", e)))?;
+    Ok(buf)
 }
 
 /// WebSocket 接続
@@ -255,7 +256,7 @@ impl WebSocketClientConnection {
         Self {
             state: ConnectionState::Disconnected,
             options,
-            nonce: random_bytes(),
+            nonce: [0u8; 16], // connect() で生成
             handshake_validator: None,
             frame_decoder: FrameDecoder::new(),
             fragment_buffer: FragmentBuffer::new(),
@@ -291,6 +292,9 @@ impl WebSocketClientConnection {
         if self.state != ConnectionState::Disconnected {
             return Err(Error::invalid_state("already connected or connecting"));
         }
+
+        // ハンドシェイク用の nonce を生成
+        self.nonce = random_bytes()?;
 
         // ハンドシェイクリクエストを構築
         let mut request = HandshakeRequest::new(&self.options.path, &self.options.host);
@@ -344,7 +348,7 @@ impl WebSocketClientConnection {
         self.check_connected()?;
 
         let frame = Frame::text(text);
-        self.send_frame(frame);
+        self.send_frame(frame)?;
 
         Ok(())
     }
@@ -354,7 +358,7 @@ impl WebSocketClientConnection {
         self.check_connected()?;
 
         let frame = Frame::binary(data.to_vec());
-        self.send_frame(frame);
+        self.send_frame(frame)?;
 
         Ok(())
     }
@@ -364,7 +368,7 @@ impl WebSocketClientConnection {
         self.check_connected()?;
 
         let frame = Frame::ping(data.to_vec());
-        self.send_frame(frame);
+        self.send_frame(frame)?;
 
         self.last_ping_time = Some(now);
         self.awaiting_pong = true;
@@ -386,7 +390,7 @@ impl WebSocketClientConnection {
 
         if !self.close_sent {
             let frame = Frame::close(Some(code.as_u16()), reason);
-            self.send_frame(frame);
+            self.send_frame(frame)?;
             self.close_sent = true;
 
             // クローズタイムアウト設定
@@ -464,11 +468,12 @@ impl WebSocketClientConnection {
         Ok(())
     }
 
-    fn send_frame(&mut self, frame: Frame) {
-        let masking_key: [u8; 4] = random_bytes();
+    fn send_frame(&mut self, frame: Frame) -> Result<(), Error> {
+        let masking_key: [u8; 4] = random_bytes()?;
         let encoded = frame.encode(masking_key);
         self.output_queue
             .push_back(ConnectionOutput::SendData(encoded));
+        Ok(())
     }
 
     fn process_handshake(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
@@ -489,7 +494,7 @@ impl WebSocketClientConnection {
                 .map(|v| v.remaining().to_vec())
                 .unwrap_or_default();
 
-            self.complete_handshake(response, now);
+            self.complete_handshake(response, now)?;
 
             if !remaining.is_empty() {
                 self.frame_decoder.feed(&remaining);
@@ -500,7 +505,41 @@ impl WebSocketClientConnection {
         Ok(())
     }
 
-    fn complete_handshake(&mut self, response: HandshakeResponse, _now: Timestamp) {
+    fn complete_handshake(
+        &mut self,
+        response: HandshakeResponse,
+        _now: Timestamp,
+    ) -> Result<(), Error> {
+        // RFC 6455 Section 4.2.2: サーバーが返したプロトコルが要求に含まれているか検証
+        if let Some(ref protocol) = response.protocol
+            && !self.options.protocols.iter().any(|p| p == protocol)
+        {
+            return Err(Error::handshake_rejected(format!(
+                "server returned unsolicited protocol: {}",
+                protocol
+            )));
+        }
+
+        // RFC 6455 Section 4.2.2: サーバーが返した拡張が要求に含まれているか検証
+        let requested_extension_names: Vec<&str> = self
+            .options
+            .deflate_config
+            .as_ref()
+            .map(|_| vec!["permessage-deflate"])
+            .unwrap_or_default();
+
+        for ext_str in &response.extensions {
+            let extensions = Extension::parse(ext_str);
+            for ext in &extensions {
+                if !requested_extension_names.contains(&ext.name.as_str()) {
+                    return Err(Error::handshake_rejected(format!(
+                        "server returned unsolicited extension: {}",
+                        ext.name
+                    )));
+                }
+            }
+        }
+
         self.negotiated_protocol = response.protocol;
         self.negotiated_extensions = response.extensions.clone();
 
@@ -528,16 +567,30 @@ impl WebSocketClientConnection {
                 duration_millis: self.options.ping_interval_millis,
             });
         }
+
+        Ok(())
     }
 
     fn process_frames(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
         self.frame_decoder.feed(buf);
 
-        while let Some(frame) = self.frame_decoder.decode()? {
-            self.handle_frame(frame, now)?;
+        while let Some(decoded) = self.frame_decoder.decode_with_info()? {
+            self.handle_decoded_frame(decoded, now)?;
         }
 
         Ok(())
+    }
+
+    fn handle_decoded_frame(
+        &mut self,
+        decoded: crate::websocket_frame::DecodedFrame,
+        now: Timestamp,
+    ) -> Result<(), Error> {
+        // RFC 6455 Section 5.1: サーバーからのフレームはマスクしてはならない
+        if decoded.masked {
+            return Err(Error::protocol_violation("masked server frame"));
+        }
+        self.handle_frame(decoded.frame, now)
     }
 
     fn handle_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
@@ -552,8 +605,8 @@ impl WebSocketClientConnection {
         }
 
         match frame.opcode {
-            Opcode::Continuation => self.handle_continuation(frame)?,
-            Opcode::Text | Opcode::Binary => self.handle_data_frame(frame)?,
+            Opcode::Continuation => self.handle_continuation(frame, now)?,
+            Opcode::Text | Opcode::Binary => self.handle_data_frame(frame, now)?,
             Opcode::Close => self.handle_close(frame, now)?,
             Opcode::Ping => self.handle_ping(frame)?,
             Opcode::Pong => self.handle_pong(frame)?,
@@ -562,7 +615,7 @@ impl WebSocketClientConnection {
         Ok(())
     }
 
-    fn handle_data_frame(&mut self, frame: Frame) -> Result<(), Error> {
+    fn handle_data_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
         // RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
         if !self.fragment_buffer.is_empty() {
             return Err(Error::protocol_violation(
@@ -572,7 +625,7 @@ impl WebSocketClientConnection {
 
         if frame.fin {
             // 完全なメッセージ
-            self.emit_message(frame.opcode, frame.payload);
+            self.emit_message(frame.opcode, frame.payload, now)?;
         } else {
             // フラグメント開始
             self.fragment_buffer.start(frame.opcode, frame.payload);
@@ -580,7 +633,7 @@ impl WebSocketClientConnection {
         Ok(())
     }
 
-    fn handle_continuation(&mut self, frame: Frame) -> Result<(), Error> {
+    fn handle_continuation(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
         if self.fragment_buffer.is_empty() {
             return Err(Error::protocol_violation(
                 "continuation frame without initial frame",
@@ -591,13 +644,18 @@ impl WebSocketClientConnection {
 
         if frame.fin {
             let (opcode, payload) = self.fragment_buffer.take();
-            self.emit_message(opcode, payload);
+            self.emit_message(opcode, payload, now)?;
         }
 
         Ok(())
     }
 
-    fn emit_message(&mut self, opcode: Opcode, payload: Vec<u8>) {
+    fn emit_message(
+        &mut self,
+        opcode: Opcode,
+        payload: Vec<u8>,
+        now: Timestamp,
+    ) -> Result<(), Error> {
         match opcode {
             Opcode::Text => match String::from_utf8(payload) {
                 Ok(text) => {
@@ -605,10 +663,13 @@ impl WebSocketClientConnection {
                         .push_back(ConnectionEvent::TextMessage(text));
                 }
                 Err(e) => {
+                    // RFC 6455 Section 8.1: UTF-8 検証失敗時は接続を失敗させる
                     self.event_queue.push_back(ConnectionEvent::Error(format!(
                         "invalid UTF-8 in text message: {}",
                         e
                     )));
+                    self.close(CloseCode::INVALID_PAYLOAD, "invalid UTF-8", now)?;
+                    return Err(Error::protocol_violation("invalid UTF-8 in text message"));
                 }
             },
             Opcode::Binary => {
@@ -617,15 +678,36 @@ impl WebSocketClientConnection {
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn handle_close(&mut self, frame: Frame, _now: Timestamp) -> Result<(), Error> {
         self.close_received = true;
 
+        // RFC 6455 Section 5.5.1: ペイロード長は 0 または 2 以上でなければならない
+        if frame.payload.len() == 1 {
+            return Err(Error::protocol_violation(
+                "close frame payload length must be 0 or >= 2",
+            ));
+        }
+
         let (code, reason) = if frame.payload.len() >= 2 {
             let code_val = u16::from_be_bytes([frame.payload[0], frame.payload[1]]);
-            let reason = String::from_utf8_lossy(&frame.payload[2..]).to_string();
-            (Some(CloseCode::new(code_val)), reason)
+            let close_code = CloseCode::new(code_val);
+
+            // RFC 6455 Section 7.4.1: クローズコードの妥当性検証
+            if !close_code.is_valid() {
+                return Err(Error::protocol_violation(format!(
+                    "invalid close code: {}",
+                    code_val
+                )));
+            }
+
+            // RFC 6455 Section 5.5.1: 理由は有効な UTF-8 でなければならない
+            let reason = String::from_utf8(frame.payload[2..].to_vec())
+                .map_err(|_| Error::protocol_violation("close frame reason is not valid UTF-8"))?;
+
+            (Some(close_code), reason)
         } else {
             (None, String::new())
         };
@@ -637,7 +719,7 @@ impl WebSocketClientConnection {
             // クローズフレームを返送
             let reply_code = code.map(|c| c.as_u16()).unwrap_or(1000);
             let reply_frame = Frame::close(Some(reply_code), "");
-            self.send_frame(reply_frame);
+            self.send_frame(reply_frame)?;
             self.close_sent = true;
         }
 
@@ -663,7 +745,7 @@ impl WebSocketClientConnection {
 
         // Pong を自動返信
         let pong = Frame::pong(frame.payload);
-        self.send_frame(pong);
+        self.send_frame(pong)?;
 
         Ok(())
     }

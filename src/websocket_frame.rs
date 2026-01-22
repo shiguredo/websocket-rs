@@ -185,6 +185,12 @@ impl FrameDecoder {
                 if self.buf.len() < 10 {
                     return Ok(None);
                 }
+                // RFC 6455 Section 5.2: 最上位ビットは 0 でなければならない
+                if self.buf[2] & 0x80 != 0 {
+                    return Err(Error::protocol_violation(
+                        "64-bit payload length MSB must be 0",
+                    ));
+                }
                 let len = u64::from_be_bytes([
                     self.buf[2],
                     self.buf[3],

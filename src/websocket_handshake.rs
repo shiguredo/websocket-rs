@@ -382,14 +382,18 @@ impl HandshakeValidator {
             None => return Err(Error::handshake_rejected("missing Upgrade header")),
         }
 
-        // Connection ヘッダーの検証
+        // Connection ヘッダーの検証（トークンとして検証）
         match response.get_header("Connection") {
-            Some(v) if v.to_lowercase().contains("upgrade") => {}
             Some(v) => {
-                return Err(Error::handshake_rejected(format!(
-                    "invalid Connection header: {}",
-                    v
-                )));
+                let has_upgrade = v
+                    .split(',')
+                    .any(|token| token.trim().eq_ignore_ascii_case("upgrade"));
+                if !has_upgrade {
+                    return Err(Error::handshake_rejected(format!(
+                        "invalid Connection header: {}",
+                        v
+                    )));
+                }
             }
             None => return Err(Error::handshake_rejected("missing Connection header")),
         }

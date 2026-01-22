@@ -544,8 +544,8 @@ impl WebSocketServerConnection {
         }
 
         match frame.opcode {
-            Opcode::Continuation => self.handle_continuation(frame)?,
-            Opcode::Text | Opcode::Binary => self.handle_data_frame(frame)?,
+            Opcode::Continuation => self.handle_continuation(frame, now)?,
+            Opcode::Text | Opcode::Binary => self.handle_data_frame(frame, now)?,
             Opcode::Close => self.handle_close(frame, now)?,
             Opcode::Ping => self.handle_ping(frame)?,
             Opcode::Pong => self.handle_pong(frame)?,
@@ -554,7 +554,7 @@ impl WebSocketServerConnection {
         Ok(())
     }
 
-    fn handle_data_frame(&mut self, frame: Frame) -> Result<(), Error> {
+    fn handle_data_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
         // RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
         if !self.fragment_buffer.is_empty() {
             return Err(Error::protocol_violation(
@@ -564,7 +564,7 @@ impl WebSocketServerConnection {
 
         if frame.fin {
             // 完全なメッセージ
-            self.emit_message(frame.opcode, frame.payload);
+            self.emit_message(frame.opcode, frame.payload, now)?;
         } else {
             // フラグメント開始
             self.fragment_buffer.start(frame.opcode, frame.payload);
@@ -572,7 +572,7 @@ impl WebSocketServerConnection {
         Ok(())
     }
 
-    fn handle_continuation(&mut self, frame: Frame) -> Result<(), Error> {
+    fn handle_continuation(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
         if self.fragment_buffer.is_empty() {
             return Err(Error::protocol_violation(
                 "continuation frame without initial frame",
@@ -583,13 +583,18 @@ impl WebSocketServerConnection {
 
         if frame.fin {
             let (opcode, payload) = self.fragment_buffer.take();
-            self.emit_message(opcode, payload);
+            self.emit_message(opcode, payload, now)?;
         }
 
         Ok(())
     }
 
-    fn emit_message(&mut self, opcode: Opcode, payload: Vec<u8>) {
+    fn emit_message(
+        &mut self,
+        opcode: Opcode,
+        payload: Vec<u8>,
+        now: Timestamp,
+    ) -> Result<(), Error> {
         match opcode {
             Opcode::Text => match String::from_utf8(payload) {
                 Ok(text) => {
@@ -597,10 +602,13 @@ impl WebSocketServerConnection {
                         .push_back(ConnectionEvent::TextMessage(text));
                 }
                 Err(e) => {
+                    // RFC 6455 Section 8.1: UTF-8 検証失敗時は接続を失敗させる
                     self.event_queue.push_back(ConnectionEvent::Error(format!(
                         "invalid UTF-8 in text message: {}",
                         e
                     )));
+                    self.close(CloseCode::INVALID_PAYLOAD, "invalid UTF-8", now)?;
+                    return Err(Error::protocol_violation("invalid UTF-8 in text message"));
                 }
             },
             Opcode::Binary => {
@@ -609,15 +617,36 @@ impl WebSocketServerConnection {
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn handle_close(&mut self, frame: Frame, _now: Timestamp) -> Result<(), Error> {
         self.close_received = true;
 
+        // RFC 6455 Section 5.5.1: ペイロード長は 0 または 2 以上でなければならない
+        if frame.payload.len() == 1 {
+            return Err(Error::protocol_violation(
+                "close frame payload length must be 0 or >= 2",
+            ));
+        }
+
         let (code, reason) = if frame.payload.len() >= 2 {
             let code_val = u16::from_be_bytes([frame.payload[0], frame.payload[1]]);
-            let reason = String::from_utf8_lossy(&frame.payload[2..]).to_string();
-            (Some(CloseCode::new(code_val)), reason)
+            let close_code = CloseCode::new(code_val);
+
+            // RFC 6455 Section 7.4.1: クローズコードの妥当性検証
+            if !close_code.is_valid() {
+                return Err(Error::protocol_violation(format!(
+                    "invalid close code: {}",
+                    code_val
+                )));
+            }
+
+            // RFC 6455 Section 5.5.1: 理由は有効な UTF-8 でなければならない
+            let reason = String::from_utf8(frame.payload[2..].to_vec())
+                .map_err(|_| Error::protocol_violation("close frame reason is not valid UTF-8"))?;
+
+            (Some(close_code), reason)
         } else {
             (None, String::new())
         };
