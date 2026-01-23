@@ -224,18 +224,18 @@ impl WebSocketServerConnection {
     }
 
     /// 受信データを処理
-    pub fn feed_recv_buf(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
+    pub fn feed_recv_buf(&mut self, buf: &[u8]) -> Result<(), Error> {
         match self.state {
             ConnectionState::Disconnected | ConnectionState::Connecting => {
-                self.process_handshake(buf, now)
+                self.process_handshake(buf)
             }
-            ConnectionState::Connected | ConnectionState::Closing => self.process_frames(buf, now),
+            ConnectionState::Connected | ConnectionState::Closing => self.process_frames(buf),
             ConnectionState::Closed => Err(Error::invalid_state("connection is closed")),
         }
     }
 
     /// ハンドシェイクを自動で受諾
-    pub fn accept_handshake_auto(&mut self, now: Timestamp) -> Result<(), Error> {
+    pub fn accept_handshake_auto(&mut self) -> Result<(), Error> {
         let request = self
             .pending_request
             .as_ref()
@@ -255,15 +255,11 @@ impl WebSocketServerConnection {
             response = response.header(name, value);
         }
 
-        self.accept_handshake(response, now)
+        self.accept_handshake(response)
     }
 
     /// ハンドシェイクを受諾
-    pub fn accept_handshake(
-        &mut self,
-        response: ServerHandshakeResponse,
-        now: Timestamp,
-    ) -> Result<(), Error> {
+    pub fn accept_handshake(&mut self, response: ServerHandshakeResponse) -> Result<(), Error> {
         if self.state != ConnectionState::Connecting {
             return Err(Error::invalid_state("handshake is not in progress"));
         }
@@ -359,7 +355,7 @@ impl WebSocketServerConnection {
 
         if !self.pending_frame_data.is_empty() {
             let pending = std::mem::take(&mut self.pending_frame_data);
-            self.process_frames(&pending, now)?;
+            self.process_frames(&pending)?;
         }
 
         self.handshake_validator.reset();
@@ -387,13 +383,13 @@ impl WebSocketServerConnection {
     }
 
     /// テキストメッセージを送信
-    pub fn send_text(&mut self, text: &str, _now: Timestamp) -> Result<(), Error> {
+    pub fn send_text(&mut self, text: &str) -> Result<(), Error> {
         self.check_connected()?;
         self.send_data_frame(Opcode::Text, text.as_bytes().to_vec())
     }
 
     /// バイナリメッセージを送信
-    pub fn send_binary(&mut self, data: &[u8], _now: Timestamp) -> Result<(), Error> {
+    pub fn send_binary(&mut self, data: &[u8]) -> Result<(), Error> {
         self.check_connected()?;
         self.send_data_frame(Opcode::Binary, data.to_vec())
     }
@@ -445,7 +441,7 @@ impl WebSocketServerConnection {
     }
 
     /// 接続をクローズ
-    pub fn close(&mut self, code: CloseCode, reason: &str, _now: Timestamp) -> Result<(), Error> {
+    pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
         if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
             return Err(Error::invalid_state("connection is already closed"));
         }
@@ -488,7 +484,7 @@ impl WebSocketServerConnection {
                     // Pong タイムアウト - 接続を閉じる
                     self.event_queue
                         .push_back(ConnectionEvent::Error("pong timeout".to_string()));
-                    self.close(CloseCode::POLICY_VIOLATION, "pong timeout", now)?;
+                    self.close(CloseCode::POLICY_VIOLATION, "pong timeout")?;
                 }
             }
             TimerId::CloseTimeout => {
@@ -536,7 +532,7 @@ impl WebSocketServerConnection {
             .push_back(ConnectionOutput::SendData(encoded));
     }
 
-    fn process_handshake(&mut self, buf: &[u8], _now: Timestamp) -> Result<(), Error> {
+    fn process_handshake(&mut self, buf: &[u8]) -> Result<(), Error> {
         if self.pending_request.is_some() {
             self.pending_frame_data.extend_from_slice(buf);
             return Ok(());
@@ -557,24 +553,24 @@ impl WebSocketServerConnection {
         Ok(())
     }
 
-    fn process_frames(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
+    fn process_frames(&mut self, buf: &[u8]) -> Result<(), Error> {
         self.frame_decoder.feed(buf);
 
         while let Some(decoded) = self.frame_decoder.decode_with_info()? {
-            self.handle_decoded_frame(decoded, now)?;
+            self.handle_decoded_frame(decoded)?;
         }
 
         Ok(())
     }
 
-    fn handle_decoded_frame(&mut self, decoded: DecodedFrame, now: Timestamp) -> Result<(), Error> {
+    fn handle_decoded_frame(&mut self, decoded: DecodedFrame) -> Result<(), Error> {
         if !decoded.masked {
             return Err(Error::protocol_violation("unmasked client frame"));
         }
-        self.handle_frame(decoded.frame, now)
+        self.handle_frame(decoded.frame)
     }
 
-    fn handle_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
+    fn handle_frame(&mut self, frame: Frame) -> Result<(), Error> {
         // RSV ビットチェック（permessage-deflate 以外は禁止）
         if frame.rsv2 || frame.rsv3 {
             return Err(Error::protocol_violation("reserved bits set"));
@@ -601,9 +597,9 @@ impl WebSocketServerConnection {
         }
 
         match frame.opcode {
-            Opcode::Continuation => self.handle_continuation(frame, now)?,
-            Opcode::Text | Opcode::Binary => self.handle_data_frame(frame, now)?,
-            Opcode::Close => self.handle_close(frame, now)?,
+            Opcode::Continuation => self.handle_continuation(frame)?,
+            Opcode::Text | Opcode::Binary => self.handle_data_frame(frame)?,
+            Opcode::Close => self.handle_close(frame)?,
             Opcode::Ping => self.handle_ping(frame)?,
             Opcode::Pong => self.handle_pong(frame)?,
         }
@@ -611,7 +607,7 @@ impl WebSocketServerConnection {
         Ok(())
     }
 
-    fn handle_data_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
+    fn handle_data_frame(&mut self, frame: Frame) -> Result<(), Error> {
         // RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
         if !self.fragment_buffer.is_empty() {
             return Err(Error::protocol_violation(
@@ -622,7 +618,7 @@ impl WebSocketServerConnection {
         if frame.fin {
             // 完全なメッセージ
             let payload = self.decompress_if_needed(frame.payload, frame.rsv1)?;
-            self.emit_message(frame.opcode, payload, now)?;
+            self.emit_message(frame.opcode, payload)?;
         } else {
             // フラグメント開始 (RSV1 は最初のフレームにのみ設定される)
             self.fragment_buffer
@@ -631,7 +627,7 @@ impl WebSocketServerConnection {
         Ok(())
     }
 
-    fn handle_continuation(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
+    fn handle_continuation(&mut self, frame: Frame) -> Result<(), Error> {
         if self.fragment_buffer.is_empty() {
             return Err(Error::protocol_violation(
                 "continuation frame without initial frame",
@@ -643,7 +639,7 @@ impl WebSocketServerConnection {
         if frame.fin {
             let (opcode, payload, compressed) = self.fragment_buffer.take();
             let payload = self.decompress_if_needed(payload, compressed)?;
-            self.emit_message(opcode, payload, now)?;
+            self.emit_message(opcode, payload)?;
         }
 
         Ok(())
@@ -668,12 +664,7 @@ impl WebSocketServerConnection {
         }
     }
 
-    fn emit_message(
-        &mut self,
-        opcode: Opcode,
-        payload: Vec<u8>,
-        now: Timestamp,
-    ) -> Result<(), Error> {
+    fn emit_message(&mut self, opcode: Opcode, payload: Vec<u8>) -> Result<(), Error> {
         match opcode {
             Opcode::Text => match String::from_utf8(payload) {
                 Ok(text) => {
@@ -686,7 +677,7 @@ impl WebSocketServerConnection {
                         "invalid UTF-8 in text message: {}",
                         e
                     )));
-                    self.close(CloseCode::INVALID_PAYLOAD, "invalid UTF-8", now)?;
+                    self.close(CloseCode::INVALID_PAYLOAD, "invalid UTF-8")?;
                     return Err(Error::protocol_violation("invalid UTF-8 in text message"));
                 }
             },
@@ -699,7 +690,7 @@ impl WebSocketServerConnection {
         Ok(())
     }
 
-    fn handle_close(&mut self, frame: Frame, _now: Timestamp) -> Result<(), Error> {
+    fn handle_close(&mut self, frame: Frame) -> Result<(), Error> {
         self.close_received = true;
 
         // RFC 6455 Section 5.5.1: ペイロード長は 0 または 2 以上でなければならない
@@ -838,14 +829,13 @@ mod tests {
     fn test_server_handshake_auto() {
         let mut conn =
             WebSocketServerConnection::new(ServerConnectionOptions::new().protocol("chat"));
-        let now = Timestamp::from_millis(0);
 
         let request = create_handshake_request();
-        conn.feed_recv_buf(request.as_bytes(), now).unwrap();
+        conn.feed_recv_buf(request.as_bytes()).unwrap();
 
         assert!(conn.handshake_request().is_some());
 
-        conn.accept_handshake_auto(now).unwrap();
+        conn.accept_handshake_auto().unwrap();
         assert_eq!(conn.state(), ConnectionState::Connected);
 
         let _event = conn.poll_event().unwrap(); // Connecting
@@ -872,20 +862,19 @@ mod tests {
     #[test]
     fn test_server_requires_masked_frames() {
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
-        let now = Timestamp::from_millis(0);
 
         let request = create_handshake_request();
-        conn.feed_recv_buf(request.as_bytes(), now).unwrap();
-        conn.accept_handshake_auto(now).unwrap();
+        conn.feed_recv_buf(request.as_bytes()).unwrap();
+        conn.accept_handshake_auto().unwrap();
 
         // 未マスクのテキストフレームは拒否
         let frame = [0x81, 0x05, b'H', b'e', b'l', b'l', b'o'];
-        let result = conn.feed_recv_buf(&frame, now);
+        let result = conn.feed_recv_buf(&frame);
         assert!(result.is_err());
 
         // マスク済みフレームは受理
         let masked_frame = Frame::text("Hello").encode([1, 2, 3, 4]);
-        conn.feed_recv_buf(&masked_frame, now).unwrap();
+        conn.feed_recv_buf(&masked_frame).unwrap();
 
         while let Some(event) = conn.poll_event() {
             if event == ConnectionEvent::TextMessage("Hello".to_string()) {

@@ -13,7 +13,7 @@ use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use shiguredo_websocket::{
-    ConnectionEvent, ConnectionOutput, ConnectionState, ServerConnectionOptions, Timestamp,
+    ConnectionEvent, ConnectionOutput, ConnectionState, ServerConnectionOptions,
     WebSocketServerConnection,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -157,14 +157,6 @@ fn load_tls_config(
     Ok(config)
 }
 
-fn now() -> Timestamp {
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    Timestamp::from_millis(millis)
-}
-
 async fn handle_websocket_connection<S>(
     mut stream: S,
     peer_addr: std::net::SocketAddr,
@@ -190,11 +182,11 @@ where
         }
 
         // WebSocket にフィード
-        ws.feed_recv_buf(&buf[..n], now())?;
+        ws.feed_recv_buf(&buf[..n])?;
 
         // ハンドシェイクの自動受諾
         if !handshake_done && ws.state() == ConnectionState::Connecting {
-            ws.accept_handshake_auto(now())?;
+            ws.accept_handshake_auto()?;
             handshake_done = true;
         }
 
@@ -216,12 +208,12 @@ where
                 ConnectionEvent::TextMessage(text) => {
                     println!("Received text from {}: {}", peer_addr, text);
                     // エコーバック
-                    ws.send_text(&text, now())?;
+                    ws.send_text(&text)?;
                 }
                 ConnectionEvent::BinaryMessage(data) => {
                     println!("Received binary from {}: {} bytes", peer_addr, data.len());
                     // エコーバック
-                    ws.send_binary(&data, now())?;
+                    ws.send_binary(&data)?;
                 }
                 ConnectionEvent::Ping(_data) => {
                     println!("Ping from {}", peer_addr);

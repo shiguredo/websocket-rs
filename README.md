@@ -109,7 +109,7 @@ loop {
 ```rust
 use shiguredo_websocket::{
     ConnectionEvent, ConnectionOutput, ConnectionState,
-    ServerConnectionOptions, WebSocketServerConnection, Timestamp,
+    ServerConnectionOptions, WebSocketServerConnection,
 };
 
 // WebSocketServerConnection の初期化
@@ -117,11 +117,11 @@ let options = ServerConnectionOptions::new();
 let mut ws = WebSocketServerConnection::new(options);
 
 // 受信データをフィード
-// ws.feed_recv_buf(&received_data, now())?;
+// ws.feed_recv_buf(&received_data)?;
 
 // ハンドシェイクの自動受諾
 // if ws.state() == ConnectionState::Connecting {
-//     ws.accept_handshake_auto(now())?;
+//     ws.accept_handshake_auto()?;
 // }
 
 // イベント処理
@@ -155,16 +155,16 @@ ws.close(CloseCode::NORMAL, "Goodbye").unwrap();
 use shiguredo_websocket::CloseCode;
 
 // テキストメッセージ送信
-ws.send_text("Hello, WebSocket!", now()).unwrap();
+ws.send_text("Hello, WebSocket!").unwrap();
 
 // バイナリメッセージ送信
-ws.send_binary(&[0x01, 0x02, 0x03], now()).unwrap();
+ws.send_binary(&[0x01, 0x02, 0x03]).unwrap();
 
 // Ping 送信
 ws.send_ping(&[], now()).unwrap();
 
 // 接続を閉じる
-ws.close(CloseCode::NORMAL, "Goodbye", now()).unwrap();
+ws.close(CloseCode::NORMAL, "Goodbye").unwrap();
 ```
 
 ### フレームの直接操作 (低レベル API)
