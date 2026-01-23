@@ -400,11 +400,11 @@ where
             return Ok(());
         }
 
-        client_ws.feed_recv_buf(&buf[..n], now())?;
+        client_ws.feed_recv_buf(&buf[..n])?;
 
         if client_ws.state() == ConnectionState::Connecting {
             // ハンドシェイクを受諾
-            client_ws.accept_handshake_auto(now())?;
+            client_ws.accept_handshake_auto()?;
             break;
         }
     }
@@ -558,7 +558,7 @@ where
                     break;
                 }
 
-                client_ws.feed_recv_buf(&client_buf[..n], now())?;
+                client_ws.feed_recv_buf(&client_buf[..n])?;
 
                 // クライアントからのイベントを処理してアップストリームへ転送
                 while let Some(event) = client_ws.poll_event() {
@@ -604,7 +604,7 @@ where
                     log_debug(debug, "アップストリーム切断");
                     // アップストリームが切断したらクライアントも閉じる
                     if client_ws.state() == ConnectionState::Connected {
-                        client_ws.close(CloseCode::NORMAL, "", now())?;
+                        client_ws.close(CloseCode::NORMAL, "")?;
                         send_output_server(client_stream, client_ws).await?;
                     }
                     break;
@@ -617,11 +617,11 @@ where
                     match event {
                         ConnectionEvent::TextMessage(text) => {
                             log_debug(debug, &format!("アップストリーム -> クライアント (text): {} bytes", text.len()));
-                            client_ws.send_text(&text, now())?;
+                            client_ws.send_text(&text)?;
                         }
                         ConnectionEvent::BinaryMessage(data) => {
                             log_debug(debug, &format!("アップストリーム -> クライアント (binary): {} bytes", data.len()));
-                            client_ws.send_binary(&data, now())?;
+                            client_ws.send_binary(&data)?;
                         }
                         ConnectionEvent::Ping(data) => {
                             log_debug(debug, "アップストリーム -> クライアント (ping)");
@@ -629,7 +629,7 @@ where
                         }
                         ConnectionEvent::Close { code, reason } => {
                             log_debug(debug, &format!("アップストリームから Close: {:?} {}", code, reason));
-                            client_ws.close(code.unwrap_or(CloseCode::NORMAL), &reason, now())?;
+                            client_ws.close(code.unwrap_or(CloseCode::NORMAL), &reason)?;
                         }
                         ConnectionEvent::Error(err) => {
                             log_debug(debug, &format!("アップストリームエラー: {}", err));
