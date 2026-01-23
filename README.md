@@ -33,8 +33,25 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use shiguredo_websocket::{
     ClientConnectionOptions, ConnectionEvent, ConnectionOutput,
-    WebSocketClientConnection, Timestamp,
+    RandomSource, WebSocketClientConnection, Timestamp,
 };
+
+// 乱数ソースの実装
+struct SecureRandom;
+
+impl RandomSource for SecureRandom {
+    fn masking_key(&mut self) -> [u8; 4] {
+        let mut key = [0u8; 4];
+        getrandom::fill(&mut key).expect("failed to generate masking key");
+        key
+    }
+
+    fn nonce(&mut self) -> [u8; 16] {
+        let mut nonce = [0u8; 16];
+        getrandom::fill(&mut nonce).expect("failed to generate nonce");
+        nonce
+    }
+}
 
 // TCP ソケット接続
 let mut socket = TcpStream::connect("echo.websocket.org:80")?;
@@ -43,8 +60,8 @@ let mut socket = TcpStream::connect("echo.websocket.org:80")?;
 let options = ClientConnectionOptions::new("echo.websocket.org", "/");
 
 // WebSocket 接続作成・開始
-let mut ws = WebSocketClientConnection::new(options);
-ws.connect(now())?;
+let mut ws = WebSocketClientConnection::new(options, SecureRandom);
+ws.connect()?;
 
 // HTTP Upgrade リクエスト送信
 while let Some(output) = ws.poll_output() {
@@ -114,21 +131,40 @@ let mut ws = WebSocketServerConnection::new(options);
 // while let Some(output) = ws.poll_output() { ... }
 ```
 
-### メッセージ送信
+### メッセージ送信 (クライアント)
 
 ```rust
+use shiguredo_websocket::CloseCode;
+
 // テキストメッセージ送信
-conn.send_text("Hello, WebSocket!", now).unwrap();
+ws.send_text("Hello, WebSocket!").unwrap();
 
 // バイナリメッセージ送信
-conn.send_binary(&[0x01, 0x02, 0x03], now).unwrap();
+ws.send_binary(&[0x01, 0x02, 0x03]).unwrap();
 
 // Ping 送信
-conn.send_ping(&[], now).unwrap();
+ws.send_ping(&[], now()).unwrap();
 
 // 接続を閉じる
+ws.close(CloseCode::NORMAL, "Goodbye").unwrap();
+```
+
+### メッセージ送信 (サーバー)
+
+```rust
 use shiguredo_websocket::CloseCode;
-conn.close(CloseCode::Normal, "Goodbye", now).unwrap();
+
+// テキストメッセージ送信
+ws.send_text("Hello, WebSocket!", now()).unwrap();
+
+// バイナリメッセージ送信
+ws.send_binary(&[0x01, 0x02, 0x03], now()).unwrap();
+
+// Ping 送信
+ws.send_ping(&[], now()).unwrap();
+
+// 接続を閉じる
+ws.close(CloseCode::NORMAL, "Goodbye", now()).unwrap();
 ```
 
 ### フレームの直接操作 (低レベル API)
