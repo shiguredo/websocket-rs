@@ -19,6 +19,9 @@ use crate::websocket_opcode::Opcode;
 use crate::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};
 use shiguredo_http11::Response;
 
+/// デフォルトの最大解凍サイズ（16MB）
+pub const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 16 * 1024 * 1024;
+
 /// サーバー接続オプション
 #[derive(Debug, Clone)]
 pub struct ServerConnectionOptions {
@@ -34,6 +37,8 @@ pub struct ServerConnectionOptions {
     pub pong_timeout_millis: u64,
     /// クローズタイムアウト（ミリ秒）
     pub close_timeout_millis: u64,
+    /// 最大解凍サイズ（Zip Bomb 対策）
+    pub max_decompressed_size: usize,
 }
 
 impl Default for ServerConnectionOptions {
@@ -45,6 +50,7 @@ impl Default for ServerConnectionOptions {
             ping_interval_millis: 30_000, // 30秒
             pong_timeout_millis: 10_000,  // 10秒
             close_timeout_millis: 5_000,  // 5秒
+            max_decompressed_size: DEFAULT_MAX_DECOMPRESSED_SIZE,
         }
     }
 }
@@ -77,6 +83,12 @@ impl ServerConnectionOptions {
     /// Ping 間隔を設定
     pub fn ping_interval(mut self, millis: u64) -> Self {
         self.ping_interval_millis = millis;
+        self
+    }
+
+    /// 最大解凍サイズを設定（Zip Bomb 対策）
+    pub fn max_decompressed_size(mut self, size: usize) -> Self {
+        self.max_decompressed_size = size;
         self
     }
 }
@@ -645,7 +657,7 @@ impl WebSocketServerConnection {
     ) -> Result<Vec<u8>, Error> {
         if compressed {
             if let Some(deflate) = &mut self.deflate {
-                deflate.decompress(&payload)
+                deflate.decompress(&payload, self.options.max_decompressed_size)
             } else {
                 Err(Error::protocol_violation(
                     "received compressed frame without permessage-deflate",

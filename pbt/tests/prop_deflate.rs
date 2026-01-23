@@ -60,6 +60,9 @@ proptest! {
     // =========================================================================
 
     /// Extension ヘッダーのラウンドトリップ
+    ///
+    /// to_extension() は設定に応じて no_context_takeover を含めるため、
+    /// ラウンドトリップ後も設定が保持される。
     #[test]
     fn prop_extension_roundtrip(
         server_bits in prop::option::of(8u8..=15),
@@ -84,6 +87,7 @@ proptest! {
         let ext = config.to_extension();
         let parsed = PerMessageDeflateConfig::from_extension(&ext).unwrap();
 
+        // ラウンドトリップ後は設定が保持される
         prop_assert_eq!(parsed.server_no_context_takeover, server_no_takeover);
         prop_assert_eq!(parsed.client_no_context_takeover, client_no_takeover);
 

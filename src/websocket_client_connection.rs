@@ -83,6 +83,9 @@ pub enum ConnectionOutput {
     CloseConnection,
 }
 
+/// デフォルトの最大解凍サイズ（16MB）
+pub const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 16 * 1024 * 1024;
+
 /// 接続オプション
 #[derive(Debug, Clone)]
 pub struct ClientConnectionOptions {
@@ -104,6 +107,8 @@ pub struct ClientConnectionOptions {
     pub pong_timeout_millis: u64,
     /// クローズタイムアウト（ミリ秒）
     pub close_timeout_millis: u64,
+    /// 最大解凍サイズ（Zip Bomb 対策）
+    pub max_decompressed_size: usize,
 }
 
 impl Default for ClientConnectionOptions {
@@ -118,6 +123,7 @@ impl Default for ClientConnectionOptions {
             ping_interval_millis: 30_000, // 30秒
             pong_timeout_millis: 10_000,  // 10秒
             close_timeout_millis: 5_000,  // 5秒
+            max_decompressed_size: DEFAULT_MAX_DECOMPRESSED_SIZE,
         }
     }
 }
@@ -160,6 +166,12 @@ impl ClientConnectionOptions {
     /// Ping 間隔を設定
     pub fn ping_interval(mut self, millis: u64) -> Self {
         self.ping_interval_millis = millis;
+        self
+    }
+
+    /// 最大解凍サイズを設定（Zip Bomb 対策）
+    pub fn max_decompressed_size(mut self, size: usize) -> Self {
+        self.max_decompressed_size = size;
         self
     }
 }
@@ -750,7 +762,7 @@ impl WebSocketClientConnection {
     ) -> Result<Vec<u8>, Error> {
         if compressed {
             if let Some(deflate) = &mut self.deflate {
-                deflate.decompress(&payload)
+                deflate.decompress(&payload, self.options.max_decompressed_size)
             } else {
                 Err(Error::protocol_violation(
                     "received compressed frame without permessage-deflate",
@@ -840,9 +852,8 @@ impl WebSocketClientConnection {
         self.output_queue.push_back(ConnectionOutput::ClearTimer {
             id: TimerId::PongTimeout,
         });
-        self.output_queue.push_back(ConnectionOutput::ClearTimer {
-            id: TimerId::Ping,
-        });
+        self.output_queue
+            .push_back(ConnectionOutput::ClearTimer { id: TimerId::Ping });
         self.output_queue.push_back(ConnectionOutput::ClearTimer {
             id: TimerId::CloseTimeout,
         });
@@ -1213,5 +1224,53 @@ mod tests {
         let result = conn.feed_recv_buf(&frame, now);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_zip_bomb_protection() {
+        // Zip Bomb 対策のテスト
+        // 最大解凍サイズを小さく設定し、それを超えるデータを送信してエラーになることを確認
+        let options = ClientConnectionOptions::new("example.com", "/chat")
+            .deflate(PerMessageDeflateConfig::new())
+            .max_decompressed_size(100); // 100バイト制限
+        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let now = Timestamp::from_millis(0);
+
+        conn.connect(test_nonce()).unwrap();
+
+        // ハンドシェイク完了
+        let expected_accept = conn.compute_expected_accept();
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: permessage-deflate\r\n\
+             \r\n",
+            expected_accept
+        );
+        conn.feed_recv_buf(response.as_bytes(), now).unwrap();
+
+        // イベントクリア
+        while conn.poll_event().is_some() {}
+
+        // 100バイトを超えるデータを圧縮
+        let mut deflate =
+            crate::deflate::PerMessageDeflate::new_server(PerMessageDeflateConfig::new());
+        let large_data = "A".repeat(200);
+        let compressed = deflate.compress(large_data.as_bytes()).unwrap();
+
+        // 圧縮フレームを構築: FIN=1, RSV1=1, opcode=text(1)
+        let mut frame = vec![0xC1];
+        frame.push(compressed.len() as u8);
+        frame.extend_from_slice(&compressed);
+
+        // 受信処理 - エラーになるはず
+        let result = conn.feed_recv_buf(&frame, now);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // エラーメッセージに "exceeds maximum limit" が含まれていることを確認
+        assert!(format!("{:?}", err).contains("exceeds maximum limit"));
     }
 }

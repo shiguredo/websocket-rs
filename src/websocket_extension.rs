@@ -132,6 +132,8 @@ impl PerMessageDeflateConfig {
     }
 
     /// Sec-WebSocket-Extensions ヘッダー値としてエンコードする
+    ///
+    /// 設定に応じて no_context_takeover パラメータを含める
     pub fn to_extension(&self) -> Extension {
         let mut ext = Extension::new("permessage-deflate");
 
@@ -210,7 +212,8 @@ impl PerMessageDeflateConfig {
 
     /// クライアント要求とサーバー設定をマージして交渉結果を生成
     ///
-    /// RFC 7692 に従い、両者の制約を満たす設定を返す
+    /// RFC 7692 に従い、両者の制約を満たす設定を返す。
+    /// no_context_takeover はどちらかが要求すれば有効になる。
     pub fn negotiate(client_request: &Self, server_config: &Self) -> Self {
         Self {
             // server_max_window_bits: クライアント要求があればそれを尊重（サーバー設定以下に制限）
@@ -233,7 +236,7 @@ impl PerMessageDeflateConfig {
                 (None, Some(server)) => Some(server),
                 (None, None) => None,
             },
-            // no_context_takeover: どちらかが要求すれば有効
+            // RFC 7692: どちらかが要求すれば no_context_takeover が有効
             server_no_context_takeover: client_request.server_no_context_takeover
                 || server_config.server_no_context_takeover,
             client_no_context_takeover: client_request.client_no_context_takeover

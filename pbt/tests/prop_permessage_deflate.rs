@@ -3,16 +3,22 @@ use shiguredo_websocket::{PerMessageDeflate, PerMessageDeflateConfig};
 
 const DEFLATE_TRAILER: [u8; 4] = [0x00, 0x00, 0xFF, 0xFF];
 
+/// テスト用の最大解凍サイズ（16MB）
+const TEST_MAX_DECOMPRESS_SIZE: usize = 16 * 1024 * 1024;
+
 proptest! {
+    /// 圧縮・解凍のラウンドトリップ（クライアント/サーバーペア）
     #[test]
     fn prop_compress_decompress_roundtrip(
         data in prop::collection::vec(any::<u8>(), 0..10000)
     ) {
         let config = PerMessageDeflateConfig::default();
-        let mut codec = PerMessageDeflate::new_client(config);
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = codec.compress(&data).unwrap();
-        let decompressed = codec.decompress(&compressed).unwrap();
+        // クライアント -> サーバー
+        let compressed = client.compress(&data).unwrap();
+        let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
 
         prop_assert_eq!(decompressed, data);
     }
@@ -29,6 +35,7 @@ proptest! {
         prop_assert!(!compressed.ends_with(&DEFLATE_TRAILER));
     }
 
+    /// 繰り返しデータの圧縮効率（クライアント/サーバーペア）
     #[test]
     fn prop_repetitive_data_compresses_well(
         pattern in prop::collection::vec(any::<u8>(), 1..50),
@@ -42,50 +49,59 @@ proptest! {
             .collect();
 
         let config = PerMessageDeflateConfig::default();
-        let mut codec = PerMessageDeflate::new_client(config);
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = codec.compress(&data).unwrap();
+        let compressed = client.compress(&data).unwrap();
 
         if data.len() > 100 {
             prop_assert!(compressed.len() < data.len());
         }
 
-        let decompressed = codec.decompress(&compressed).unwrap();
+        let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
         prop_assert_eq!(decompressed, data);
     }
 
+    /// 圧縮レベルのテスト（no_context_takeover でテスト）
     #[test]
     fn prop_compression_levels_preserve_data(
         data in prop::collection::vec(any::<u8>(), 1..1000),
         level in 0u32..=9
     ) {
-        let config = PerMessageDeflateConfig::default();
-        let mut codec = PerMessageDeflate::new_client(config);
-        codec.set_compression_level(level);
+        let config = PerMessageDeflateConfig::new()
+            .client_no_context_takeover()
+            .server_no_context_takeover();
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
+        client.set_compression_level(level);
 
-        let compressed = codec.compress(&data).unwrap();
-        let decompressed = codec.decompress(&compressed).unwrap();
+        let compressed = client.compress(&data).unwrap();
+        let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
 
         prop_assert_eq!(decompressed, data);
     }
 
+    /// 複数回の圧縮・解凍（クライアント/サーバーペア）
     #[test]
     fn prop_multiple_compress_decompress(
         data in prop::collection::vec(any::<u8>(), 1..500),
         iterations in 2usize..5
     ) {
         let config = PerMessageDeflateConfig::default();
-        let mut codec = PerMessageDeflate::new_client(config);
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
 
         let mut current = data.clone();
         for _ in 0..iterations {
-            let compressed = codec.compress(&current).unwrap();
-            current = codec.decompress(&compressed).unwrap();
+            // クライアント -> サーバー
+            let compressed = client.compress(&current).unwrap();
+            current = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
         }
 
         prop_assert_eq!(current, data);
     }
 
+    /// no_context_takeover の動作確認（クライアント/サーバーペア）
     #[test]
     fn prop_no_context_takeover(
         data in prop::collection::vec(any::<u8>(), 1..500)
@@ -93,14 +109,16 @@ proptest! {
         let config = PerMessageDeflateConfig::new()
             .client_no_context_takeover()
             .server_no_context_takeover();
-        let mut codec = PerMessageDeflate::new_client(config);
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = codec.compress(&data).unwrap();
-        let decompressed = codec.decompress(&compressed).unwrap();
+        let compressed = client.compress(&data).unwrap();
+        let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
 
         prop_assert_eq!(decompressed, data);
     }
 
+    /// window_bits のバリエーション（no_context_takeover でテスト）
     #[test]
     fn prop_window_bits_variations(
         data in prop::collection::vec(any::<u8>(), 1..500),
@@ -109,24 +127,30 @@ proptest! {
     ) {
         let config = PerMessageDeflateConfig::new()
             .server_max_window_bits(server_bits)
-            .client_max_window_bits(client_bits);
-        let mut codec = PerMessageDeflate::new_client(config);
+            .client_max_window_bits(client_bits)
+            .client_no_context_takeover()
+            .server_no_context_takeover();
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = codec.compress(&data).unwrap();
-        let decompressed = codec.decompress(&compressed).unwrap();
+        let compressed = client.compress(&data).unwrap();
+        let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
 
         prop_assert_eq!(decompressed, data);
     }
 
+    /// サーバーコーデックのテスト（クライアント/サーバーペア）
     #[test]
     fn prop_server_codec(
         data in prop::collection::vec(any::<u8>(), 1..500)
     ) {
         let config = PerMessageDeflateConfig::default();
-        let mut codec = PerMessageDeflate::new_server(config);
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = codec.compress(&data).unwrap();
-        let decompressed = codec.decompress(&compressed).unwrap();
+        // サーバー -> クライアント
+        let compressed = server.compress(&data).unwrap();
+        let decompressed = client.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
 
         prop_assert_eq!(decompressed, data);
     }
@@ -143,6 +167,43 @@ proptest! {
         let should = codec.should_compress(&data, threshold);
 
         prop_assert_eq!(should, data_len >= threshold);
+    }
+
+    /// 最大解凍サイズを超えるデータはエラーになることを確認（クライアント/サーバーペア）
+    #[test]
+    fn prop_decompress_max_size_limit(
+        // 1000 バイト以上のデータを生成
+        data in prop::collection::vec(any::<u8>(), 1000..5000)
+    ) {
+        let config = PerMessageDeflateConfig::default();
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
+
+        let compressed = client.compress(&data).unwrap();
+
+        // 元データより小さい上限を設定
+        let small_limit = data.len() / 2;
+        let result = server.decompress(&compressed, small_limit);
+
+        // エラーになることを確認
+        prop_assert!(result.is_err());
+    }
+
+    /// 十分な上限があれば解凍が成功することを確認（クライアント/サーバーペア）
+    #[test]
+    fn prop_decompress_within_limit(
+        data in prop::collection::vec(any::<u8>(), 1..1000)
+    ) {
+        let config = PerMessageDeflateConfig::default();
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
+
+        let compressed = client.compress(&data).unwrap();
+
+        // 元データと同じサイズの上限を設定
+        let result = server.decompress(&compressed, data.len());
+        prop_assert!(result.is_ok());
+        prop_assert_eq!(result.unwrap(), data);
     }
 }
 
@@ -177,5 +238,43 @@ proptest! {
         prop_assert_eq!(retrieved.client_max_window_bits, config.client_max_window_bits);
         prop_assert_eq!(retrieved.server_no_context_takeover, config.server_no_context_takeover);
         prop_assert_eq!(retrieved.client_no_context_takeover, config.client_no_context_takeover);
+    }
+
+    // ==== negotiate() が RFC 7692 に従い no_context_takeover を設定することを確認 ====
+
+    #[test]
+    fn prop_negotiate_or_logic_for_no_context_takeover(
+        client_server_no_takeover in any::<bool>(),
+        client_client_no_takeover in any::<bool>(),
+        server_server_no_takeover in any::<bool>(),
+        server_client_no_takeover in any::<bool>()
+    ) {
+        let mut client_config = PerMessageDeflateConfig::new();
+        let mut server_config = PerMessageDeflateConfig::new();
+
+        if client_server_no_takeover {
+            client_config = client_config.server_no_context_takeover();
+        }
+        if client_client_no_takeover {
+            client_config = client_config.client_no_context_takeover();
+        }
+        if server_server_no_takeover {
+            server_config = server_config.server_no_context_takeover();
+        }
+        if server_client_no_takeover {
+            server_config = server_config.client_no_context_takeover();
+        }
+
+        let negotiated = PerMessageDeflateConfig::negotiate(&client_config, &server_config);
+
+        // RFC 7692: どちらかが要求すれば no_context_takeover が有効
+        prop_assert_eq!(
+            negotiated.server_no_context_takeover,
+            client_server_no_takeover || server_server_no_takeover
+        );
+        prop_assert_eq!(
+            negotiated.client_no_context_takeover,
+            client_client_no_takeover || server_client_no_takeover
+        );
     }
 }
