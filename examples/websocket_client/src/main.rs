@@ -24,7 +24,7 @@ use rustls_platform_verifier::ConfigVerifierExt;
 use shiguredo_http11::uri::Uri;
 use shiguredo_websocket::{
     ClientConnectionOptions, CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState,
-    PerMessageDeflateConfig, Timestamp, WebSocketClientConnection,
+    PerMessageDeflateConfig, RandomSource, Timestamp, WebSocketClientConnection,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -94,18 +94,21 @@ fn now() -> Timestamp {
     Timestamp::from_millis(millis)
 }
 
-/// ハンドシェイク用の nonce を生成
-fn generate_nonce() -> [u8; 16] {
-    let mut nonce = [0u8; 16];
-    getrandom::fill(&mut nonce).expect("failed to generate nonce");
-    nonce
-}
+/// 暗号学的に安全な乱数ソース
+struct SecureRandom;
 
-/// フレームマスキング用のキーを生成
-fn generate_masking_key() -> [u8; 4] {
-    let mut key = [0u8; 4];
-    getrandom::fill(&mut key).expect("failed to generate masking key");
-    key
+impl RandomSource for SecureRandom {
+    fn masking_key(&mut self) -> [u8; 4] {
+        let mut key = [0u8; 4];
+        getrandom::fill(&mut key).expect("failed to generate masking key");
+        key
+    }
+
+    fn nonce(&mut self) -> [u8; 16] {
+        let mut nonce = [0u8; 16];
+        getrandom::fill(&mut nonce).expect("failed to generate nonce");
+        nonce
+    }
 }
 
 fn parse_args() -> Result<ClientOptions, Box<dyn std::error::Error>> {
@@ -297,10 +300,10 @@ async fn main() -> io::Result<()> {
         .deflate(PerMessageDeflateConfig::new());
 
     // WebSocket 接続を作成
-    let mut ws = WebSocketClientConnection::new(options, generate_masking_key);
+    let mut ws = WebSocketClientConnection::new(options, SecureRandom);
 
     // ハンドシェイク開始
-    ws.connect(generate_nonce()).unwrap();
+    ws.connect().unwrap();
 
     // 出力を送信
     while let Some(output) = ws.poll_output() {

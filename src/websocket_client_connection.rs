@@ -14,6 +14,50 @@ use crate::websocket_frame::{Frame, FrameDecoder};
 use crate::websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};
 use crate::websocket_opcode::Opcode;
 
+/// 乱数生成のトレイト
+///
+/// WebSocket クライアントが使用する masking key と nonce を生成するためのトレイト。
+/// ライブラリはこのトレイトのみを提供し、実装は利用者側で行う。
+///
+/// # Example
+///
+/// ```ignore
+/// // 本番環境: 暗号学的に安全な乱数を使用
+/// pub struct SecureRandom;
+///
+/// impl RandomSource for SecureRandom {
+///     fn masking_key(&mut self) -> [u8; 4] {
+///         let mut key = [0u8; 4];
+///         getrandom::fill(&mut key).expect("failed to generate masking key");
+///         key
+///     }
+///
+///     fn nonce(&mut self) -> [u8; 16] {
+///         let mut nonce = [0u8; 16];
+///         getrandom::fill(&mut nonce).expect("failed to generate nonce");
+///         nonce
+///     }
+/// }
+///
+/// // テスト環境: 固定値を使用
+/// pub struct FixedRandom {
+///     pub masking_key: [u8; 4],
+///     pub nonce: [u8; 16],
+/// }
+///
+/// impl RandomSource for FixedRandom {
+///     fn masking_key(&mut self) -> [u8; 4] { self.masking_key }
+///     fn nonce(&mut self) -> [u8; 16] { self.nonce }
+/// }
+/// ```
+pub trait RandomSource: Send {
+    /// masking key (4 bytes) を生成する
+    fn masking_key(&mut self) -> [u8; 4];
+
+    /// nonce (16 bytes) を生成する
+    fn nonce(&mut self) -> [u8; 16];
+}
+
 /// 接続状態
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConnectionState {
@@ -222,7 +266,7 @@ impl FragmentBuffer {
 }
 
 /// WebSocket 接続
-pub struct WebSocketClientConnection {
+pub struct WebSocketClientConnection<R: RandomSource> {
     /// 状態
     state: ConnectionState,
     /// オプション
@@ -260,38 +304,29 @@ pub struct WebSocketClientConnection {
     /// 出力キュー
     output_queue: VecDeque<ConnectionOutput>,
 
-    /// Masking key 生成関数
-    masking_key_generator: Box<dyn FnMut() -> [u8; 4] + Send>,
+    /// 乱数ソース
+    random: R,
 }
 
-impl WebSocketClientConnection {
+impl<R: RandomSource> WebSocketClientConnection<R> {
     /// 新しい接続を作成
     ///
     /// # Arguments
     /// * `options` - 接続オプション
-    /// * `masking_key_generator` - フレームマスキング用の 4 バイト乱数を生成する関数
+    /// * `random` - 乱数ソース（`RandomSource` トレイトを実装した型）
     ///
     /// # Example
     /// ```ignore
-    /// // 本番環境: 真の乱数を使用
-    /// let ws = WebSocketClientConnection::new(options, || {
-    ///     let mut key = [0u8; 4];
-    ///     getrandom::fill(&mut key).unwrap();
-    ///     key
-    /// });
+    /// // 本番環境: 暗号学的に安全な乱数を使用
+    /// let ws = WebSocketClientConnection::new(options, SecureRandom);
     ///
-    /// // テスト環境: 固定シードの PRNG を使用
-    /// let mut rng = StdRng::seed_from_u64(12345);
-    /// let ws = WebSocketClientConnection::new(options, move || {
-    ///     let mut key = [0u8; 4];
-    ///     rng.fill(&mut key);
-    ///     key
+    /// // テスト環境: 固定値を使用
+    /// let ws = WebSocketClientConnection::new(options, FixedRandom {
+    ///     masking_key: [0xAB, 0xCD, 0xEF, 0x12],
+    ///     nonce: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
     /// });
     /// ```
-    pub fn new<F>(options: ClientConnectionOptions, masking_key_generator: F) -> Self
-    where
-        F: FnMut() -> [u8; 4] + Send + 'static,
-    {
+    pub fn new(options: ClientConnectionOptions, random: R) -> Self {
         Self {
             state: ConnectionState::Disconnected,
             options,
@@ -308,7 +343,7 @@ impl WebSocketClientConnection {
             awaiting_pong: false,
             event_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            masking_key_generator: Box::new(masking_key_generator),
+            random,
         }
     }
 
@@ -328,16 +363,13 @@ impl WebSocketClientConnection {
     }
 
     /// 接続を開始
-    ///
-    /// # Arguments
-    /// * `nonce` - ハンドシェイク用の 16 バイト乱数（外部から提供）
-    pub fn connect(&mut self, nonce: [u8; 16]) -> Result<(), Error> {
+    pub fn connect(&mut self) -> Result<(), Error> {
         if self.state != ConnectionState::Disconnected {
             return Err(Error::invalid_state("already connected or connecting"));
         }
 
-        // ハンドシェイク用の nonce を設定
-        self.nonce = nonce;
+        // ハンドシェイク用の nonce を生成
+        self.nonce = self.random.nonce();
 
         // ハンドシェイクリクエストを構築
         let mut request = HandshakeRequest::new(&self.options.path, &self.options.host);
@@ -530,7 +562,7 @@ impl WebSocketClientConnection {
 
     /// フレームを送信（masking_key は自動生成）
     fn send_frame(&mut self, frame: Frame) -> Result<(), Error> {
-        let masking_key = (self.masking_key_generator)();
+        let masking_key = self.random.masking_key();
         let encoded = frame.encode(masking_key);
         self.output_queue
             .push_back(ConnectionOutput::SendData(encoded));
@@ -915,23 +947,38 @@ impl WebSocketClientConnection {
 mod tests {
     use super::*;
 
-    /// テスト用の固定 nonce を生成
-    fn test_nonce() -> [u8; 16] {
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    /// テスト用の固定乱数ソース
+    struct FixedRandom {
+        masking_key: [u8; 4],
+        nonce: [u8; 16],
     }
 
-    /// テスト用の固定 masking_key を生成
-    fn test_masking_key() -> [u8; 4] {
-        [0xAB, 0xCD, 0xEF, 0x12]
+    impl FixedRandom {
+        fn new() -> Self {
+            Self {
+                masking_key: [0xAB, 0xCD, 0xEF, 0x12],
+                nonce: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            }
+        }
+    }
+
+    impl RandomSource for FixedRandom {
+        fn masking_key(&mut self) -> [u8; 4] {
+            self.masking_key
+        }
+
+        fn nonce(&mut self) -> [u8; 16] {
+            self.nonce
+        }
     }
 
     // テスト用ヘルパー: 接続を作成してハンドシェイク完了まで進める
-    fn create_connected_client_connection() -> WebSocketClientConnection {
+    fn create_connected_client_connection() -> WebSocketClientConnection<FixedRandom> {
         let options = ClientConnectionOptions::new("example.com", "/chat");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
 
         // nonce から期待される Accept を計算
         let expected_accept = conn.compute_expected_accept();
@@ -956,16 +1003,16 @@ mod tests {
     #[test]
     fn test_connection_new() {
         let options = ClientConnectionOptions::new("example.com", "/chat");
-        let conn = WebSocketClientConnection::new(options, test_masking_key);
+        let conn = WebSocketClientConnection::new(options, FixedRandom::new());
         assert_eq!(conn.state(), ConnectionState::Disconnected);
     }
 
     #[test]
     fn test_connection_connect() {
         let options = ClientConnectionOptions::new("example.com", "/chat");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
 
         assert_eq!(conn.state(), ConnectionState::Connecting);
 
@@ -992,10 +1039,10 @@ mod tests {
     #[test]
     fn test_connection_handshake() {
         let options = ClientConnectionOptions::new("example.com", "/chat");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
 
         // nonce から期待される Accept を計算
         let expected_accept = conn.compute_expected_accept();
@@ -1106,13 +1153,13 @@ mod tests {
     }
 
     // テスト用ヘルパー: deflate 対応接続を作成してハンドシェイク完了まで進める
-    fn create_connected_client_with_deflate() -> WebSocketClientConnection {
+    fn create_connected_client_with_deflate() -> WebSocketClientConnection<FixedRandom> {
         let options = ClientConnectionOptions::new("example.com", "/chat")
             .deflate(PerMessageDeflateConfig::new());
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
 
         // nonce から期待される Accept を計算
         let expected_accept = conn.compute_expected_accept();
@@ -1233,10 +1280,10 @@ mod tests {
         let options = ClientConnectionOptions::new("example.com", "/chat")
             .deflate(PerMessageDeflateConfig::new())
             .max_decompressed_size(100); // 100バイト制限
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
 
         // ハンドシェイク完了
         let expected_accept = conn.compute_expected_accept();

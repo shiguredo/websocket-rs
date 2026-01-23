@@ -12,7 +12,7 @@ use proptest::prelude::*;
 use sha1::{Digest, Sha1};
 use shiguredo_websocket::{
     ClientConnectionOptions, CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, Frame,
-    Opcode, PerMessageDeflateConfig, TimerId, Timestamp, WebSocketClientConnection,
+    Opcode, PerMessageDeflateConfig, RandomSource, TimerId, Timestamp, WebSocketClientConnection,
 };
 
 /// nonce から Sec-WebSocket-Accept を計算する
@@ -48,24 +48,40 @@ fn create_valid_handshake_response(
     response.into_bytes()
 }
 
-/// テスト用の固定 nonce を生成
-fn test_nonce() -> [u8; 16] {
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+/// テスト用の固定乱数ソース
+struct FixedRandom {
+    masking_key: [u8; 4],
+    nonce: [u8; 16],
 }
 
-/// テスト用の固定 masking_key を生成
-fn test_masking_key() -> [u8; 4] {
-    [0xAB, 0xCD, 0xEF, 0x12]
+impl FixedRandom {
+    fn new() -> Self {
+        Self {
+            masking_key: [0xAB, 0xCD, 0xEF, 0x12],
+            nonce: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        }
+    }
+}
+
+impl RandomSource for FixedRandom {
+    fn masking_key(&mut self) -> [u8; 4] {
+        self.masking_key
+    }
+
+    fn nonce(&mut self) -> [u8; 16] {
+        self.nonce
+    }
 }
 
 /// 接続を作成して Connected 状態まで進める
-fn setup_connected_client() -> (WebSocketClientConnection, Timestamp, [u8; 16]) {
+fn setup_connected_client() -> (WebSocketClientConnection<FixedRandom>, Timestamp, [u8; 16]) {
     let options = ClientConnectionOptions::new("example.com", "/ws");
-    let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+    let random = FixedRandom::new();
+    let nonce = random.nonce;
+    let mut conn = WebSocketClientConnection::new(options, random);
     let now = Timestamp::from_millis(0);
-    let nonce = test_nonce();
 
-    conn.connect(nonce).unwrap();
+    conn.connect().unwrap();
 
     // 出力を消費（ハンドシェイクリクエスト）
     while conn.poll_output().is_some() {}
@@ -149,9 +165,9 @@ proptest! {
     #[test]
     fn prop_connect_changes_state_to_connecting(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
         prop_assert_eq!(conn.state(), ConnectionState::Connecting);
     }
 
@@ -159,9 +175,9 @@ proptest! {
     #[test]
     fn prop_connect_sends_handshake_request(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
 
         let output = conn.poll_output().unwrap();
         match output {
@@ -182,10 +198,10 @@ proptest! {
     #[test]
     fn prop_double_connect_fails(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
 
-        conn.connect(test_nonce()).unwrap();
-        let result = conn.connect(test_nonce());
+        conn.connect().unwrap();
+        let result = conn.connect();
         prop_assert!(result.is_err());
     }
 }
@@ -209,10 +225,10 @@ proptest! {
     ) {
         let options = ClientConnectionOptions::new("example.com", "/ws")
             .protocol(&protocol);
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
 
         // リクエストから nonce を取得
         let output = conn.poll_output().unwrap();
@@ -246,13 +262,16 @@ proptest! {
     #[test]
     fn prop_invalid_accept_fails(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let random = FixedRandom::new();
+        let nonce = random.nonce;
+        let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
         while conn.poll_output().is_some() {}
 
-        // 無効な Accept
+        // 無効な Accept（正しい Accept とは異なる値）
+        let _ = compute_accept(&nonce); // 正しい Accept を計算（使用しない）
         let response = create_valid_handshake_response("invalid_accept", None, None);
         let result = conn.feed_recv_buf(&response, now);
 
@@ -270,11 +289,12 @@ proptest! {
 
         let options = ClientConnectionOptions::new("example.com", "/ws")
             .protocol(&client_protocol);
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let random = FixedRandom::new();
+        let nonce = random.nonce;
+        let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
-        let nonce = test_nonce();
 
-        conn.connect(nonce).unwrap();
+        conn.connect().unwrap();
         while conn.poll_output().is_some() {}
 
         // サーバーがクライアントの要求と異なるプロトコルを返す
@@ -589,7 +609,7 @@ proptest! {
     #[test]
     fn prop_cannot_send_while_disconnected(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
 
         let result = conn.send_text("hello");
         prop_assert!(result.is_err());
@@ -599,9 +619,9 @@ proptest! {
     #[test]
     fn prop_cannot_send_while_connecting(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
         prop_assert_eq!(conn.state(), ConnectionState::Connecting);
 
         let result = conn.send_text("hello");
@@ -614,7 +634,7 @@ proptest! {
     #[test]
     fn prop_feed_to_disconnected_fails(_dummy in Just(())) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
 
         let result = conn.feed_recv_buf(b"data", now);
@@ -819,10 +839,10 @@ proptest! {
         random_data in prop::collection::vec(any::<u8>(), 1..500),
     ) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, test_masking_key);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
 
-        conn.connect(test_nonce()).unwrap();
+        conn.connect().unwrap();
         while conn.poll_output().is_some() {}
 
         // ランダムなレスポンスを送信

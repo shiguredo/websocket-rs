@@ -15,27 +15,32 @@
 //! ```no_run
 //! use shiguredo_websocket::{
 //!     ClientConnectionOptions, ConnectionEvent, ConnectionOutput,
-//!     WebSocketClientConnection, Timestamp,
+//!     RandomSource, WebSocketClientConnection, Timestamp,
 //! };
+//!
+//! // 乱数ソースの実装（実際には getrandom などを使用）
+//! struct DemoRandom {
+//!     counter: u32,
+//! }
+//!
+//! impl RandomSource for DemoRandom {
+//!     fn masking_key(&mut self) -> [u8; 4] {
+//!         self.counter = self.counter.wrapping_add(1);
+//!         self.counter.to_le_bytes()
+//!     }
+//!     fn nonce(&mut self) -> [u8; 16] {
+//!         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+//!     }
+//! }
 //!
 //! // WebSocket 接続オプション
 //! let options = ClientConnectionOptions::new("example.com", "/");
 //!
-//! // Masking key 生成関数（実際には乱数を使用）
-//! let mut counter = 0u32;
-//! let masking_key_generator = move || {
-//!     counter = counter.wrapping_add(1);
-//!     counter.to_le_bytes()
-//! };
-//!
 //! // WebSocket 接続作成
-//! let mut ws = WebSocketClientConnection::new(options, masking_key_generator);
-//!
-//! // ハンドシェイク用の nonce を生成（実際には乱数を使用）
-//! let nonce: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+//! let mut ws = WebSocketClientConnection::new(options, DemoRandom { counter: 0 });
 //!
 //! // 接続開始
-//! ws.connect(nonce).unwrap();
+//! ws.connect().unwrap();
 //!
 //! // 出力データを取得してソケットに送信
 //! while let Some(output) = ws.poll_output() {
@@ -81,8 +86,8 @@ pub use deflate::{Compressor, Decompressor, PerMessageDeflate};
 pub use error::{Error, ErrorKind};
 pub use time::Timestamp;
 pub use websocket_client_connection::{
-    ClientConnectionOptions, ConnectionEvent, ConnectionOutput, ConnectionState, TimerId,
-    WebSocketClientConnection,
+    ClientConnectionOptions, ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource,
+    TimerId, WebSocketClientConnection,
 };
 pub use websocket_close::CloseCode;
 pub use websocket_extension::{Extension, ExtensionParam, PerMessageDeflateConfig};

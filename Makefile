@@ -23,9 +23,6 @@ fuzzing:
 		cargo +nightly fuzz run $$target -- -max_total_time=30 || exit 1; \
 	done
 
-# Fuzzing を実行する
-fuzz: fuzzing
-
 # Fuzzing ターゲット一覧を表示する
 fuzzing-list:
 	cargo fuzz list

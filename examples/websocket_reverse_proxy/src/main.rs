@@ -21,8 +21,8 @@ use rustls_platform_verifier::ConfigVerifierExt;
 use shiguredo_http11::uri::Uri;
 use shiguredo_websocket::{
     ClientConnectionOptions, CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState,
-    PerMessageDeflateConfig, ServerConnectionOptions, Timestamp, WebSocketClientConnection,
-    WebSocketServerConnection,
+    PerMessageDeflateConfig, RandomSource, ServerConnectionOptions, Timestamp,
+    WebSocketClientConnection, WebSocketServerConnection,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -54,18 +54,21 @@ fn now() -> Timestamp {
     Timestamp::from_millis(millis)
 }
 
-/// ハンドシェイク用の nonce を生成
-fn generate_nonce() -> [u8; 16] {
-    let mut nonce = [0u8; 16];
-    getrandom::fill(&mut nonce).expect("failed to generate nonce");
-    nonce
-}
+/// 暗号学的に安全な乱数ソース
+struct SecureRandom;
 
-/// フレームマスキング用のキーを生成
-fn generate_masking_key() -> [u8; 4] {
-    let mut key = [0u8; 4];
-    getrandom::fill(&mut key).expect("failed to generate masking key");
-    key
+impl RandomSource for SecureRandom {
+    fn masking_key(&mut self) -> [u8; 4] {
+        let mut key = [0u8; 4];
+        getrandom::fill(&mut key).expect("failed to generate masking key");
+        key
+    }
+
+    fn nonce(&mut self) -> [u8; 16] {
+        let mut nonce = [0u8; 16];
+        getrandom::fill(&mut nonce).expect("failed to generate nonce");
+        nonce
+    }
 }
 
 fn now_timestamp() -> String {
@@ -443,10 +446,10 @@ where
     );
     let client_options = ClientConnectionOptions::new(&host_header, &options.upstream_path)
         .deflate(PerMessageDeflateConfig::new());
-    let mut upstream_ws = WebSocketClientConnection::new(client_options, generate_masking_key);
+    let mut upstream_ws = WebSocketClientConnection::new(client_options, SecureRandom);
 
     // アップストリームへハンドシェイクを送信
-    upstream_ws.connect(generate_nonce())?;
+    upstream_ws.connect()?;
 
     while let Some(output) = upstream_ws.poll_output() {
         if let ConnectionOutput::SendData(data) = output {
@@ -527,11 +530,11 @@ async fn connect_upstream(
     }
 }
 
-async fn proxy_loop<S>(
+async fn proxy_loop<S, R: RandomSource>(
     client_stream: &mut S,
     client_ws: &mut WebSocketServerConnection,
     upstream_stream: &mut ProxyStream,
-    upstream_ws: &mut WebSocketClientConnection,
+    upstream_ws: &mut WebSocketClientConnection<R>,
     debug: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
@@ -651,9 +654,9 @@ where
     Ok(())
 }
 
-async fn send_output(
+async fn send_output<R: RandomSource>(
     stream: &mut ProxyStream,
-    ws: &mut WebSocketClientConnection,
+    ws: &mut WebSocketClientConnection<R>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     while let Some(output) = ws.poll_output() {
         if let ConnectionOutput::SendData(data) = output {
