@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 shiguredo_websocket = { path = "../.." }
 shiguredo_http11 = { version = "2026.1.0-canary.0" }
-getrandom = "0.3"
+aws-lc-rs = "1.15.4"
 tokio = { version = "1", features = [
     "io-util",
     "macros",
