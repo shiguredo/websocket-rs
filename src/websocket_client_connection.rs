@@ -682,16 +682,39 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         self.negotiated_extensions = response.extensions.clone();
 
         // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
+        // RFC 7692 Section 7.1.2: クライアントがリクエストした拡張に対して
+        // サーバーが不正なレスポンスを返した場合は接続失敗
         for ext_str in &response.extensions {
             let extensions = Extension::parse(ext_str);
             for ext in extensions {
                 if ext.name == "permessage-deflate" {
                     match PerMessageDeflateConfig::from_extension_for_client_response(&ext) {
                         Ok(config) => {
+                            // RFC 7692 Section 7.1.2.2: クライアントが offer していない
+                            // client_max_window_bits をサーバーが含めた場合は拒否
+                            if let Some(deflate_config) = &self.options.deflate_config {
+                                let client_offered_cmwb =
+                                    deflate_config.client_max_window_bits.is_some();
+                                let server_included_cmwb =
+                                    ext.get_param("client_max_window_bits").is_some();
+
+                                if server_included_cmwb && !client_offered_cmwb {
+                                    return Err(Error::handshake_rejected(
+                                        "server included client_max_window_bits without client offer",
+                                    ));
+                                }
+                            }
                             self.deflate = Some(PerMessageDeflate::new_client(config));
                         }
-                        Err(_) => {
-                            // 不正なパラメータは無視して次を試す
+                        Err(e) => {
+                            // クライアントがリクエストした拡張なら接続失敗
+                            if self.options.deflate_config.is_some() {
+                                return Err(Error::handshake_rejected(format!(
+                                    "invalid permessage-deflate response: {:?}",
+                                    e
+                                )));
+                            }
+                            // リクエストしていない拡張は無視
                         }
                     }
                 }
@@ -1342,6 +1365,63 @@ mod tests {
         let result = conn.feed_recv_buf(&frame, now);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reject_unsolicited_client_max_window_bits() {
+        // client_max_window_bits を offer しない deflate 設定でテスト
+        let deflate_config = PerMessageDeflateConfig::new().server_max_window_bits(12);
+        let options = ClientConnectionOptions::new("example.com", "/chat").deflate(deflate_config);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
+        let now = Timestamp::from_millis(0);
+
+        conn.connect().unwrap();
+
+        let expected_accept = conn.compute_expected_accept();
+
+        // サーバーが client_max_window_bits を含めたレスポンス（クライアントは offer していない）
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits=12\r\n\
+             \r\n",
+            expected_accept
+        );
+        let result = conn.feed_recv_buf(response.as_bytes(), now);
+
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("client_max_window_bits without client offer"));
+    }
+
+    #[test]
+    fn test_accept_client_max_window_bits_when_offered() {
+        // client_max_window_bits を offer する deflate 設定でテスト
+        let deflate_config = PerMessageDeflateConfig::new().client_max_window_bits(12);
+        let options = ClientConnectionOptions::new("example.com", "/chat").deflate(deflate_config);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
+        let now = Timestamp::from_millis(0);
+
+        conn.connect().unwrap();
+
+        let expected_accept = conn.compute_expected_accept();
+
+        // サーバーが client_max_window_bits を含めたレスポンス（クライアントも offer している）
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits=10\r\n\
+             \r\n",
+            expected_accept
+        );
+        let result = conn.feed_recv_buf(response.as_bytes(), now);
+
+        assert!(result.is_ok());
+        assert_eq!(conn.state(), ConnectionState::Connected);
     }
 
     #[test]

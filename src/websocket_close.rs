@@ -40,20 +40,26 @@ impl CloseCode {
         self.0
     }
 
-    /// 有効なクローズコードかどうか
+    /// 有効なクローズコードかどうか（受信時の検証用）
     ///
-    /// RFC 6455 Section 7.4.2 によると、0-999 は使用禁止、
-    /// 1000-2999 はプロトコル用、3000-3999 はライブラリ/フレームワーク用、
-    /// 4000-4999 はアプリケーション用
+    /// RFC 6455 Section 7.4.2:
+    /// - 0-999: 使用禁止
+    /// - 5000 以上: RFC で定義されていない
+    ///
+    /// 1004, 1012-2999 は「予約済み」だが、受信時は許容する。
+    /// 1005, 1006, 1015 は送信禁止だが、受信時は有効として扱う。
     pub fn is_valid(self) -> bool {
-        matches!(self.0, 1000..=1003 | 1007..=1011 | 3000..=4999)
+        matches!(self.0, 1000..=4999)
     }
 
     /// このコードを送信可能かどうか
     ///
-    /// 1005, 1006, 1015 は送信禁止
+    /// RFC 6455 Section 7.4.2:
+    /// - 0-999: 使用禁止
+    /// - 1005, 1006, 1015: 送信禁止 (MUST NOT be set as a status code)
+    /// - 5000以上: RFC で定義されていない範囲
     pub fn is_sendable(self) -> bool {
-        !matches!(self.0, 1005 | 1006 | 1015 | 0..=999)
+        !matches!(self.0, 0..=999 | 1005 | 1006 | 1015 | 5000..)
     }
 }
 
@@ -112,8 +118,17 @@ mod tests {
         assert!(CloseCode::new(3000).is_valid());
         assert!(CloseCode::new(4000).is_valid());
         assert!(!CloseCode::new(999).is_valid());
-        assert!(!CloseCode::new(1004).is_valid());
-        assert!(!CloseCode::new(1005).is_valid());
+        // 1004 は予約済みだが、受信時は有効として扱う
+        assert!(CloseCode::new(1004).is_valid());
+        // 1005, 1006, 1015 は送信禁止だが、受信時は有効として扱う
+        assert!(CloseCode::new(1005).is_valid());
+        assert!(CloseCode::new(1006).is_valid());
+        assert!(CloseCode::new(1015).is_valid());
+        // 1012-2999 は予約済みだが、受信時は有効として扱う
+        assert!(CloseCode::new(1012).is_valid());
+        assert!(CloseCode::new(2999).is_valid());
+        // 5000 以上は無効
+        assert!(!CloseCode::new(5000).is_valid());
     }
 
     #[test]

@@ -36,17 +36,21 @@ proptest! {
         prop_assert!(close_code.is_sendable());
     }
 
+    /// 1004 は予約済みだが、受信時は有効として扱う
     #[test]
     fn prop_reserved_1004(_dummy in 0u8..1) {
         let close_code = CloseCode::new(1004);
-        prop_assert!(!close_code.is_valid());
+        prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
     }
 
+    /// 1005, 1006, 1015 は送信禁止だが、受信時は有効
     #[test]
     fn prop_unsendable_codes(code in prop::sample::select(vec![1005u16, 1006, 1015])) {
         let close_code = CloseCode::new(code);
         prop_assert!(!close_code.is_sendable());
+        // 受信時は有効として扱う
+        prop_assert!(close_code.is_valid());
     }
 
     #[test]
@@ -56,11 +60,13 @@ proptest! {
         prop_assert!(close_code.is_sendable());
     }
 
+    /// 1012-2999 は予約済みだが、受信時は有効として扱う
     #[test]
     fn prop_unused_range_1012_2999(code in 1012u16..3000) {
         prop_assume!(code != 1015);
         let close_code = CloseCode::new(code);
-        prop_assert!(!close_code.is_valid());
+        // 受信時は有効として扱う
+        prop_assert!(close_code.is_valid());
         prop_assert!(close_code.is_sendable());
     }
 
@@ -78,11 +84,12 @@ proptest! {
         prop_assert!(close_code.is_sendable());
     }
 
+    /// 5000 以上は RFC で定義されていない範囲のため送信禁止
     #[test]
     fn prop_over_5000(code in 5000u16..=u16::MAX) {
         let close_code = CloseCode::new(code);
         prop_assert!(!close_code.is_valid());
-        prop_assert!(close_code.is_sendable());
+        prop_assert!(!close_code.is_sendable());
     }
 
 }

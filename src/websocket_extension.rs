@@ -78,6 +78,11 @@ impl Extension {
     }
 
     /// Sec-WebSocket-Extensions ヘッダー値をパースする
+    ///
+    /// RFC 6455 Section 9.1 の ABNF に従い、quoted-string もサポートする:
+    /// - `param="value"` → value
+    /// - `param="value with spaces"` → value with spaces
+    /// - `param="escaped\"quote"` → escaped"quote
     pub fn parse(s: &str) -> Vec<Extension> {
         s.split(',')
             .filter_map(|ext| {
@@ -97,9 +102,11 @@ impl Extension {
                         }
 
                         if let Some((name, value)) = p.split_once('=') {
+                            let value = value.trim();
+                            let parsed_value = Self::parse_param_value(value);
                             Some(ExtensionParam {
                                 name: name.trim().to_string(),
-                                value: Some(value.trim().to_string()),
+                                value: Some(parsed_value),
                             })
                         } else {
                             Some(ExtensionParam {
@@ -113,6 +120,55 @@ impl Extension {
                 Some(Extension { name, params })
             })
             .collect()
+    }
+
+    /// パラメータ値をパースする (quoted-string 対応)
+    ///
+    /// RFC 6455 Section 9.1:
+    /// - quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
+    /// - quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
+    fn parse_param_value(value: &str) -> String {
+        // quoted-string の場合
+        if value.starts_with('"') && value.len() >= 2 {
+            let inner = &value[1..];
+            if let Some(end_quote) = Self::find_unescaped_quote(inner) {
+                let quoted_content = &inner[..end_quote];
+                return Self::unescape_quoted_string(quoted_content);
+            }
+        }
+        // token の場合はそのまま返す
+        value.to_string()
+    }
+
+    /// エスケープされていないダブルクォートの位置を探す
+    fn find_unescaped_quote(s: &str) -> Option<usize> {
+        let mut chars = s.char_indices().peekable();
+        while let Some((i, c)) = chars.next() {
+            if c == '\\' {
+                // エスケープシーケンス: 次の文字をスキップ
+                chars.next();
+            } else if c == '"' {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// quoted-string のエスケープを解除する
+    fn unescape_quoted_string(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                // エスケープシーケンス: 次の文字をそのまま追加
+                if let Some(escaped) = chars.next() {
+                    result.push(escaped);
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
     }
 }
 
@@ -317,15 +373,12 @@ impl PerMessageDeflateConfig {
                             config.server_max_window_bits = Some(bits);
                         }
                         None => {
-                            // RFC 7692: クライアントレスポンスでは値が必須
-                            if context == ExtensionParseContext::ClientResponse {
-                                return Err(ExtensionParseError::MissingValue(
-                                    "server_max_window_bits".to_string(),
-                                ));
-                            }
-                            // サーバーリクエストでは値なしは「サーバーに値を選択させる」意味
-                            // デフォルト 15 を設定
-                            config.server_max_window_bits = Some(15);
+                            // RFC 7692 Section 7.1.2.1: server_max_window_bits は
+                            // オファーでもレスポンスでも値が必須
+                            // (client_max_window_bits とは異なり、値なしは許容されない)
+                            return Err(ExtensionParseError::MissingValue(
+                                "server_max_window_bits".to_string(),
+                            ));
                         }
                     }
                 }
@@ -346,7 +399,14 @@ impl PerMessageDeflateConfig {
                         }
                         config.client_max_window_bits = Some(bits);
                     } else {
-                        // 値なしの場合はデフォルト (15) を使用
+                        // RFC 7692 Section 7.1.2.2: クライアントレスポンスでは値が必須
+                        if context == ExtensionParseContext::ClientResponse {
+                            return Err(ExtensionParseError::MissingValue(
+                                "client_max_window_bits".to_string(),
+                            ));
+                        }
+                        // サーバーリクエスト (クライアントのオファー) では
+                        // 値なしは「サーバーに値を選択させる」意味
                         config.client_max_window_bits = Some(15);
                     }
                 }
@@ -391,15 +451,15 @@ impl PerMessageDeflateConfig {
                 (None, Some(server)) => Some(server),
                 (None, None) => None,
             },
-            // client_max_window_bits: サーバー設定があればそれを優先
+            // client_max_window_bits: クライアントが offer した場合のみ含める
+            // RFC 7692: クライアントが offer していなければサーバーは含めてはならない
             client_max_window_bits: match (
                 client_request.client_max_window_bits,
                 server_config.client_max_window_bits,
             ) {
                 (Some(client), Some(server)) => Some(client.min(server)),
                 (Some(client), None) => Some(client),
-                (None, Some(server)) => Some(server),
-                (None, None) => None,
+                (None, _) => None, // クライアントが offer していなければ含めない
             },
             // RFC 7692: どちらかが要求すれば no_context_takeover が有効
             server_no_context_takeover: client_request.server_no_context_takeover
@@ -531,13 +591,59 @@ mod tests {
     }
 
     #[test]
-    fn test_server_request_allows_server_max_window_bits_without_value() {
-        // ServerRequest コンテキストでは server_max_window_bits の値なしは許容
+    fn test_server_request_requires_server_max_window_bits_value() {
+        // RFC 7692 Section 7.1.2.1: server_max_window_bits はオファーでも値が必須
         let ext = Extension::new("permessage-deflate").param("server_max_window_bits", None);
 
         let result = PerMessageDeflateConfig::from_extension_for_server_request(&ext);
+        assert!(matches!(result, Err(ExtensionParseError::MissingValue(_))));
+    }
+
+    #[test]
+    fn test_client_response_requires_client_max_window_bits_value() {
+        // RFC 7692 Section 7.1.2.2: ClientResponse では client_max_window_bits に値が必要
+        let ext = Extension::new("permessage-deflate").param("client_max_window_bits", None);
+
+        let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+        assert!(matches!(result, Err(ExtensionParseError::MissingValue(_))));
+    }
+
+    #[test]
+    fn test_server_request_allows_client_max_window_bits_without_value() {
+        // ServerRequest (クライアントのオファー) では client_max_window_bits の値なしは許容
+        let ext = Extension::new("permessage-deflate").param("client_max_window_bits", None);
+
+        let result = PerMessageDeflateConfig::from_extension_for_server_request(&ext);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().server_max_window_bits, Some(15)); // デフォルト値
+        assert_eq!(result.unwrap().client_max_window_bits, Some(15)); // デフォルト値
+    }
+
+    #[test]
+    fn test_negotiate_does_not_include_cmwb_when_not_offered() {
+        // RFC 7692: クライアントが client_max_window_bits を offer していない場合、
+        // サーバーはレスポンスに含めてはならない
+        let client = PerMessageDeflateConfig::new().server_max_window_bits(12);
+        let server = PerMessageDeflateConfig::new().client_max_window_bits(10);
+        let result = PerMessageDeflateConfig::negotiate(&client, &server);
+        assert!(result.client_max_window_bits.is_none());
+    }
+
+    #[test]
+    fn test_negotiate_includes_cmwb_when_offered() {
+        // クライアントが client_max_window_bits を offer した場合は含める
+        let client = PerMessageDeflateConfig::new().client_max_window_bits(12);
+        let server = PerMessageDeflateConfig::new().client_max_window_bits(10);
+        let result = PerMessageDeflateConfig::negotiate(&client, &server);
+        assert_eq!(result.client_max_window_bits, Some(10)); // サーバー設定の方が小さい
+    }
+
+    #[test]
+    fn test_negotiate_cmwb_only_from_client() {
+        // クライアントのみが offer した場合
+        let client = PerMessageDeflateConfig::new().client_max_window_bits(12);
+        let server = PerMessageDeflateConfig::new();
+        let result = PerMessageDeflateConfig::negotiate(&client, &server);
+        assert_eq!(result.client_max_window_bits, Some(12));
     }
 
     #[test]
@@ -574,5 +680,52 @@ mod tests {
 
         let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
         assert!(matches!(result, Err(ExtensionParseError::NotDeflate)));
+    }
+
+    // === RFC 6455 Section 9.1 quoted-string テスト ===
+
+    #[test]
+    fn test_parse_quoted_string_value() {
+        // quoted-string: param="value"
+        let extensions = Extension::parse(r#"ext; param="quoted value""#);
+        assert_eq!(extensions.len(), 1);
+        assert_eq!(extensions[0].params[0].name, "param");
+        assert_eq!(
+            extensions[0].params[0].value,
+            Some("quoted value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_quoted_string_with_escape() {
+        // quoted-pair: \"
+        let extensions = Extension::parse(r#"ext; param="value with \"quote\"!""#);
+        assert_eq!(extensions.len(), 1);
+        assert_eq!(
+            extensions[0].params[0].value,
+            Some(r#"value with "quote"!"#.to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_quoted_string_with_escaped_backslash() {
+        // quoted-pair: \\
+        let extensions = Extension::parse(r#"ext; param="path\\to\\file""#);
+        assert_eq!(extensions.len(), 1);
+        assert_eq!(
+            extensions[0].params[0].value,
+            Some(r#"path\to\file"#.to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_unquoted_token_unchanged() {
+        // token はそのまま
+        let extensions = Extension::parse("ext; param=simplevalue");
+        assert_eq!(extensions.len(), 1);
+        assert_eq!(
+            extensions[0].params[0].value,
+            Some("simplevalue".to_string())
+        );
     }
 }
