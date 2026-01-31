@@ -46,7 +46,7 @@ proptest! {
         data in prop::collection::vec(any::<u8>(), 0..125),
         masking_key in any::<[u8; 4]>()
     ) {
-        let frame = Frame::ping(data.clone());
+        let frame = Frame::ping(data.clone()).unwrap();
         let encoded = frame.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
@@ -64,7 +64,7 @@ proptest! {
         data in prop::collection::vec(any::<u8>(), 0..125),
         masking_key in any::<[u8; 4]>()
     ) {
-        let frame = Frame::pong(data.clone());
+        let frame = Frame::pong(data.clone()).unwrap();
         let encoded = frame.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
@@ -90,7 +90,7 @@ proptest! {
         reason in "[a-zA-Z0-9 ]{0,50}",  // ASCII のみで50文字以下
         masking_key in any::<[u8; 4]>()
     ) {
-        let frame = Frame::close(Some(code), &reason);
+        let frame = Frame::close(Some(code), &reason).unwrap();
         let encoded = frame.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();

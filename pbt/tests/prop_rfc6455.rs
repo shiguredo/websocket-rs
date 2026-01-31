@@ -414,8 +414,8 @@ proptest! {
     ) {
         let text_frame = Frame::text(String::from_utf8_lossy(&payload).as_ref());
         let binary_frame = Frame::binary(payload.clone());
-        let ping_frame = Frame::ping(if payload.len() > 125 { payload[..125].to_vec() } else { payload.clone() });
-        let pong_frame = Frame::pong(if payload.len() > 125 { payload[..125].to_vec() } else { payload });
+        let ping_frame = Frame::ping(if payload.len() > 125 { payload[..125].to_vec() } else { payload.clone() }).unwrap();
+        let pong_frame = Frame::pong(if payload.len() > 125 { payload[..125].to_vec() } else { payload }).unwrap();
 
         let text_encoded = text_frame.encode(masking_key);
         let binary_encoded = binary_frame.encode(masking_key);
@@ -568,7 +568,7 @@ proptest! {
         data in prop::collection::vec(any::<u8>(), 0..125),
         masking_key in any::<[u8; 4]>()
     ) {
-        let ping = Frame::ping(data.clone());
+        let ping = Frame::ping(data.clone()).unwrap();
         let encoded = ping.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
@@ -585,9 +585,9 @@ proptest! {
         data in prop::collection::vec(any::<u8>(), 0..50),
         masking_key in any::<[u8; 4]>()
     ) {
-        let ping = Frame::ping(data.clone());
-        let pong = Frame::pong(data.clone());
-        let close = Frame::close(Some(1000), "");
+        let ping = Frame::ping(data.clone()).unwrap();
+        let pong = Frame::pong(data.clone()).unwrap();
+        let close = Frame::close(Some(1000), "").unwrap();
 
         let ping_encoded = ping.encode(masking_key);
         let pong_encoded = pong.encode(masking_key);
@@ -610,7 +610,7 @@ proptest! {
         reason in "[a-zA-Z0-9 ]{0,50}",
         masking_key in any::<[u8; 4]>()
     ) {
-        let close = Frame::close(Some(code), &reason);
+        let close = Frame::close(Some(code), &reason).unwrap();
         let encoded = close.encode(masking_key);
 
         prop_assert_eq!(encoded[0] & 0x0F, 0x08);
@@ -627,7 +627,7 @@ proptest! {
         reason in "[a-zA-Z0-9]{0,100}",
         masking_key in any::<[u8; 4]>()
     ) {
-        let close = Frame::close(Some(code), &reason);
+        let close = Frame::close(Some(code), &reason).unwrap();
         let encoded = close.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
@@ -649,7 +649,7 @@ proptest! {
     /// Section 5.5.1: Close フレームはコードなしも可能
     #[test]
     fn prop_section_5_5_1_close_without_code(masking_key in any::<[u8; 4]>()) {
-        let close = Frame::close(None, "");
+        let close = Frame::close(None, "").unwrap();
         let encoded = close.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
@@ -665,7 +665,7 @@ proptest! {
         data in prop::collection::vec(any::<u8>(), 0..50),
         masking_key in any::<[u8; 4]>()
     ) {
-        let ping = Frame::ping(data);
+        let ping = Frame::ping(data).unwrap();
         let encoded = ping.encode(masking_key);
 
         prop_assert_eq!(encoded[0] & 0x0F, 0x09);
@@ -677,10 +677,32 @@ proptest! {
         data in prop::collection::vec(any::<u8>(), 0..50),
         masking_key in any::<[u8; 4]>()
     ) {
-        let pong = Frame::pong(data);
+        let pong = Frame::pong(data).unwrap();
         let encoded = pong.encode(masking_key);
 
         prop_assert_eq!(encoded[0] & 0x0F, 0x0A);
+    }
+
+    /// Section 5.5: コントロールフレームのペイロードは 125 バイトより大きい場合はエラー
+    #[test]
+    fn prop_section_5_5_control_frame_rejects_over_125_bytes(
+        extra_len in 1usize..100
+    ) {
+        let data = vec![0x42; 125 + extra_len];
+
+        // Ping は 126 バイト以上でエラー
+        prop_assert!(Frame::ping(data.clone()).is_err());
+        // Pong も同様
+        prop_assert!(Frame::pong(data).is_err());
+    }
+
+    /// Section 5.5.1: Close フレームの理由は 123 バイトより大きい場合はエラー
+    #[test]
+    fn prop_section_5_5_1_close_reason_rejects_over_123_bytes(
+        extra_len in 1usize..50
+    ) {
+        let reason = "a".repeat(123 + extra_len);
+        prop_assert!(Frame::close(Some(1000), &reason).is_err());
     }
 }
 
@@ -1089,5 +1111,70 @@ proptest! {
         prop_assert_eq!(response.protocol, Some(protocol));
         prop_assert_eq!(response.extensions, vec![extension]);
         prop_assert_eq!(response.additional_headers.len(), 1);
+    }
+}
+
+// =============================================================================
+// RFC 6455 Section 5.2: 最小表現チェックのテスト
+// =============================================================================
+
+proptest! {
+    /// Section 5.2: 16 ビット表現で 126 未満のペイロード長は拒否される
+    #[test]
+    fn prop_section_5_2_reject_non_minimal_16bit(
+        len in 0usize..126
+    ) {
+        // 手動で不正なフレームを構築: mask=0, length=126 (16-bit), actual=len
+        let mut invalid_frame = vec![
+            0x82,       // FIN + Binary
+            0x7E,       // 126 = 16-bit length follows
+        ];
+        invalid_frame.extend_from_slice(&(len as u16).to_be_bytes());
+        invalid_frame.extend(vec![0x00; len]);
+
+        let mut decoder = FrameDecoder::new();
+        decoder.feed(&invalid_frame);
+        let result = decoder.decode();
+
+        prop_assert!(result.is_err());
+    }
+
+    /// Section 5.2: 64 ビット表現で 65535 以下のペイロード長は拒否される
+    #[test]
+    fn prop_section_5_2_reject_non_minimal_64bit(
+        len in 0usize..65536
+    ) {
+        // 手動で不正なフレームを構築: mask=0, length=127 (64-bit), actual=len
+        let mut invalid_frame = vec![
+            0x82, // FIN + Binary
+            0x7F, // 127 = 64-bit length follows
+        ];
+        invalid_frame.extend_from_slice(&(len as u64).to_be_bytes());
+        invalid_frame.extend(vec![0x00; len]);
+
+        let mut decoder = FrameDecoder::new();
+        decoder.feed(&invalid_frame);
+        let result = decoder.decode();
+
+        prop_assert!(result.is_err());
+    }
+
+    /// Section 5.2: 正しい最小表現は受け入れられる
+    #[test]
+    fn prop_section_5_2_accept_minimal_encoding(
+        len in 0usize..1000,
+        masking_key in any::<[u8; 4]>()
+    ) {
+        let payload = vec![0xAB; len];
+        let frame = Frame::binary(payload.clone());
+        let encoded = frame.encode(masking_key);
+
+        let mut decoder = FrameDecoder::new();
+        decoder.feed(&encoded);
+        let result = decoder.decode();
+
+        prop_assert!(result.is_ok());
+        let decoded = result.unwrap().unwrap();
+        prop_assert_eq!(decoded.payload.len(), len);
     }
 }

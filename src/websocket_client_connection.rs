@@ -457,10 +457,12 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     }
 
     /// Ping を送信
+    ///
+    /// RFC 6455 Section 5.5: data は 125 バイト以下でなければならない
     pub fn send_ping(&mut self, data: &[u8], now: Timestamp) -> Result<(), Error> {
         self.check_connected()?;
 
-        let frame = Frame::ping(data.to_vec());
+        let frame = Frame::ping(data.to_vec())?;
         self.send_frame(frame)?;
 
         self.last_ping_time = Some(now);
@@ -476,13 +478,24 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     }
 
     /// 接続をクローズ
+    ///
+    /// RFC 6455 Section 7.4.1: 送信禁止のクローズコード (1005, 1006, 1015) は拒否される
+    /// RFC 6455 Section 5.5: reason は 123 バイト以下でなければならない
     pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
         if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
             return Err(Error::invalid_state("connection is already closed"));
         }
 
+        // RFC 6455 Section 7.4.1: 送信禁止のクローズコードをチェック
+        if !code.is_sendable() {
+            return Err(Error::invalid_input(format!(
+                "close code {} is not sendable",
+                code.as_u16()
+            )));
+        }
+
         if !self.close_sent {
-            let frame = Frame::close(Some(code.as_u16()), reason);
+            let frame = Frame::close(Some(code.as_u16()), reason)?;
             self.send_frame(frame)?;
             self.close_sent = true;
 
@@ -570,13 +583,22 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     }
 
     /// 内部エラー処理用のクローズ
+    ///
+    /// 理由が長すぎる場合は切り詰める
     fn close_internal(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
         if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
             return Ok(());
         }
 
         if !self.close_sent {
-            let frame = Frame::close(Some(code.as_u16()), reason);
+            // 理由が長すぎる場合は切り詰める
+            let truncated_reason = if reason.len() > 123 {
+                &reason[..123]
+            } else {
+                reason
+            };
+            let frame = Frame::close(Some(code.as_u16()), truncated_reason)
+                .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").unwrap());
             self.send_frame(frame)?;
             self.close_sent = true;
 
@@ -663,10 +685,15 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         for ext_str in &response.extensions {
             let extensions = Extension::parse(ext_str);
             for ext in extensions {
-                if ext.name == "permessage-deflate"
-                    && let Some(config) = PerMessageDeflateConfig::from_extension(&ext)
-                {
-                    self.deflate = Some(PerMessageDeflate::new_client(config));
+                if ext.name == "permessage-deflate" {
+                    match PerMessageDeflateConfig::from_extension_for_client_response(&ext) {
+                        Ok(config) => {
+                            self.deflate = Some(PerMessageDeflate::new_client(config));
+                        }
+                        Err(_) => {
+                            // 不正なパラメータは無視して次を試す
+                        }
+                    }
                 }
             }
         }
@@ -706,6 +733,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     ) -> Result<(), Error> {
         // RFC 6455 Section 5.1: サーバーからのフレームはマスクしてはならない
         if decoded.masked {
+            self.close_internal(CloseCode::PROTOCOL_ERROR, "masked server frame")?;
             return Err(Error::protocol_violation("masked server frame"));
         }
         self.handle_frame(decoded.frame, now)
@@ -714,23 +742,36 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     fn handle_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
         // RSV ビットチェック（permessage-deflate 以外は禁止）
         if frame.rsv2 || frame.rsv3 {
+            self.close_internal(CloseCode::PROTOCOL_ERROR, "reserved bits set")?;
             return Err(Error::protocol_violation("reserved bits set"));
         }
         // RFC 7692 Section 6: RSV1 検証
         if frame.rsv1 {
             if self.deflate.is_none() {
+                self.close_internal(
+                    CloseCode::PROTOCOL_ERROR,
+                    "rsv1 set without permessage-deflate",
+                )?;
                 return Err(Error::protocol_violation(
                     "rsv1 set without permessage-deflate",
                 ));
             }
             // コントロールフレームでは RSV1=0 必須
             if frame.opcode.is_control() {
+                self.close_internal(
+                    CloseCode::PROTOCOL_ERROR,
+                    "rsv1 must not be set on control frames",
+                )?;
                 return Err(Error::protocol_violation(
                     "rsv1 must not be set on control frames",
                 ));
             }
             // 継続フレームでは RSV1=0 必須
             if frame.opcode == Opcode::Continuation {
+                self.close_internal(
+                    CloseCode::PROTOCOL_ERROR,
+                    "rsv1 must not be set on continuation frames",
+                )?;
                 return Err(Error::protocol_violation(
                     "rsv1 must not be set on continuation frames",
                 ));
@@ -751,6 +792,10 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     fn handle_data_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
         // RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
         if !self.fragment_buffer.is_empty() {
+            self.close_internal(
+                CloseCode::PROTOCOL_ERROR,
+                "new message started before previous completed",
+            )?;
             return Err(Error::protocol_violation(
                 "new message started before previous completed",
             ));
@@ -770,6 +815,10 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
     fn handle_continuation(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
         if self.fragment_buffer.is_empty() {
+            self.close_internal(
+                CloseCode::PROTOCOL_ERROR,
+                "continuation frame without initial frame",
+            )?;
             return Err(Error::protocol_violation(
                 "continuation frame without initial frame",
             ));
@@ -796,6 +845,10 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             if let Some(deflate) = &mut self.deflate {
                 deflate.decompress(&payload, self.options.max_decompressed_size)
             } else {
+                self.close_internal(
+                    CloseCode::PROTOCOL_ERROR,
+                    "received compressed frame without permessage-deflate",
+                )?;
                 Err(Error::protocol_violation(
                     "received compressed frame without permessage-deflate",
                 ))
@@ -841,6 +894,10 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
         // RFC 6455 Section 5.5.1: ペイロード長は 0 または 2 以上でなければならない
         if frame.payload.len() == 1 {
+            self.close_internal(
+                CloseCode::PROTOCOL_ERROR,
+                "close frame payload length must be 0 or >= 2",
+            )?;
             return Err(Error::protocol_violation(
                 "close frame payload length must be 0 or >= 2",
             ));
@@ -852,6 +909,10 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
             // RFC 6455 Section 7.4.1: クローズコードの妥当性検証
             if !close_code.is_valid() {
+                self.close_internal(
+                    CloseCode::PROTOCOL_ERROR,
+                    &format!("invalid close code: {}", code_val),
+                )?;
                 return Err(Error::protocol_violation(format!(
                     "invalid close code: {}",
                     code_val
@@ -859,8 +920,18 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             }
 
             // RFC 6455 Section 5.5.1: 理由は有効な UTF-8 でなければならない
-            let reason = String::from_utf8(frame.payload[2..].to_vec())
-                .map_err(|_| Error::protocol_violation("close frame reason is not valid UTF-8"))?;
+            let reason = match String::from_utf8(frame.payload[2..].to_vec()) {
+                Ok(r) => r,
+                Err(_) => {
+                    self.close_internal(
+                        CloseCode::PROTOCOL_ERROR,
+                        "close frame reason is not valid UTF-8",
+                    )?;
+                    return Err(Error::protocol_violation(
+                        "close frame reason is not valid UTF-8",
+                    ));
+                }
+            };
 
             (Some(close_code), reason)
         } else {
@@ -873,7 +944,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         if !self.close_sent {
             // クローズフレームを返送
             let reply_code = code.map(|c| c.as_u16()).unwrap_or(1000);
-            let reply_frame = Frame::close(Some(reply_code), "");
+            let reply_frame = Frame::close(Some(reply_code), "")?;
             self.send_frame(reply_frame)?;
             self.close_sent = true;
         }
@@ -905,8 +976,8 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         self.event_queue
             .push_back(ConnectionEvent::Ping(frame.payload.clone()));
 
-        // Pong を自動返信
-        let pong = Frame::pong(frame.payload);
+        // Pong を自動返信（受信した Ping のペイロードをそのまま返すので 125 バイト以下は保証される）
+        let pong = Frame::pong(frame.payload)?;
         self.send_frame(pong)?;
 
         Ok(())
@@ -1319,5 +1390,77 @@ mod tests {
         let err = result.unwrap_err();
         // エラーメッセージに "exceeds maximum limit" が含まれていることを確認
         assert!(format!("{:?}", err).contains("exceeds maximum limit"));
+    }
+
+    // === RFC 6455 準拠テスト ===
+
+    #[test]
+    fn test_close_rejects_unsendable_code() {
+        let mut conn = create_connected_client_connection();
+
+        // 1005 (NO_STATUS_RECEIVED) は送信禁止
+        let result = conn.close(CloseCode::NO_STATUS_RECEIVED, "");
+        assert!(result.is_err());
+
+        // 1006 (ABNORMAL_CLOSURE) は送信禁止
+        let mut conn = create_connected_client_connection();
+        let result = conn.close(CloseCode::ABNORMAL_CLOSURE, "");
+        assert!(result.is_err());
+
+        // 1015 (TLS_HANDSHAKE) は送信禁止
+        let mut conn = create_connected_client_connection();
+        let result = conn.close(CloseCode::TLS_HANDSHAKE, "");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_close_accepts_sendable_code() {
+        let mut conn = create_connected_client_connection();
+
+        // 1000 (NORMAL) は送信可能
+        let result = conn.close(CloseCode::NORMAL, "goodbye");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_close_rejects_long_reason() {
+        let mut conn = create_connected_client_connection();
+
+        // 124 バイトの理由は NG
+        let long_reason = "a".repeat(124);
+        let result = conn.close(CloseCode::NORMAL, &long_reason);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_close_accepts_max_reason_length() {
+        let mut conn = create_connected_client_connection();
+
+        // 123 バイトの理由は OK
+        let max_reason = "a".repeat(123);
+        let result = conn.close(CloseCode::NORMAL, &max_reason);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_send_ping_rejects_long_payload() {
+        let mut conn = create_connected_client_connection();
+        let now = Timestamp::from_millis(0);
+
+        // 126 バイトは NG
+        let long_payload = vec![0x42; 126];
+        let result = conn.send_ping(&long_payload, now);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_send_ping_accepts_max_payload() {
+        let mut conn = create_connected_client_connection();
+        let now = Timestamp::from_millis(0);
+
+        // 125 バイトは OK
+        let max_payload = vec![0x42; 125];
+        let result = conn.send_ping(&max_payload, now);
+        assert!(result.is_ok());
     }
 }

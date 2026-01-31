@@ -394,7 +394,7 @@ proptest! {
     ) {
         let (mut conn, now, _) = setup_connected_client();
 
-        let ping = Frame::ping(data.clone()).encode_unmasked();
+        let ping = Frame::ping(data.clone()).unwrap().encode_unmasked();
         conn.feed_recv_buf(&ping, now).unwrap();
 
         // Ping イベントが発生
@@ -431,7 +431,7 @@ proptest! {
         while conn.poll_output().is_some() {}
 
         // Pong を受信
-        let pong = Frame::pong(data.clone()).encode_unmasked();
+        let pong = Frame::pong(data.clone()).unwrap().encode_unmasked();
         conn.feed_recv_buf(&pong, now).unwrap();
 
         // Pong イベントが発生
@@ -468,7 +468,7 @@ proptest! {
     ) {
         let (mut conn, now, _) = setup_connected_client();
 
-        let close = Frame::close(Some(code), &reason).encode_unmasked();
+        let close = Frame::close(Some(code), &reason).unwrap().encode_unmasked();
         conn.feed_recv_buf(&close, now).unwrap();
 
         // Close イベントが発生
@@ -519,7 +519,7 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // コードなしの Close フレーム
-        let close = Frame::close(None, "").encode_unmasked();
+        let close = Frame::close(None, "").unwrap().encode_unmasked();
         conn.feed_recv_buf(&close, now).unwrap();
 
         let mut found = false;
@@ -647,7 +647,7 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // Close フレームを送受信
-        let close = Frame::close(Some(1000), "").encode_unmasked();
+        let close = Frame::close(Some(1000), "").unwrap().encode_unmasked();
         conn.feed_recv_buf(&close, now).unwrap();
 
         prop_assert_eq!(conn.state(), ConnectionState::Closed);

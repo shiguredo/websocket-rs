@@ -55,15 +55,15 @@ fn create_masked_binary_frame(data: &[u8], mask_key: [u8; 4]) -> Vec<u8> {
 }
 
 fn create_masked_ping_frame(data: &[u8], mask_key: [u8; 4]) -> Vec<u8> {
-    Frame::ping(data.to_vec()).encode(mask_key)
+    Frame::ping(data.to_vec()).unwrap().encode(mask_key)
 }
 
 fn create_masked_pong_frame(data: &[u8], mask_key: [u8; 4]) -> Vec<u8> {
-    Frame::pong(data.to_vec()).encode(mask_key)
+    Frame::pong(data.to_vec()).unwrap().encode(mask_key)
 }
 
 fn create_masked_close_frame(code: Option<u16>, reason: &str, mask_key: [u8; 4]) -> Vec<u8> {
-    Frame::close(code, reason).encode(mask_key)
+    Frame::close(code, reason).unwrap().encode(mask_key)
 }
 
 // ==== ServerConnectionOptions のテスト ====

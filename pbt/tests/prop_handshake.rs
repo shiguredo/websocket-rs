@@ -81,7 +81,8 @@ proptest! {
         }
 
         let ext = config.to_extension();
-        let parsed = PerMessageDeflateConfig::from_extension(&ext).unwrap();
+        // サーバーリクエストとしてパース（クライアントからの要求）
+        let parsed = PerMessageDeflateConfig::from_extension_for_server_request(&ext).unwrap();
 
         // ラウンドトリップ後は設定が保持される
         prop_assert_eq!(parsed.server_no_context_takeover, server_no_takeover);

@@ -1,8 +1,36 @@
+use std::collections::HashSet;
+
 /// WebSocket 拡張パラメータ
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionParam {
     pub name: String,
     pub value: Option<String>,
+}
+
+/// 拡張パースのコンテキスト
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtensionParseContext {
+    /// クライアントがサーバーレスポンスをパースする
+    ClientResponse,
+    /// サーバーがクライアントリクエストをパースする
+    ServerRequest,
+}
+
+/// 拡張パースエラー
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtensionParseError {
+    /// 拡張名が permessage-deflate ではない
+    NotDeflate,
+    /// 未定義のパラメータ
+    UnknownParameter(String),
+    /// 重複したパラメータ
+    DuplicateParameter(String),
+    /// 値が必要なパラメータに値がない
+    MissingValue(String),
+    /// 値が不要なパラメータに値がある
+    UnexpectedValue(String),
+    /// 値が不正（範囲外など）
+    InvalidValue(String),
 }
 
 /// WebSocket 拡張ネゴシエーション結果
@@ -159,6 +187,13 @@ impl PerMessageDeflateConfig {
     /// Extension からパースする
     ///
     /// RFC 7692 に従い、8-15 範囲外の window_bits 値は拒否する
+    ///
+    /// # Deprecated
+    /// この関数は検証が不十分なため、`from_extension_validated` を使用してください。
+    #[deprecated(
+        since = "0.3.0",
+        note = "use from_extension_for_client_response or from_extension_for_server_request instead"
+    )]
     pub fn from_extension(ext: &Extension) -> Option<Self> {
         if ext.name != "permessage-deflate" {
             return None;
@@ -208,6 +243,136 @@ impl PerMessageDeflateConfig {
         }
 
         Some(config)
+    }
+
+    /// Extension からパースする（検証付き）
+    ///
+    /// RFC 7692 に従い、パラメータの妥当性を検証する。
+    /// コンテキストに応じて異なる検証ルールを適用する。
+    pub fn from_extension_validated(
+        ext: &Extension,
+        context: ExtensionParseContext,
+    ) -> Result<Self, ExtensionParseError> {
+        if ext.name != "permessage-deflate" {
+            return Err(ExtensionParseError::NotDeflate);
+        }
+
+        let mut config = Self::default();
+        let mut seen_params = HashSet::new();
+
+        // 有効なパラメータ名
+        const VALID_PARAMS: &[&str] = &[
+            "server_no_context_takeover",
+            "client_no_context_takeover",
+            "server_max_window_bits",
+            "client_max_window_bits",
+        ];
+
+        for param in &ext.params {
+            // 未定義パラメータをチェック
+            if !VALID_PARAMS.contains(&param.name.as_str()) {
+                return Err(ExtensionParseError::UnknownParameter(param.name.clone()));
+            }
+
+            // 重複パラメータをチェック
+            if !seen_params.insert(param.name.clone()) {
+                return Err(ExtensionParseError::DuplicateParameter(param.name.clone()));
+            }
+
+            match param.name.as_str() {
+                "server_no_context_takeover" => {
+                    // RFC 7692: このパラメータは値を持ってはならない
+                    if param.value.is_some() {
+                        return Err(ExtensionParseError::UnexpectedValue(
+                            "server_no_context_takeover".to_string(),
+                        ));
+                    }
+                    config.server_no_context_takeover = true;
+                }
+                "client_no_context_takeover" => {
+                    // RFC 7692: このパラメータは値を持ってはならない
+                    if param.value.is_some() {
+                        return Err(ExtensionParseError::UnexpectedValue(
+                            "client_no_context_takeover".to_string(),
+                        ));
+                    }
+                    config.client_no_context_takeover = true;
+                }
+                "server_max_window_bits" => {
+                    match &param.value {
+                        Some(value) => {
+                            let bits = value.parse::<u8>().map_err(|_| {
+                                ExtensionParseError::InvalidValue(format!(
+                                    "server_max_window_bits: invalid value '{}'",
+                                    value
+                                ))
+                            })?;
+                            // RFC 7692: 8-15 の範囲外は拒否
+                            if !(8..=15).contains(&bits) {
+                                return Err(ExtensionParseError::InvalidValue(format!(
+                                    "server_max_window_bits: {} is out of range (8-15)",
+                                    bits
+                                )));
+                            }
+                            config.server_max_window_bits = Some(bits);
+                        }
+                        None => {
+                            // RFC 7692: クライアントレスポンスでは値が必須
+                            if context == ExtensionParseContext::ClientResponse {
+                                return Err(ExtensionParseError::MissingValue(
+                                    "server_max_window_bits".to_string(),
+                                ));
+                            }
+                            // サーバーリクエストでは値なしは「サーバーに値を選択させる」意味
+                            // デフォルト 15 を設定
+                            config.server_max_window_bits = Some(15);
+                        }
+                    }
+                }
+                "client_max_window_bits" => {
+                    if let Some(value) = &param.value {
+                        let bits = value.parse::<u8>().map_err(|_| {
+                            ExtensionParseError::InvalidValue(format!(
+                                "client_max_window_bits: invalid value '{}'",
+                                value
+                            ))
+                        })?;
+                        // RFC 7692: 8-15 の範囲外は拒否
+                        if !(8..=15).contains(&bits) {
+                            return Err(ExtensionParseError::InvalidValue(format!(
+                                "client_max_window_bits: {} is out of range (8-15)",
+                                bits
+                            )));
+                        }
+                        config.client_max_window_bits = Some(bits);
+                    } else {
+                        // 値なしの場合はデフォルト (15) を使用
+                        config.client_max_window_bits = Some(15);
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(config)
+    }
+
+    /// クライアントがサーバーレスポンスをパースする
+    ///
+    /// サーバーからのレスポンスをパースする際に使用する。
+    /// より厳格な検証を行い、RFC 7692 に準拠していないレスポンスを拒否する。
+    pub fn from_extension_for_client_response(
+        ext: &Extension,
+    ) -> Result<Self, ExtensionParseError> {
+        Self::from_extension_validated(ext, ExtensionParseContext::ClientResponse)
+    }
+
+    /// サーバーがクライアントリクエストをパースする
+    ///
+    /// クライアントからのリクエストをパースする際に使用する。
+    /// クライアントリクエストでは一部のパラメータで値なしが許容される。
+    pub fn from_extension_for_server_request(ext: &Extension) -> Result<Self, ExtensionParseError> {
+        Self::from_extension_validated(ext, ExtensionParseContext::ServerRequest)
     }
 
     /// クライアント要求とサーバー設定をマージして交渉結果を生成
@@ -306,6 +471,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_permessage_deflate_from_extension() {
         let ext = Extension::new("permessage-deflate")
             .param("server_no_context_takeover", None)
@@ -315,5 +481,98 @@ mod tests {
         assert!(config.server_no_context_takeover);
         assert!(!config.client_no_context_takeover);
         assert_eq!(config.client_max_window_bits, Some(12));
+    }
+
+    // === RFC 7692 パラメータ検証テスト ===
+
+    #[test]
+    fn test_reject_unknown_parameter() {
+        let ext = Extension::new("permessage-deflate").param("unknown_param", None);
+
+        let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+        assert!(matches!(
+            result,
+            Err(ExtensionParseError::UnknownParameter(_))
+        ));
+    }
+
+    #[test]
+    fn test_reject_duplicate_parameter() {
+        let ext = Extension::new("permessage-deflate")
+            .param("server_no_context_takeover", None)
+            .param("server_no_context_takeover", None);
+
+        let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+        assert!(matches!(
+            result,
+            Err(ExtensionParseError::DuplicateParameter(_))
+        ));
+    }
+
+    #[test]
+    fn test_reject_no_context_takeover_with_value() {
+        let ext =
+            Extension::new("permessage-deflate").param("server_no_context_takeover", Some("true"));
+
+        let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+        assert!(matches!(
+            result,
+            Err(ExtensionParseError::UnexpectedValue(_))
+        ));
+    }
+
+    #[test]
+    fn test_client_response_requires_server_max_window_bits_value() {
+        // ClientResponse コンテキストでは server_max_window_bits に値が必要
+        let ext = Extension::new("permessage-deflate").param("server_max_window_bits", None);
+
+        let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+        assert!(matches!(result, Err(ExtensionParseError::MissingValue(_))));
+    }
+
+    #[test]
+    fn test_server_request_allows_server_max_window_bits_without_value() {
+        // ServerRequest コンテキストでは server_max_window_bits の値なしは許容
+        let ext = Extension::new("permessage-deflate").param("server_max_window_bits", None);
+
+        let result = PerMessageDeflateConfig::from_extension_for_server_request(&ext);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().server_max_window_bits, Some(15)); // デフォルト値
+    }
+
+    #[test]
+    fn test_reject_invalid_window_bits_value() {
+        // 7 は範囲外
+        let ext = Extension::new("permessage-deflate").param("server_max_window_bits", Some("7"));
+
+        let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+        assert!(matches!(result, Err(ExtensionParseError::InvalidValue(_))));
+
+        // 16 も範囲外
+        let ext = Extension::new("permessage-deflate").param("server_max_window_bits", Some("16"));
+
+        let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+        assert!(matches!(result, Err(ExtensionParseError::InvalidValue(_))));
+    }
+
+    #[test]
+    fn test_accept_valid_window_bits_range() {
+        // 8-15 の範囲は全て OK
+        for bits in 8..=15 {
+            let ext = Extension::new("permessage-deflate")
+                .param("server_max_window_bits", Some(&bits.to_string()));
+
+            let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().server_max_window_bits, Some(bits));
+        }
+    }
+
+    #[test]
+    fn test_not_deflate_extension() {
+        let ext = Extension::new("other-extension");
+
+        let result = PerMessageDeflateConfig::from_extension_for_client_response(&ext);
+        assert!(matches!(result, Err(ExtensionParseError::NotDeflate)));
     }
 }

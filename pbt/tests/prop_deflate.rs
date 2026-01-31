@@ -85,7 +85,9 @@ proptest! {
         }
 
         let ext = config.to_extension();
-        let parsed = PerMessageDeflateConfig::from_extension(&ext).unwrap();
+        // サーバーレスポンスとしてパース（server_max_window_bits に値が必要）
+        // to_extension() は値を含めて生成するのでパース可能
+        let parsed = PerMessageDeflateConfig::from_extension_for_server_request(&ext).unwrap();
 
         // ラウンドトリップ後は設定が保持される
         prop_assert_eq!(parsed.server_no_context_takeover, server_no_takeover);

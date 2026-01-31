@@ -49,19 +49,45 @@ impl Frame {
     }
 
     /// Ping フレームを生成する
-    pub fn ping(payload: Vec<u8>) -> Self {
-        Self::new(Opcode::Ping, payload)
+    ///
+    /// RFC 6455 Section 5.5: コントロールフレームのペイロードは 125 バイト以下
+    pub fn ping(payload: Vec<u8>) -> Result<Self, Error> {
+        if payload.len() > 125 {
+            return Err(Error::invalid_input(format!(
+                "ping payload exceeds 125 bytes: {} bytes",
+                payload.len()
+            )));
+        }
+        Ok(Self::new(Opcode::Ping, payload))
     }
 
     /// Pong フレームを生成する
-    pub fn pong(payload: Vec<u8>) -> Self {
-        Self::new(Opcode::Pong, payload)
+    ///
+    /// RFC 6455 Section 5.5: コントロールフレームのペイロードは 125 バイト以下
+    pub fn pong(payload: Vec<u8>) -> Result<Self, Error> {
+        if payload.len() > 125 {
+            return Err(Error::invalid_input(format!(
+                "pong payload exceeds 125 bytes: {} bytes",
+                payload.len()
+            )));
+        }
+        Ok(Self::new(Opcode::Pong, payload))
     }
 
     /// Close フレームを生成する
-    pub fn close(code: Option<u16>, reason: &str) -> Self {
+    ///
+    /// RFC 6455 Section 5.5: コントロールフレームのペイロードは 125 バイト以下
+    /// Close フレームの場合、コード (2 バイト) + 理由で 125 バイト以下
+    pub fn close(code: Option<u16>, reason: &str) -> Result<Self, Error> {
         let payload = match code {
             Some(c) => {
+                // 理由は 123 バイト以下 (125 - 2 バイトのコード)
+                if reason.len() > 123 {
+                    return Err(Error::invalid_input(format!(
+                        "close reason exceeds 123 bytes: {} bytes",
+                        reason.len()
+                    )));
+                }
                 let mut p = Vec::with_capacity(2 + reason.len());
                 p.extend_from_slice(&c.to_be_bytes());
                 p.extend_from_slice(reason.as_bytes());
@@ -69,7 +95,7 @@ impl Frame {
             }
             None => Vec::new(),
         };
-        Self::new(Opcode::Close, payload)
+        Ok(Self::new(Opcode::Close, payload))
     }
 
     /// フレームをエンコードする（クライアントはマスキング必須）
@@ -203,6 +229,13 @@ impl FrameDecoder {
                 ]);
                 let len = usize::try_from(len)
                     .map_err(|_| Error::protocol_violation("payload length too large"))?;
+                // RFC 6455 Section 5.2: 最小表現チェック
+                // 64 ビット表現は 65535 より大きい場合のみ使用可能
+                if len <= 65535 {
+                    return Err(Error::protocol_violation(
+                        "64-bit payload length must be > 65535 (non-minimal encoding)",
+                    ));
+                }
                 (len, 10)
             }
             126 => {
@@ -210,6 +243,13 @@ impl FrameDecoder {
                     return Ok(None);
                 }
                 let len = u16::from_be_bytes([self.buf[2], self.buf[3]]) as usize;
+                // RFC 6455 Section 5.2: 最小表現チェック
+                // 16 ビット表現は 126 以上の場合のみ使用可能
+                if len < 126 {
+                    return Err(Error::protocol_violation(
+                        "16-bit payload length must be >= 126 (non-minimal encoding)",
+                    ));
+                }
                 (len, 4)
             }
             _ => (payload_len_7 as usize, 2),
@@ -330,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_ping_pong() {
-        let ping = Frame::ping(vec![0x01, 0x02]);
+        let ping = Frame::ping(vec![0x01, 0x02]).unwrap();
         let masking_key = [0x11, 0x22, 0x33, 0x44];
         let encoded = ping.encode(masking_key);
 
@@ -345,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_close() {
-        let close = Frame::close(Some(1000), "goodbye");
+        let close = Frame::close(Some(1000), "goodbye").unwrap();
         let masking_key = [0x55, 0x66, 0x77, 0x88];
         let encoded = close.encode(masking_key);
 
@@ -407,5 +447,108 @@ mod tests {
         decoder.feed(&[encoded[encoded.len() - 1]]);
         let decoded = decoder.decode().unwrap().unwrap();
         assert_eq!(decoded.payload, b"Hello");
+    }
+
+    // === RFC 6455 準拠テスト ===
+
+    #[test]
+    fn test_ping_payload_limit_125_bytes() {
+        // 125 バイトは OK
+        let payload = vec![0x42; 125];
+        assert!(Frame::ping(payload).is_ok());
+
+        // 126 バイトは NG
+        let payload = vec![0x42; 126];
+        assert!(Frame::ping(payload).is_err());
+    }
+
+    #[test]
+    fn test_pong_payload_limit_125_bytes() {
+        // 125 バイトは OK
+        let payload = vec![0x42; 125];
+        assert!(Frame::pong(payload).is_ok());
+
+        // 126 バイトは NG
+        let payload = vec![0x42; 126];
+        assert!(Frame::pong(payload).is_err());
+    }
+
+    #[test]
+    fn test_close_reason_limit_123_bytes() {
+        // 123 バイトは OK
+        let reason = "a".repeat(123);
+        assert!(Frame::close(Some(1000), &reason).is_ok());
+
+        // 124 バイトは NG
+        let reason = "a".repeat(124);
+        assert!(Frame::close(Some(1000), &reason).is_err());
+    }
+
+    #[test]
+    fn test_reject_non_minimal_16bit_length() {
+        // 16 ビット表現で 125 バイト以下を表現するのは不正
+        // 手動で不正なフレームを構築: mask=0, length=126 (16-bit), actual=100
+        let mut invalid_frame = vec![
+            0x82, // FIN + Binary
+            0x7E, // 126 = 16-bit length follows
+            0x00, 0x64, // 100 in big-endian (should use 7-bit encoding)
+        ];
+        invalid_frame.extend(vec![0x00; 100]); // 100 bytes payload
+
+        let mut decoder = FrameDecoder::new();
+        decoder.feed(&invalid_frame);
+        let result = decoder.decode();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reject_non_minimal_64bit_length() {
+        // 64 ビット表現で 65535 バイト以下を表現するのは不正
+        // 手動で不正なフレームを構築: mask=0, length=127 (64-bit), actual=1000
+        let mut invalid_frame = vec![
+            0x82, // FIN + Binary
+            0x7F, // 127 = 64-bit length follows
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xE8, // 1000 in big-endian
+        ];
+        invalid_frame.extend(vec![0x00; 1000]); // 1000 bytes payload
+
+        let mut decoder = FrameDecoder::new();
+        decoder.feed(&invalid_frame);
+        let result = decoder.decode();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_accept_minimal_16bit_length() {
+        // 16 ビット表現で 126 バイトは正当
+        let mut valid_frame = vec![
+            0x82, // FIN + Binary
+            0x7E, // 126 = 16-bit length follows
+            0x00, 0x7E, // 126 in big-endian
+        ];
+        valid_frame.extend(vec![0x00; 126]); // 126 bytes payload
+
+        let mut decoder = FrameDecoder::new();
+        decoder.feed(&valid_frame);
+        let result = decoder.decode().unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().payload.len(), 126);
+    }
+
+    #[test]
+    fn test_accept_minimal_64bit_length() {
+        // 64 ビット表現で 65536 バイトは正当
+        let mut valid_frame = vec![
+            0x82, // FIN + Binary
+            0x7F, // 127 = 64-bit length follows
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, // 65536 in big-endian
+        ];
+        valid_frame.extend(vec![0x00; 65536]); // 65536 bytes payload
+
+        let mut decoder = FrameDecoder::new();
+        decoder.feed(&valid_frame);
+        let result = decoder.decode().unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().payload.len(), 65536);
     }
 }
