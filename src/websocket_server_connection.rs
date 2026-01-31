@@ -861,9 +861,12 @@ impl WebSocketServerConnection {
         self.event_queue
             .push_back(ConnectionEvent::Ping(frame.payload.clone()));
 
-        // Pong を自動返信（受信した Ping のペイロードをそのまま返すので 125 バイト以下は保証される）
-        let pong = Frame::pong(frame.payload)?;
-        self.send_frame(pong);
+        // RFC 6455 Section 5.5.2: Close を受信済みなら Pong を送らない
+        if !self.close_received {
+            // Pong を自動返信（受信した Ping のペイロードをそのまま返すので 125 バイト以下は保証される）
+            let pong = Frame::pong(frame.payload)?;
+            self.send_frame(pong);
+        }
 
         Ok(())
     }

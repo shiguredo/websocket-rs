@@ -220,13 +220,18 @@ impl HandshakeRequestValidator {
             .ok_or_else(|| Error::handshake_rejected("missing Host header"))?
             .to_string();
 
+        // RFC 6455 Section 4.2.1: Upgrade ヘッダーに "websocket" トークンが含まれていること
         match request.get_header("Upgrade") {
-            Some(v) if v.eq_ignore_ascii_case("websocket") => {}
             Some(v) => {
-                return Err(Error::handshake_rejected(format!(
-                    "invalid Upgrade header: {}",
-                    v
-                )));
+                let has_websocket = v
+                    .split(',')
+                    .any(|token| token.trim().eq_ignore_ascii_case("websocket"));
+                if !has_websocket {
+                    return Err(Error::handshake_rejected(format!(
+                        "invalid Upgrade header: {}",
+                        v
+                    )));
+                }
             }
             None => return Err(Error::handshake_rejected("missing Upgrade header")),
         }
