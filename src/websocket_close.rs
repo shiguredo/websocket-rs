@@ -42,24 +42,29 @@ impl CloseCode {
 
     /// 有効なクローズコードかどうか（受信時の検証用）
     ///
-    /// RFC 6455 Section 7.4.2:
+    /// RFC 6455 Section 7.4.1/7.4.2:
     /// - 0-999: 使用禁止
+    /// - 1005, 1006, 1015: 送信禁止 (MUST NOT be set as a status code)
+    ///   → 受信時もプロトコルエラーとして扱う
     /// - 5000 以上: RFC で定義されていない
     ///
     /// 1004, 1012-2999 は「予約済み」だが、受信時は許容する。
-    /// 1005, 1006, 1015 は送信禁止だが、受信時は有効として扱う。
     pub fn is_valid(self) -> bool {
-        matches!(self.0, 1000..=4999)
+        matches!(self.0, 1000..=1004 | 1007..=1014 | 1016..=4999)
     }
 
     /// このコードを送信可能かどうか
     ///
-    /// RFC 6455 Section 7.4.2:
+    /// RFC 6455 Section 7.4.1/7.4.2:
     /// - 0-999: 使用禁止
+    /// - 1004: 予約済み（未定義）
     /// - 1005, 1006, 1015: 送信禁止 (MUST NOT be set as a status code)
+    /// - 2000-2999: 予約済み（RFC 6455 および将来の拡張用）
     /// - 5000以上: RFC で定義されていない範囲
+    ///
+    /// 1012-1014 は IANA に登録されているため許容する。
     pub fn is_sendable(self) -> bool {
-        !matches!(self.0, 0..=999 | 1005 | 1006 | 1015 | 5000..)
+        !matches!(self.0, 0..=999 | 1004 | 1005 | 1006 | 1015 | 2000..=2999 | 5000..)
     }
 }
 
@@ -120,12 +125,17 @@ mod tests {
         assert!(!CloseCode::new(999).is_valid());
         // 1004 は予約済みだが、受信時は有効として扱う
         assert!(CloseCode::new(1004).is_valid());
-        // 1005, 1006, 1015 は送信禁止だが、受信時は有効として扱う
-        assert!(CloseCode::new(1005).is_valid());
-        assert!(CloseCode::new(1006).is_valid());
-        assert!(CloseCode::new(1015).is_valid());
-        // 1012-2999 は予約済みだが、受信時は有効として扱う
+        // 1005, 1006, 1015 は送信禁止であり、受信時も無効として扱う
+        // (RFC 6455 Section 7.4.1: MUST NOT be set as a status code)
+        assert!(!CloseCode::new(1005).is_valid());
+        assert!(!CloseCode::new(1006).is_valid());
+        assert!(!CloseCode::new(1015).is_valid());
+        // 1012-1014 は IANA 登録済み、受信時は有効
         assert!(CloseCode::new(1012).is_valid());
+        assert!(CloseCode::new(1013).is_valid());
+        assert!(CloseCode::new(1014).is_valid());
+        // 1016-2999 は予約済みだが、受信時は有効として扱う
+        assert!(CloseCode::new(1016).is_valid());
         assert!(CloseCode::new(2999).is_valid());
         // 5000 以上は無効
         assert!(!CloseCode::new(5000).is_valid());
@@ -138,5 +148,17 @@ mod tests {
         assert!(!CloseCode::NO_STATUS_RECEIVED.is_sendable());
         assert!(!CloseCode::ABNORMAL_CLOSURE.is_sendable());
         assert!(!CloseCode::TLS_HANDSHAKE.is_sendable());
+        // 1004 は予約済みで送信禁止
+        assert!(!CloseCode::RESERVED.is_sendable());
+        // 1012-1014 は IANA 登録済みで送信可能
+        assert!(CloseCode::new(1012).is_sendable());
+        assert!(CloseCode::new(1013).is_sendable());
+        assert!(CloseCode::new(1014).is_sendable());
+        // 2000-2999 は予約済みで送信禁止
+        assert!(!CloseCode::new(2000).is_sendable());
+        assert!(!CloseCode::new(2999).is_sendable());
+        // 3000-4999 は送信可能
+        assert!(CloseCode::new(3000).is_sendable());
+        assert!(CloseCode::new(4999).is_sendable());
     }
 }

@@ -831,7 +831,11 @@ impl WebSocketServerConnection {
 
         if !self.close_sent {
             // クローズフレームを返送
-            let reply_code = code.map(|c| c.as_u16()).unwrap_or(1000);
+            // 送信禁止コードの場合は 1000 (Normal Closure) を使用
+            let reply_code = code
+                .filter(|c| c.is_sendable())
+                .map(|c| c.as_u16())
+                .unwrap_or(1000);
             let reply_frame = Frame::close(Some(reply_code), "")?;
             self.send_frame(reply_frame);
             self.close_sent = true;
