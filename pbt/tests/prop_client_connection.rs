@@ -873,3 +873,119 @@ proptest! {
         prop_assert!(err_msg.contains("UTF-8") || err_msg.contains("utf-8"));
     }
 }
+
+// ==== RFC 7692 window_bits 検証のテスト ====
+
+proptest! {
+    /// RFC 7692 Section 7.1.2.1: server_max_window_bits がクライアントの offer を超える場合は拒否
+    #[test]
+    fn prop_reject_server_max_window_bits_exceeding_offer(
+        client_bits in 8u8..=14,
+        server_bits in 9u8..=15,
+    ) {
+        // サーバーの値がクライアントの offer より大きい場合のみテスト
+        prop_assume!(server_bits > client_bits);
+
+        let options = ClientConnectionOptions::new("example.com", "/ws")
+            .deflate(PerMessageDeflateConfig::new().server_max_window_bits(client_bits));
+        let random = FixedRandom::new();
+        let nonce = random.nonce;
+        let mut conn = WebSocketClientConnection::new(options, random);
+        let now = Timestamp::from_millis(0);
+
+        conn.connect().unwrap();
+        while conn.poll_output().is_some() {}
+
+        let accept = compute_accept(&nonce);
+        let ext = format!("permessage-deflate; server_max_window_bits={}", server_bits);
+        let response = create_valid_handshake_response(&accept, None, Some(&ext));
+
+        let result = conn.feed_recv_buf(&response, now);
+        prop_assert!(result.is_err(), "Should reject server_max_window_bits {} > client offer {}", server_bits, client_bits);
+        let err_msg = format!("{}", result.unwrap_err());
+        prop_assert!(err_msg.contains("server_max_window_bits") && err_msg.contains("exceeds"));
+    }
+
+    /// RFC 7692 Section 7.1.2.1: server_max_window_bits がクライアントの offer 以下なら受理
+    #[test]
+    fn prop_accept_server_max_window_bits_within_offer(
+        client_bits in 8u8..=15,
+        server_bits in 8u8..=15,
+    ) {
+        // サーバーの値がクライアントの offer 以下の場合のみテスト
+        prop_assume!(server_bits <= client_bits);
+
+        let options = ClientConnectionOptions::new("example.com", "/ws")
+            .deflate(PerMessageDeflateConfig::new().server_max_window_bits(client_bits));
+        let random = FixedRandom::new();
+        let nonce = random.nonce;
+        let mut conn = WebSocketClientConnection::new(options, random);
+        let now = Timestamp::from_millis(0);
+
+        conn.connect().unwrap();
+        while conn.poll_output().is_some() {}
+
+        let accept = compute_accept(&nonce);
+        let ext = format!("permessage-deflate; server_max_window_bits={}", server_bits);
+        let response = create_valid_handshake_response(&accept, None, Some(&ext));
+
+        let result = conn.feed_recv_buf(&response, now);
+        prop_assert!(result.is_ok(), "Should accept server_max_window_bits {} <= client offer {}", server_bits, client_bits);
+    }
+
+    /// RFC 7692 Section 7.1.2.2: client_max_window_bits がクライアントの offer を超える場合は拒否
+    #[test]
+    fn prop_reject_client_max_window_bits_exceeding_offer(
+        client_bits in 8u8..=14,
+        server_bits in 9u8..=15,
+    ) {
+        // サーバーの値がクライアントの offer より大きい場合のみテスト
+        prop_assume!(server_bits > client_bits);
+
+        let options = ClientConnectionOptions::new("example.com", "/ws")
+            .deflate(PerMessageDeflateConfig::new().client_max_window_bits(client_bits));
+        let random = FixedRandom::new();
+        let nonce = random.nonce;
+        let mut conn = WebSocketClientConnection::new(options, random);
+        let now = Timestamp::from_millis(0);
+
+        conn.connect().unwrap();
+        while conn.poll_output().is_some() {}
+
+        let accept = compute_accept(&nonce);
+        let ext = format!("permessage-deflate; client_max_window_bits={}", server_bits);
+        let response = create_valid_handshake_response(&accept, None, Some(&ext));
+
+        let result = conn.feed_recv_buf(&response, now);
+        prop_assert!(result.is_err(), "Should reject client_max_window_bits {} > client offer {}", server_bits, client_bits);
+        let err_msg = format!("{}", result.unwrap_err());
+        prop_assert!(err_msg.contains("client_max_window_bits") && err_msg.contains("exceeds"));
+    }
+
+    /// RFC 7692 Section 7.1.2.2: client_max_window_bits がクライアントの offer 以下なら受理
+    #[test]
+    fn prop_accept_client_max_window_bits_within_offer(
+        client_bits in 8u8..=15,
+        server_bits in 8u8..=15,
+    ) {
+        // サーバーの値がクライアントの offer 以下の場合のみテスト
+        prop_assume!(server_bits <= client_bits);
+
+        let options = ClientConnectionOptions::new("example.com", "/ws")
+            .deflate(PerMessageDeflateConfig::new().client_max_window_bits(client_bits));
+        let random = FixedRandom::new();
+        let nonce = random.nonce;
+        let mut conn = WebSocketClientConnection::new(options, random);
+        let now = Timestamp::from_millis(0);
+
+        conn.connect().unwrap();
+        while conn.poll_output().is_some() {}
+
+        let accept = compute_accept(&nonce);
+        let ext = format!("permessage-deflate; client_max_window_bits={}", server_bits);
+        let response = create_valid_handshake_response(&accept, None, Some(&ext));
+
+        let result = conn.feed_recv_buf(&response, now);
+        prop_assert!(result.is_ok(), "Should accept client_max_window_bits {} <= client offer {}", server_bits, client_bits);
+    }
+}

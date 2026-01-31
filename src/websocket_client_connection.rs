@@ -690,9 +690,9 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 if ext.name == "permessage-deflate" {
                     match PerMessageDeflateConfig::from_extension_for_client_response(&ext) {
                         Ok(config) => {
-                            // RFC 7692 Section 7.1.2.2: クライアントが offer していない
-                            // client_max_window_bits をサーバーが含めた場合は拒否
                             if let Some(deflate_config) = &self.options.deflate_config {
+                                // RFC 7692 Section 7.1.2.2: クライアントが offer していない
+                                // client_max_window_bits をサーバーが含めた場合は拒否
                                 let client_offered_cmwb =
                                     deflate_config.client_max_window_bits.is_some();
                                 let server_included_cmwb =
@@ -702,6 +702,32 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                                     return Err(Error::handshake_rejected(
                                         "server included client_max_window_bits without client offer",
                                     ));
+                                }
+
+                                // RFC 7692 Section 7.1.2.1: server_max_window_bits は
+                                // クライアントの offer 以下でなければならない
+                                if let (Some(client_smwb), Some(server_smwb)) = (
+                                    deflate_config.server_max_window_bits,
+                                    config.server_max_window_bits,
+                                ) && server_smwb > client_smwb
+                                {
+                                    return Err(Error::handshake_rejected(format!(
+                                        "server_max_window_bits {} exceeds client offer {}",
+                                        server_smwb, client_smwb
+                                    )));
+                                }
+
+                                // RFC 7692 Section 7.1.2.2: client_max_window_bits は
+                                // クライアントの offer 以下でなければならない
+                                if let (Some(client_cmwb), Some(server_cmwb)) = (
+                                    deflate_config.client_max_window_bits,
+                                    config.client_max_window_bits,
+                                ) && server_cmwb > client_cmwb
+                                {
+                                    return Err(Error::handshake_rejected(format!(
+                                        "client_max_window_bits {} exceeds client offer {}",
+                                        server_cmwb, client_cmwb
+                                    )));
                                 }
                             }
                             self.deflate = Some(PerMessageDeflate::new_client(config));
