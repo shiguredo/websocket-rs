@@ -36,21 +36,22 @@ proptest! {
         prop_assert!(close_code.is_sendable());
     }
 
-    /// 1004 は予約済みだが、受信時は有効として扱う
+    /// 1004 は予約済みで、受信時は有効だが送信禁止
     #[test]
     fn prop_reserved_1004(_dummy in 0u8..1) {
         let close_code = CloseCode::new(1004);
         prop_assert!(close_code.is_valid());
-        prop_assert!(close_code.is_sendable());
+        prop_assert!(!close_code.is_sendable());
     }
 
-    /// 1005, 1006, 1015 は送信禁止だが、受信時は有効
+    /// 1005, 1006, 1015 は送信禁止であり、受信時も無効として扱う
+    /// (RFC 6455 Section 7.4.1: MUST NOT be set as a status code)
     #[test]
     fn prop_unsendable_codes(code in prop::sample::select(vec![1005u16, 1006, 1015])) {
         let close_code = CloseCode::new(code);
         prop_assert!(!close_code.is_sendable());
-        // 受信時は有効として扱う
-        prop_assert!(close_code.is_valid());
+        // 受信時も無効として扱う
+        prop_assert!(!close_code.is_valid());
     }
 
     #[test]
@@ -60,14 +61,30 @@ proptest! {
         prop_assert!(close_code.is_sendable());
     }
 
-    /// 1012-2999 は予約済みだが、受信時は有効として扱う
+    /// 1012-1014 は IANA 登録済みで送信可能
     #[test]
-    fn prop_unused_range_1012_2999(code in 1012u16..3000) {
-        prop_assume!(code != 1015);
+    fn prop_iana_range_1012_1014(code in 1012u16..=1014) {
+        let close_code = CloseCode::new(code);
+        prop_assert!(close_code.is_valid());
+        prop_assert!(close_code.is_sendable());
+    }
+
+    /// 1016-1999 は予約済みだが、受信時は有効として扱い送信も許容
+    #[test]
+    fn prop_reserved_range_1016_1999(code in 1016u16..2000) {
+        let close_code = CloseCode::new(code);
+        prop_assert!(close_code.is_valid());
+        prop_assert!(close_code.is_sendable());
+    }
+
+    /// 2000-2999 は予約済み（RFC 6455 および将来の拡張用）で送信禁止
+    #[test]
+    fn prop_reserved_range_2000_2999(code in 2000u16..3000) {
         let close_code = CloseCode::new(code);
         // 受信時は有効として扱う
         prop_assert!(close_code.is_valid());
-        prop_assert!(close_code.is_sendable());
+        // 送信は禁止
+        prop_assert!(!close_code.is_sendable());
     }
 
     #[test]
