@@ -27,8 +27,17 @@ impl Compressor {
     /// `is_client` が true の場合、クライアント側の設定（client_no_context_takeover）を使用。
     /// false の場合、サーバー側の設定（server_no_context_takeover）を使用。
     ///
-    /// 注: window_bits のカスタマイズは flate2 の `any_zlib` feature が必要なため、
+    /// # 制限事項
+    ///
+    /// window_bits のカスタマイズは flate2 の `any_zlib` feature が必要なため、
     /// 現在の実装ではデフォルト値 (15) を使用する。
+    ///
+    /// RFC 7692 Section 7.2.1 では、合意した window bits を超える LZ77 ウィンドウを
+    /// 使用してはならないと規定されている。相手が 15 未満の window bits を要求した場合、
+    /// 現在の実装では RFC 非準拠となる可能性がある。
+    ///
+    /// TODO: flate2 の `any_zlib` feature を有効にして window bits を反映するか、
+    /// ハンドシェイク時に 15 以外の window bits を拒否する対応を検討する。
     pub fn new(config: &PerMessageDeflateConfig, is_client: bool) -> Self {
         let level = 6u32; // デフォルト圧縮レベル
         let reset_after_message = if is_client {
@@ -130,8 +139,13 @@ impl Decompressor {
     /// false の場合、クライアントから受信したデータを解凍するため、
     /// client_no_context_takeover を参照。
     ///
-    /// 注: window_bits のカスタマイズは flate2 の `any_zlib` feature が必要なため、
+    /// # 制限事項
+    ///
+    /// window_bits のカスタマイズは flate2 の `any_zlib` feature が必要なため、
     /// 現在の実装ではデフォルト値 (15) を使用する。
+    ///
+    /// 解凍側では window_bits=15（最大値）を使用するため、相手がどの window bits で
+    /// 圧縮しても解凍可能であり、RFC 7692 準拠性の問題は発生しない。
     pub fn new(config: &PerMessageDeflateConfig, is_client: bool) -> Self {
         let reset_after_message = if is_client {
             // クライアントはサーバーから受信 -> server_no_context_takeover

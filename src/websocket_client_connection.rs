@@ -742,8 +742,19 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     fn process_frames(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
         self.frame_decoder.feed(buf);
 
-        while let Some(decoded) = self.frame_decoder.decode_with_info()? {
-            self.handle_decoded_frame(decoded, now)?;
+        loop {
+            match self.frame_decoder.decode_with_info() {
+                Ok(Some(decoded)) => {
+                    self.handle_decoded_frame(decoded, now)?;
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    // RFC 6455 Section 7.1.7: 接続確立後のプロトコル違反では
+                    // Close フレームを送信してから接続を終了する
+                    self.close_internal(CloseCode::PROTOCOL_ERROR, "frame decode error")?;
+                    return Err(e);
+                }
+            }
         }
 
         Ok(())
