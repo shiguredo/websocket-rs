@@ -573,7 +573,7 @@ where
                         }
                         ConnectionEvent::Ping(data) => {
                             log_debug(debug, "クライアント -> アップストリーム (ping)");
-                            upstream_ws.send_ping(&data, now())?;
+                            upstream_ws.send_ping(&data)?;
                         }
                         ConnectionEvent::Close { code, reason } => {
                             log_debug(debug, &format!("クライアントから Close: {:?} {}", code, reason));
@@ -625,7 +625,7 @@ where
                         }
                         ConnectionEvent::Ping(data) => {
                             log_debug(debug, "アップストリーム -> クライアント (ping)");
-                            client_ws.send_ping(&data, now())?;
+                            client_ws.send_ping(&data)?;
                         }
                         ConnectionEvent::Close { code, reason } => {
                             log_debug(debug, &format!("アップストリームから Close: {:?} {}", code, reason));

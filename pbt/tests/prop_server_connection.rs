@@ -11,13 +11,8 @@ use base64::engine::general_purpose::STANDARD;
 use proptest::prelude::*;
 use shiguredo_websocket::{
     CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, Frame, PerMessageDeflateConfig,
-    ServerConnectionOptions, TimerId, Timestamp, WebSocketServerConnection,
+    ServerConnectionOptions, TimerId, WebSocketServerConnection,
 };
-
-// handle_timer と send_ping で使用
-fn now() -> Timestamp {
-    Timestamp::from_millis(0)
-}
 
 /// 有効なハンドシェイクリクエストを生成
 fn create_valid_handshake_request(
@@ -348,7 +343,7 @@ proptest! {
         let mut conn = setup_connected_server();
 
         // まず Ping を送信
-        conn.send_ping(&[], now()).unwrap();
+        conn.send_ping(&[]).unwrap();
         while conn.poll_output().is_some() {}
 
         // Pong を受信
@@ -463,7 +458,7 @@ proptest! {
     fn prop_ping_timer_event(_dummy in Just(())) {
         let mut conn = setup_connected_server();
 
-        conn.handle_timer(TimerId::Ping, now()).unwrap();
+        conn.handle_timer(TimerId::Ping).unwrap();
 
         // Ping が送信されるはず
         let mut found = false;
@@ -484,12 +479,12 @@ proptest! {
         let mut conn = setup_connected_server();
 
         // Ping を送信
-        conn.send_ping(&[], now()).unwrap();
+        conn.send_ping(&[]).unwrap();
         while conn.poll_output().is_some() {}
         while conn.poll_event().is_some() {}
 
         // Pong タイムアウトをトリガー
-        conn.handle_timer(TimerId::PongTimeout, now()).unwrap();
+        conn.handle_timer(TimerId::PongTimeout).unwrap();
 
         // エラーイベントが発生
         let mut error_found = false;
@@ -519,7 +514,7 @@ proptest! {
         prop_assert_eq!(conn.state(), ConnectionState::Closing);
 
         // Close タイムアウトをトリガー
-        conn.handle_timer(TimerId::CloseTimeout, now()).unwrap();
+        conn.handle_timer(TimerId::CloseTimeout).unwrap();
 
         prop_assert_eq!(conn.state(), ConnectionState::Closed);
     }
@@ -1052,11 +1047,11 @@ proptest! {
         let mut conn = setup_connected_server();
 
         // Ping を送信して awaiting_pong を true にする
-        conn.send_ping(&[], now()).unwrap();
+        conn.send_ping(&[]).unwrap();
         while conn.poll_output().is_some() {}
 
         // Ping タイマーが発火
-        conn.handle_timer(TimerId::Ping, now()).unwrap();
+        conn.handle_timer(TimerId::Ping).unwrap();
 
         // 新しい Ping は送られない（SetTimer のみ）
         let mut ping_count = 0;

@@ -70,6 +70,16 @@ while let Some(output) = ws.poll_output() {
     }
 }
 
+// 現在時刻を取得するヘルパー関数
+fn now() -> Timestamp {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    Timestamp::from_millis(millis)
+}
+
 // ハンドシェイクレスポンス受信
 let mut buf = [0u8; 4096];
 loop {
@@ -143,7 +153,7 @@ ws.send_text("Hello, WebSocket!").unwrap();
 ws.send_binary(&[0x01, 0x02, 0x03]).unwrap();
 
 // Ping 送信
-ws.send_ping(&[], now()).unwrap();
+ws.send_ping(&[]).unwrap();
 
 // 接続を閉じる
 ws.close(CloseCode::NORMAL, "Goodbye").unwrap();
@@ -161,7 +171,7 @@ ws.send_text("Hello, WebSocket!").unwrap();
 ws.send_binary(&[0x01, 0x02, 0x03]).unwrap();
 
 // Ping 送信
-ws.send_ping(&[], now()).unwrap();
+ws.send_ping(&[]).unwrap();
 
 // 接続を閉じる
 ws.close(CloseCode::NORMAL, "Goodbye").unwrap();
@@ -244,10 +254,9 @@ while let Some(frame) = decoder.decode().unwrap() {
 
 デフォルト値:
 
-- 最大フレームペイロードサイズ: 64MB
-- 最大メッセージサイズ: 64MB
+- 最大解凍サイズ (Zip Bomb 対策): 16MB
 
-`ClientConnectionOptions` / `ServerConnectionOptions` で各制限値をカスタマイズ可能です。
+`ClientConnectionOptions` / `ServerConnectionOptions` で `max_decompressed_size` をカスタマイズ可能です。
 
 ## サンプル
 

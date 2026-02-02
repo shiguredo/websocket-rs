@@ -5,7 +5,6 @@
 
 use std::collections::VecDeque;
 
-use crate::Timestamp;
 use crate::deflate::PerMessageDeflate;
 use crate::error::Error;
 use crate::websocket_close::CloseCode;
@@ -169,8 +168,6 @@ pub struct WebSocketServerConnection {
     /// クローズフレームを受信したか
     close_received: bool,
 
-    /// 最後の Ping 送信時刻
-    last_ping_time: Option<Timestamp>,
     /// Pong 待ち
     awaiting_pong: bool,
 
@@ -196,7 +193,6 @@ impl WebSocketServerConnection {
             deflate: None,
             close_sent: false,
             close_received: false,
-            last_ping_time: None,
             awaiting_pong: false,
             event_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
@@ -430,13 +426,12 @@ impl WebSocketServerConnection {
     /// Ping を送信
     ///
     /// RFC 6455 Section 5.5: data は 125 バイト以下でなければならない
-    pub fn send_ping(&mut self, data: &[u8], now: Timestamp) -> Result<(), Error> {
+    pub fn send_ping(&mut self, data: &[u8]) -> Result<(), Error> {
         self.check_connected()?;
 
         let frame = Frame::ping(data.to_vec())?;
         self.send_frame(frame);
 
-        self.last_ping_time = Some(now);
         self.awaiting_pong = true;
 
         // Pong タイムアウト設定
@@ -514,12 +509,12 @@ impl WebSocketServerConnection {
     }
 
     /// タイマーイベントを処理
-    pub fn handle_timer(&mut self, timer_id: TimerId, now: Timestamp) -> Result<(), Error> {
+    pub fn handle_timer(&mut self, timer_id: TimerId) -> Result<(), Error> {
         match timer_id {
             TimerId::Ping => {
                 if self.state == ConnectionState::Connected && !self.awaiting_pong {
                     // 空の Ping を送信
-                    self.send_ping(&[], now)?;
+                    self.send_ping(&[])?;
                 }
                 // 次の Ping タイマー設定
                 if self.options.ping_interval_millis > 0 {
@@ -1045,22 +1040,20 @@ mod tests {
     #[test]
     fn test_server_send_ping_rejects_long_payload() {
         let mut conn = create_connected_server();
-        let now = Timestamp::from_millis(0);
 
         // 126 バイトは NG
         let long_payload = vec![0x42; 126];
-        let result = conn.send_ping(&long_payload, now);
+        let result = conn.send_ping(&long_payload);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_server_send_ping_accepts_max_payload() {
         let mut conn = create_connected_server();
-        let now = Timestamp::from_millis(0);
 
         // 125 バイトは OK
         let max_payload = vec![0x42; 125];
-        let result = conn.send_ping(&max_payload, now);
+        let result = conn.send_ping(&max_payload);
         assert!(result.is_ok());
     }
 }

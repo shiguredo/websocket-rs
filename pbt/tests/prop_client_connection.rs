@@ -427,7 +427,7 @@ proptest! {
         let (mut conn, now, _) = setup_connected_client();
 
         // まず Ping を送信
-        conn.send_ping(&[], now).unwrap();
+        conn.send_ping(&[]).unwrap();
         while conn.poll_output().is_some() {}
 
         // Pong を受信
@@ -540,9 +540,9 @@ proptest! {
     /// Ping タイマーで Ping が送信される
     #[test]
     fn prop_ping_timer_event(_dummy in Just(())) {
-        let (mut conn, now, _) = setup_connected_client();
+        let (mut conn, _, _) = setup_connected_client();
 
-        conn.handle_timer(TimerId::Ping, now).unwrap();
+        conn.handle_timer(TimerId::Ping).unwrap();
 
         // Ping が送信されるはず
         let mut found = false;
@@ -558,15 +558,15 @@ proptest! {
     /// Pong タイムアウトで接続が閉じられる
     #[test]
     fn prop_pong_timeout_closes_connection(_dummy in Just(())) {
-        let (mut conn, now, _) = setup_connected_client();
+        let (mut conn, _, _) = setup_connected_client();
 
         // Ping を送信
-        conn.send_ping(&[], now).unwrap();
+        conn.send_ping(&[]).unwrap();
         while conn.poll_output().is_some() {}
         while conn.poll_event().is_some() {}
 
         // Pong タイムアウトをトリガー
-        conn.handle_timer(TimerId::PongTimeout, now).unwrap();
+        conn.handle_timer(TimerId::PongTimeout).unwrap();
 
         // エラーイベントが発生
         let mut error_found = false;
@@ -586,7 +586,7 @@ proptest! {
     /// Close タイムアウトで強制切断
     #[test]
     fn prop_close_timeout_forces_disconnect(_dummy in Just(())) {
-        let (mut conn, now, _) = setup_connected_client();
+        let (mut conn, _, _) = setup_connected_client();
 
         // Close を送信
         conn.close(CloseCode::NORMAL, "").unwrap();
@@ -596,7 +596,7 @@ proptest! {
         prop_assert_eq!(conn.state(), ConnectionState::Closing);
 
         // Close タイムアウトをトリガー
-        conn.handle_timer(TimerId::CloseTimeout, now).unwrap();
+        conn.handle_timer(TimerId::CloseTimeout).unwrap();
 
         prop_assert_eq!(conn.state(), ConnectionState::Closed);
     }
