@@ -2,7 +2,7 @@ use crate::error::Error;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha1::{Digest, Sha1};
-use shiguredo_http11::{Request, RequestDecoder, Response, ResponseDecoder};
+use shiguredo_http11::{HttpHead, Request, RequestDecoder, ResponseDecoder, ResponseHead};
 
 /// WebSocket ハンドシェイクで使用する固定 GUID (RFC 6455 Section 1.3)
 const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -354,19 +354,26 @@ impl HandshakeValidator {
             return Err(Error::invalid_data(reason));
         }
 
-        let response = match self
+        // WebSocket ハンドシェイクレスポンスにボディは不要なので、
+        // ヘッダーが揃った時点で検証する。
+        // decode() を使うと、非 101 レスポンスでは BodyKind::CloseDelimited となり
+        // mark_eof() が呼ばれるまで None を返し続けてしまう。
+        let head = match self
             .decoder
-            .decode()
+            .decode_headers()
             .map_err(|err| Error::invalid_data(err.to_string()))?
         {
-            Some(r) => r,
+            Some((head, _body_kind)) => head,
             None => return Ok(None),
         };
 
-        self.validate_response(&response)
+        self.validate_response(&head)
     }
 
-    fn validate_response(&self, response: &Response) -> Result<Option<HandshakeResponse>, Error> {
+    fn validate_response(
+        &self,
+        response: &ResponseHead,
+    ) -> Result<Option<HandshakeResponse>, Error> {
         // ステータスコードの検証
         if response.status_code != 101 {
             return Err(Error::handshake_rejected(format!(

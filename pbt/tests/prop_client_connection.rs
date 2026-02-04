@@ -880,11 +880,8 @@ proptest! {
     /// RFC 7692 Section 7.1.2.1: server_max_window_bits がクライアントの offer を超える場合は拒否
     #[test]
     fn prop_reject_server_max_window_bits_exceeding_offer(
-        client_bits in 8u8..=14,
-        server_bits in 9u8..=15,
+        (client_bits, server_bits) in (8u8..=14u8).prop_flat_map(|c| (Just(c), (c + 1)..=15u8)),
     ) {
-        // サーバーの値がクライアントの offer より大きい場合のみテスト
-        prop_assume!(server_bits > client_bits);
 
         let options = ClientConnectionOptions::new("example.com", "/ws")
             .deflate(PerMessageDeflateConfig::new().server_max_window_bits(client_bits));
@@ -909,11 +906,8 @@ proptest! {
     /// RFC 7692 Section 7.1.2.1: server_max_window_bits がクライアントの offer 以下なら受理
     #[test]
     fn prop_accept_server_max_window_bits_within_offer(
-        client_bits in 8u8..=15,
-        server_bits in 8u8..=15,
+        (client_bits, server_bits) in (8u8..=15u8).prop_flat_map(|c| (Just(c), 8u8..=c)),
     ) {
-        // サーバーの値がクライアントの offer 以下の場合のみテスト
-        prop_assume!(server_bits <= client_bits);
 
         let options = ClientConnectionOptions::new("example.com", "/ws")
             .deflate(PerMessageDeflateConfig::new().server_max_window_bits(client_bits));
@@ -936,11 +930,8 @@ proptest! {
     /// RFC 7692 Section 7.1.2.2: client_max_window_bits がクライアントの offer を超える場合は拒否
     #[test]
     fn prop_reject_client_max_window_bits_exceeding_offer(
-        client_bits in 8u8..=14,
-        server_bits in 9u8..=15,
+        (client_bits, server_bits) in (8u8..=14u8).prop_flat_map(|c| (Just(c), (c + 1)..=15u8)),
     ) {
-        // サーバーの値がクライアントの offer より大きい場合のみテスト
-        prop_assume!(server_bits > client_bits);
 
         let options = ClientConnectionOptions::new("example.com", "/ws")
             .deflate(PerMessageDeflateConfig::new().client_max_window_bits(client_bits));
@@ -965,11 +956,8 @@ proptest! {
     /// RFC 7692 Section 7.1.2.2: client_max_window_bits がクライアントの offer 以下なら受理
     #[test]
     fn prop_accept_client_max_window_bits_within_offer(
-        client_bits in 8u8..=15,
-        server_bits in 8u8..=15,
+        (client_bits, server_bits) in (8u8..=15u8).prop_flat_map(|c| (Just(c), 8u8..=c)),
     ) {
-        // サーバーの値がクライアントの offer 以下の場合のみテスト
-        prop_assume!(server_bits <= client_bits);
 
         let options = ClientConnectionOptions::new("example.com", "/ws")
             .deflate(PerMessageDeflateConfig::new().client_max_window_bits(client_bits));
