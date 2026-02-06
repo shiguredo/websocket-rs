@@ -514,8 +514,9 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 if self.state == ConnectionState::Connected && !self.awaiting_pong {
                     self.send_ping(&[])?;
                 }
-                // 次の Ping タイマー設定
-                if self.options.ping_interval_millis > 0 {
+                // 次の Ping タイマー設定（Connected 状態の場合のみ）
+                if self.state == ConnectionState::Connected && self.options.ping_interval_millis > 0
+                {
                     self.output_queue.push_back(ConnectionOutput::SetTimer {
                         id: TimerId::Ping,
                         duration_millis: self.options.ping_interval_millis,
@@ -664,8 +665,11 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             .map(|_| vec!["permessage-deflate"])
             .unwrap_or_default();
 
+        // RFC 6455 Section 9.1: ABNF に不適合なら接続を失敗させる (MUST)
         for ext_str in &response.extensions {
-            let extensions = Extension::parse(ext_str);
+            let extensions = Extension::parse_strict(ext_str).map_err(|e| {
+                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {}", e))
+            })?;
             for ext in &extensions {
                 if !requested_extension_names.contains(&ext.name.as_str()) {
                     return Err(Error::handshake_rejected(format!(
@@ -682,8 +686,11 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
         // RFC 7692 Section 7.1.2: クライアントがリクエストした拡張に対して
         // サーバーが不正なレスポンスを返した場合は接続失敗
+        // RFC 6455 Section 9.1: 上の検証で ABNF 適合性は確認済み
         for ext_str in &response.extensions {
-            let extensions = Extension::parse(ext_str);
+            let extensions = Extension::parse_strict(ext_str).map_err(|e| {
+                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {}", e))
+            })?;
             for ext in extensions {
                 if ext.name == "permessage-deflate" {
                     match PerMessageDeflateConfig::from_extension_for_client_response(&ext) {

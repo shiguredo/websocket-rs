@@ -516,8 +516,9 @@ impl WebSocketServerConnection {
                     // 空の Ping を送信
                     self.send_ping(&[])?;
                 }
-                // 次の Ping タイマー設定
-                if self.options.ping_interval_millis > 0 {
+                // 次の Ping タイマー設定（Connected 状態の場合のみ）
+                if self.state == ConnectionState::Connected && self.options.ping_interval_millis > 0
+                {
                     self.output_queue.push_back(ConnectionOutput::SetTimer {
                         id: TimerId::Ping,
                         duration_millis: self.options.ping_interval_millis,
@@ -837,6 +838,13 @@ impl WebSocketServerConnection {
         }
 
         // 両方向でクローズが完了
+        // Ping/Pong 関連の状態とタイマーをクリア
+        self.awaiting_pong = false;
+        self.output_queue.push_back(ConnectionOutput::ClearTimer {
+            id: TimerId::PongTimeout,
+        });
+        self.output_queue
+            .push_back(ConnectionOutput::ClearTimer { id: TimerId::Ping });
         self.output_queue.push_back(ConnectionOutput::ClearTimer {
             id: TimerId::CloseTimeout,
         });

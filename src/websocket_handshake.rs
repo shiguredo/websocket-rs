@@ -256,6 +256,15 @@ impl HandshakeRequestValidator {
             }
         }
 
+        // RFC 6455 Section 4.2.1: Sec-WebSocket-Version は単一値ヘッダー
+        {
+            let version_values = request.get_headers("Sec-WebSocket-Version");
+            if version_values.len() > 1 {
+                return Err(Error::handshake_rejected(
+                    "duplicate Sec-WebSocket-Version header",
+                ));
+            }
+        }
         match request.get_header("Sec-WebSocket-Version") {
             Some("13") => {}
             Some(v) => {
@@ -267,31 +276,42 @@ impl HandshakeRequestValidator {
             None => return Err(Error::handshake_rejected("missing Sec-WebSocket-Version")),
         }
 
+        // RFC 6455 Section 4.2.1: Sec-WebSocket-Key は単一値ヘッダー
+        {
+            let key_values = request.get_headers("Sec-WebSocket-Key");
+            if key_values.len() > 1 {
+                return Err(Error::handshake_rejected(
+                    "duplicate Sec-WebSocket-Key header",
+                ));
+            }
+        }
         let key = request
             .get_header("Sec-WebSocket-Key")
             .ok_or_else(|| Error::handshake_rejected("missing Sec-WebSocket-Key"))?
             .to_string();
         validate_key(&key)?;
 
-        let protocols = request
-            .get_header("Sec-WebSocket-Protocol")
-            .map(|v| {
-                v.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はリスト値として統合する
+        let protocols = {
+            let values = request.get_headers("Sec-WebSocket-Protocol");
+            values
+                .iter()
+                .flat_map(|v| v.split(','))
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        };
 
-        let extensions = request
-            .get_header("Sec-WebSocket-Extensions")
-            .map(|v| {
-                v.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はリスト値として統合する
+        let extensions = {
+            let values = request.get_headers("Sec-WebSocket-Extensions");
+            values
+                .iter()
+                .flat_map(|v| v.split(','))
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        };
 
         let origin = request.get_header("Origin").map(String::from);
 
@@ -425,6 +445,15 @@ impl HandshakeValidator {
             }
         }
 
+        // RFC 6455 Section 4.2.2: Sec-WebSocket-Accept は単一値ヘッダー
+        {
+            let accept_values = response.get_headers("Sec-WebSocket-Accept");
+            if accept_values.len() > 1 {
+                return Err(Error::handshake_rejected(
+                    "duplicate Sec-WebSocket-Accept header",
+                ));
+            }
+        }
         // Sec-WebSocket-Accept ヘッダーの検証
         match response.get_header("Sec-WebSocket-Accept") {
             Some(v) if v == self.expected_accept => {}
@@ -441,6 +470,15 @@ impl HandshakeValidator {
             }
         }
 
+        // RFC 6455 Section 4.2.2: Sec-WebSocket-Protocol は単一値ヘッダー
+        {
+            let protocol_values = response.get_headers("Sec-WebSocket-Protocol");
+            if protocol_values.len() > 1 {
+                return Err(Error::handshake_rejected(
+                    "duplicate Sec-WebSocket-Protocol header",
+                ));
+            }
+        }
         // サブプロトコルの取得
         let protocol = response
             .get_header("Sec-WebSocket-Protocol")

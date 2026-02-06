@@ -82,6 +82,9 @@ impl Extension {
     /// RFC 6455 Section 9.1 の ABNF に従い、quoted-string をサポートする。
     /// quoted-string 内の `,` / `;` は区切り文字として扱わない。
     /// 復号後の値が token ABNF に準拠しない場合、その拡張は除外する。
+    ///
+    /// サーバー側でクライアントリクエストをパースする場合に使用する。
+    /// 不正な拡張オファーは無視して次の候補を試すため、エラーにしない。
     pub fn parse(s: &str) -> Vec<Extension> {
         Self::split_respecting_quotes(s, b',')
             .into_iter()
@@ -124,6 +127,60 @@ impl Extension {
                 Some(Extension { name, params })
             })
             .collect()
+    }
+
+    /// Sec-WebSocket-Extensions ヘッダー値を厳密にパースする
+    ///
+    /// RFC 6455 Section 9.1 の ABNF に従い、不適合な値はエラーとして返す。
+    /// クライアント側でサーバーレスポンスをパースする場合に使用する。
+    /// RFC 6455 Section 9.1: ABNF に適合しない場合は接続を失敗させなければならない (MUST)。
+    pub fn parse_strict(s: &str) -> Result<Vec<Extension>, String> {
+        let mut result = Vec::new();
+        for ext_str in Self::split_respecting_quotes(s, b',') {
+            let ext = ext_str.trim();
+            if ext.is_empty() {
+                continue;
+            }
+
+            let parts = Self::split_respecting_quotes(ext, b';');
+            let mut parts_iter = parts.into_iter();
+            let name = parts_iter
+                .next()
+                .map(|n| n.trim())
+                .filter(|n| !n.is_empty())
+                .ok_or_else(|| format!("empty extension name in '{}'", ext))?
+                .to_string();
+
+            let mut params = Vec::new();
+            for p in parts_iter {
+                let p = p.trim();
+                if p.is_empty() {
+                    continue;
+                }
+
+                if let Some((param_name, value)) = p.split_once('=') {
+                    let value = value.trim();
+                    let parsed_value = Self::parse_param_value(value).ok_or_else(|| {
+                        format!(
+                            "invalid parameter value in extension '{}': '{}'",
+                            name, value
+                        )
+                    })?;
+                    params.push(ExtensionParam {
+                        name: param_name.trim().to_string(),
+                        value: Some(parsed_value),
+                    });
+                } else {
+                    params.push(ExtensionParam {
+                        name: p.to_string(),
+                        value: None,
+                    });
+                }
+            }
+
+            result.push(Extension { name, params });
+        }
+        Ok(result)
     }
 
     /// quoted-string を考慮して区切り文字で分割する
