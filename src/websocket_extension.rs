@@ -79,47 +79,103 @@ impl Extension {
 
     /// Sec-WebSocket-Extensions ヘッダー値をパースする
     ///
-    /// RFC 6455 Section 9.1 の ABNF に従い、quoted-string もサポートする:
-    /// - `param="value"` → value
-    /// - `param="value with spaces"` → value with spaces
-    /// - `param="escaped\"quote"` → escaped"quote
+    /// RFC 6455 Section 9.1 の ABNF に従い、quoted-string をサポートする。
+    /// quoted-string 内の `,` / `;` は区切り文字として扱わない。
+    /// 復号後の値が token ABNF に準拠しない場合、その拡張は除外する。
     pub fn parse(s: &str) -> Vec<Extension> {
-        s.split(',')
+        Self::split_respecting_quotes(s, b',')
+            .into_iter()
             .filter_map(|ext| {
                 let ext = ext.trim();
                 if ext.is_empty() {
                     return None;
                 }
 
-                let mut parts = ext.split(';');
-                let name = parts.next()?.trim().to_string();
+                let parts = Self::split_respecting_quotes(ext, b';');
+                let mut parts_iter = parts.into_iter();
+                let name = parts_iter.next()?.trim().to_string();
+                if name.is_empty() {
+                    return None;
+                }
 
-                let params: Vec<ExtensionParam> = parts
-                    .filter_map(|p| {
-                        let p = p.trim();
-                        if p.is_empty() {
-                            return None;
-                        }
+                let mut params = Vec::new();
+                for p in parts_iter {
+                    let p = p.trim();
+                    if p.is_empty() {
+                        continue;
+                    }
 
-                        if let Some((name, value)) = p.split_once('=') {
-                            let value = value.trim();
-                            let parsed_value = Self::parse_param_value(value);
-                            Some(ExtensionParam {
-                                name: name.trim().to_string(),
-                                value: Some(parsed_value),
-                            })
-                        } else {
-                            Some(ExtensionParam {
-                                name: p.to_string(),
-                                value: None,
-                            })
-                        }
-                    })
-                    .collect();
+                    if let Some((param_name, value)) = p.split_once('=') {
+                        let value = value.trim();
+                        // RFC 6455 Section 9.1: 値が token に準拠しない場合は拡張全体を除外
+                        let parsed_value = Self::parse_param_value(value)?;
+                        params.push(ExtensionParam {
+                            name: param_name.trim().to_string(),
+                            value: Some(parsed_value),
+                        });
+                    } else {
+                        params.push(ExtensionParam {
+                            name: p.to_string(),
+                            value: None,
+                        });
+                    }
+                }
 
                 Some(Extension { name, params })
             })
             .collect()
+    }
+
+    /// quoted-string を考慮して区切り文字で分割する
+    fn split_respecting_quotes(s: &str, delimiter: u8) -> Vec<&str> {
+        let mut parts = Vec::new();
+        let mut start = 0;
+        let mut in_quotes = false;
+        let bytes = s.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            let b = bytes[i];
+            if in_quotes {
+                if b == b'\\' {
+                    // エスケープシーケンス: 次の文字をスキップ
+                    i += 2;
+                    continue;
+                }
+                if b == b'"' {
+                    in_quotes = false;
+                }
+                i += 1;
+                continue;
+            }
+            if b == b'"' {
+                in_quotes = true;
+                i += 1;
+                continue;
+            }
+            if b == delimiter {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            i += 1;
+        }
+        parts.push(&s[start..]);
+        parts
+    }
+
+    /// RFC 7230 の token ABNF に準拠するかチェック
+    ///
+    /// token = 1*tchar
+    /// tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
+    ///         "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
+    fn is_valid_token(s: &str) -> bool {
+        !s.is_empty()
+            && s.bytes().all(|b| {
+                matches!(b,
+                    b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' |
+                    b'^' | b'_' | b'`' | b'|' | b'~' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z'
+                )
+            })
     }
 
     /// パラメータ値をパースする (quoted-string 対応)
@@ -127,17 +183,29 @@ impl Extension {
     /// RFC 6455 Section 9.1:
     /// - quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
     /// - quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
-    fn parse_param_value(value: &str) -> String {
+    /// - 復号後の値は token ABNF に準拠する必要がある (MUST)
+    ///
+    /// 不正な値 (token 制約に違反) の場合は None を返す
+    fn parse_param_value(value: &str) -> Option<String> {
         // quoted-string の場合
         if value.starts_with('"') && value.len() >= 2 {
             let inner = &value[1..];
             if let Some(end_quote) = Self::find_unescaped_quote(inner) {
                 let quoted_content = &inner[..end_quote];
-                return Self::unescape_quoted_string(quoted_content);
+                let unescaped = Self::unescape_quoted_string(quoted_content);
+                // RFC 6455 Section 9.1: 復号後の値は token ABNF に準拠する必要がある
+                if Self::is_valid_token(&unescaped) {
+                    return Some(unescaped);
+                }
+                return None;
             }
         }
-        // token の場合はそのまま返す
-        value.to_string()
+        // token の場合: token として有効か検証
+        if Self::is_valid_token(value) {
+            Some(value.to_string())
+        } else {
+            None
+        }
     }
 
     /// エスケープされていないダブルクォートの位置を探す
@@ -441,16 +509,11 @@ impl PerMessageDeflateConfig {
     /// no_context_takeover はどちらかが要求すれば有効になる。
     pub fn negotiate(client_request: &Self, server_config: &Self) -> Self {
         Self {
-            // server_max_window_bits: クライアント要求があればそれを尊重（サーバー設定以下に制限）
-            server_max_window_bits: match (
-                client_request.server_max_window_bits,
-                server_config.server_max_window_bits,
-            ) {
-                (Some(client), Some(server)) => Some(client.min(server)),
-                (Some(client), None) => Some(client),
-                (None, Some(server)) => Some(server),
-                (None, None) => None,
-            },
+            // 現在の実装では window_bits=15 固定 (flate2 の制約) のため、
+            // server_max_window_bits は含めない (デフォルト 15 を使用)
+            // RFC 7692 Section 7.1.2.1: クライアントが server_max_window_bits を
+            // offer しても、サーバーはパラメータを含めないことで拒否できる
+            server_max_window_bits: None,
             // client_max_window_bits: クライアントが offer した場合のみ含める
             // RFC 7692: クライアントが offer していなければサーバーは含めてはならない
             client_max_window_bits: match (
@@ -647,6 +710,15 @@ mod tests {
     }
 
     #[test]
+    fn test_negotiate_forces_server_max_window_bits_to_none() {
+        // flate2 の制約により server_max_window_bits は常に None (デフォルト 15)
+        let client = PerMessageDeflateConfig::new().server_max_window_bits(10);
+        let server = PerMessageDeflateConfig::new().server_max_window_bits(12);
+        let result = PerMessageDeflateConfig::negotiate(&client, &server);
+        assert!(result.server_max_window_bits.is_none());
+    }
+
+    #[test]
     fn test_reject_invalid_window_bits_value() {
         // 7 は範囲外
         let ext = Extension::new("permessage-deflate").param("server_max_window_bits", Some("7"));
@@ -685,37 +757,48 @@ mod tests {
     // === RFC 6455 Section 9.1 quoted-string テスト ===
 
     #[test]
-    fn test_parse_quoted_string_value() {
-        // quoted-string: param="value"
-        let extensions = Extension::parse(r#"ext; param="quoted value""#);
+    fn test_parse_quoted_string_valid_token() {
+        // RFC 6455 Section 9.1: quoted-string は token と等価
+        let extensions = Extension::parse(r#"ext; param="simplevalue""#);
         assert_eq!(extensions.len(), 1);
         assert_eq!(extensions[0].params[0].name, "param");
         assert_eq!(
             extensions[0].params[0].value,
-            Some("quoted value".to_string())
+            Some("simplevalue".to_string())
         );
     }
 
     #[test]
-    fn test_parse_quoted_string_with_escape() {
-        // quoted-pair: \"
-        let extensions = Extension::parse(r#"ext; param="value with \"quote\"!""#);
+    fn test_parse_quoted_string_numeric() {
+        // quoted-string で数値を囲んだ場合も正しくパースされる
+        let extensions = Extension::parse(r#"permessage-deflate; server_max_window_bits="10""#);
         assert_eq!(extensions.len(), 1);
-        assert_eq!(
-            extensions[0].params[0].value,
-            Some(r#"value with "quote"!"#.to_string())
-        );
+        assert_eq!(extensions[0].name, "permessage-deflate");
+        assert_eq!(extensions[0].params[0].value, Some("10".to_string()));
     }
 
     #[test]
-    fn test_parse_quoted_string_with_escaped_backslash() {
-        // quoted-pair: \\
-        let extensions = Extension::parse(r#"ext; param="path\\to\\file""#);
-        assert_eq!(extensions.len(), 1);
-        assert_eq!(
-            extensions[0].params[0].value,
-            Some(r#"path\to\file"#.to_string())
-        );
+    fn test_parse_quoted_string_rejects_non_token_space() {
+        // RFC 6455 Section 9.1: 復号後の値が token に準拠しない場合は拡張を除外
+        // スペースは tchar に含まれない
+        let extensions = Extension::parse(r#"ext; param="quoted value""#);
+        assert!(extensions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_quoted_string_rejects_non_token_escape() {
+        // quoted-pair: \" → " (tchar に含まれない)
+        // RFC 6455 Section 9.1: 復号後の値が token に準拠しないため拡張を除外
+        let extensions = Extension::parse(r#"ext; param="value\"quote""#);
+        assert!(extensions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_quoted_string_rejects_non_token_backslash() {
+        // quoted-pair: \\ → \ (tchar に含まれない)
+        // RFC 6455 Section 9.1: 復号後の値が token に準拠しないため拡張を除外
+        let extensions = Extension::parse(r#"ext; param="path\\file""#);
+        assert!(extensions.is_empty());
     }
 
     #[test]
@@ -727,5 +810,29 @@ mod tests {
             extensions[0].params[0].value,
             Some("simplevalue".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_respects_quotes_with_comma() {
+        // quoted-string 内のカンマは拡張の区切りとして扱わない
+        // "a,b" は token に準拠しないため ext は除外、other は残る
+        let extensions = Extension::parse(r#"ext; param="a,b", other"#);
+        assert_eq!(extensions.len(), 1);
+        assert_eq!(extensions[0].name, "other");
+    }
+
+    #[test]
+    fn test_parse_respects_quotes_with_semicolon() {
+        // quoted-string 内のセミコロンはパラメータの区切りとして扱わない
+        // "a;b" は token に準拠しないため拡張を除外
+        let extensions = Extension::parse(r#"ext; param="a;b""#);
+        assert!(extensions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_rejects_invalid_unquoted_value() {
+        // token に準拠しない非 quoted 値は拡張を除外
+        let extensions = Extension::parse("ext; param=invalid value");
+        assert!(extensions.is_empty());
     }
 }

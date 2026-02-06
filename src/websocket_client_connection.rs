@@ -629,11 +629,13 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 .unwrap_or_default();
 
             self.complete_handshake(response, now)?;
-
-            if !remaining.is_empty() {
-                self.frame_decoder.feed(&remaining);
-            }
             self.handshake_validator = None;
+
+            // ハンドシェイク完了後、残りのデータがあれば即時処理する
+            // (101 応答と最初のフレームが同一受信バッファに含まれる場合)
+            if !remaining.is_empty() {
+                self.process_frames(&remaining, now)?;
+            }
         }
 
         Ok(())
@@ -723,6 +725,18 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                                     return Err(Error::handshake_rejected(format!(
                                         "client_max_window_bits {} exceeds client offer {}",
                                         server_cmwb, client_cmwb
+                                    )));
+                                }
+
+                                // RFC 7692 Section 7.2.1: 合意した window bits で圧縮する必要がある
+                                // 現在の実装では window_bits=15 固定 (flate2 の制約) のため、
+                                // client_max_window_bits < 15 はサポートしない
+                                if let Some(cmwb) = config.client_max_window_bits
+                                    && cmwb < 15
+                                {
+                                    return Err(Error::handshake_rejected(format!(
+                                        "client_max_window_bits={} is not supported (only 15 is supported)",
+                                        cmwb
                                     )));
                                 }
                             }
@@ -1438,7 +1452,34 @@ mod tests {
 
     #[test]
     fn test_accept_client_max_window_bits_when_offered() {
-        // client_max_window_bits を offer する deflate 設定でテスト
+        // client_max_window_bits=15 を offer し、サーバーが 15 で応答するケース
+        let deflate_config = PerMessageDeflateConfig::new().client_max_window_bits(15);
+        let options = ClientConnectionOptions::new("example.com", "/chat").deflate(deflate_config);
+        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
+        let now = Timestamp::from_millis(0);
+
+        conn.connect().unwrap();
+
+        let expected_accept = conn.compute_expected_accept();
+
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits=15\r\n\
+             \r\n",
+            expected_accept
+        );
+        let result = conn.feed_recv_buf(response.as_bytes(), now);
+
+        assert!(result.is_ok());
+        assert_eq!(conn.state(), ConnectionState::Connected);
+    }
+
+    #[test]
+    fn test_reject_client_max_window_bits_less_than_15() {
+        // client_max_window_bits < 15 はサポートしないため拒否する
         let deflate_config = PerMessageDeflateConfig::new().client_max_window_bits(12);
         let options = ClientConnectionOptions::new("example.com", "/chat").deflate(deflate_config);
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
@@ -1448,7 +1489,6 @@ mod tests {
 
         let expected_accept = conn.compute_expected_accept();
 
-        // サーバーが client_max_window_bits を含めたレスポンス（クライアントも offer している）
         let response = format!(
             "HTTP/1.1 101 Switching Protocols\r\n\
              Upgrade: websocket\r\n\
@@ -1460,8 +1500,9 @@ mod tests {
         );
         let result = conn.feed_recv_buf(response.as_bytes(), now);
 
-        assert!(result.is_ok());
-        assert_eq!(conn.state(), ConnectionState::Connected);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("client_max_window_bits=10 is not supported"));
     }
 
     #[test]

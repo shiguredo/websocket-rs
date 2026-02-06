@@ -221,34 +221,39 @@ impl HandshakeRequestValidator {
             .to_string();
 
         // RFC 6455 Section 4.2.1: Upgrade ヘッダーに "websocket" トークンが含まれていること
-        match request.get_header("Upgrade") {
-            Some(v) => {
-                let has_websocket = v
-                    .split(',')
-                    .any(|token| token.trim().eq_ignore_ascii_case("websocket"));
-                if !has_websocket {
-                    return Err(Error::handshake_rejected(format!(
-                        "invalid Upgrade header: {}",
-                        v
-                    )));
-                }
+        // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合は統合して評価する
+        {
+            let upgrade_values = request.get_headers("Upgrade");
+            if upgrade_values.is_empty() {
+                return Err(Error::handshake_rejected("missing Upgrade header"));
             }
-            None => return Err(Error::handshake_rejected("missing Upgrade header")),
+            let has_websocket = upgrade_values.iter().any(|v| {
+                v.split(',')
+                    .any(|token| token.trim().eq_ignore_ascii_case("websocket"))
+            });
+            if !has_websocket {
+                return Err(Error::handshake_rejected(format!(
+                    "invalid Upgrade header: {}",
+                    upgrade_values.join(", ")
+                )));
+            }
         }
 
-        match request.get_header("Connection") {
-            Some(v) => {
-                let has_upgrade = v
-                    .split(',')
-                    .any(|token| token.trim().eq_ignore_ascii_case("upgrade"));
-                if !has_upgrade {
-                    return Err(Error::handshake_rejected(format!(
-                        "invalid Connection header: {}",
-                        v
-                    )));
-                }
+        {
+            let connection_values = request.get_headers("Connection");
+            if connection_values.is_empty() {
+                return Err(Error::handshake_rejected("missing Connection header"));
             }
-            None => return Err(Error::handshake_rejected("missing Connection header")),
+            let has_upgrade = connection_values.iter().any(|v| {
+                v.split(',')
+                    .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+            });
+            if !has_upgrade {
+                return Err(Error::handshake_rejected(format!(
+                    "invalid Connection header: {}",
+                    connection_values.join(", ")
+                )));
+            }
         }
 
         match request.get_header("Sec-WebSocket-Version") {
@@ -382,32 +387,42 @@ impl HandshakeValidator {
             )));
         }
 
-        // Upgrade ヘッダーの検証
-        match response.get_header("Upgrade") {
-            Some(v) if v.eq_ignore_ascii_case("websocket") => {}
-            Some(v) => {
+        // Upgrade ヘッダーの検証（トークンとして検証）
+        // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合は統合して評価する
+        {
+            let upgrade_values = response.get_headers("Upgrade");
+            if upgrade_values.is_empty() {
+                return Err(Error::handshake_rejected("missing Upgrade header"));
+            }
+            let has_websocket = upgrade_values.iter().any(|v| {
+                v.split(',')
+                    .any(|token| token.trim().eq_ignore_ascii_case("websocket"))
+            });
+            if !has_websocket {
                 return Err(Error::handshake_rejected(format!(
                     "invalid Upgrade header: {}",
-                    v
+                    upgrade_values.join(", ")
                 )));
             }
-            None => return Err(Error::handshake_rejected("missing Upgrade header")),
         }
 
         // Connection ヘッダーの検証（トークンとして検証）
-        match response.get_header("Connection") {
-            Some(v) => {
-                let has_upgrade = v
-                    .split(',')
-                    .any(|token| token.trim().eq_ignore_ascii_case("upgrade"));
-                if !has_upgrade {
-                    return Err(Error::handshake_rejected(format!(
-                        "invalid Connection header: {}",
-                        v
-                    )));
-                }
+        // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合は統合して評価する
+        {
+            let connection_values = response.get_headers("Connection");
+            if connection_values.is_empty() {
+                return Err(Error::handshake_rejected("missing Connection header"));
             }
-            None => return Err(Error::handshake_rejected("missing Connection header")),
+            let has_upgrade = connection_values.iter().any(|v| {
+                v.split(',')
+                    .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+            });
+            if !has_upgrade {
+                return Err(Error::handshake_rejected(format!(
+                    "invalid Connection header: {}",
+                    connection_values.join(", ")
+                )));
+            }
         }
 
         // Sec-WebSocket-Accept ヘッダーの検証

@@ -33,11 +33,9 @@ impl Compressor {
     /// 現在の実装ではデフォルト値 (15) を使用する。
     ///
     /// RFC 7692 Section 7.2.1 では、合意した window bits を超える LZ77 ウィンドウを
-    /// 使用してはならないと規定されている。相手が 15 未満の window bits を要求した場合、
-    /// 現在の実装では RFC 非準拠となる可能性がある。
-    ///
-    /// TODO: flate2 の `any_zlib` feature を有効にして window bits を反映するか、
-    /// ハンドシェイク時に 15 以外の window bits を拒否する対応を検討する。
+    /// 使用してはならないと規定されている。この制約はハンドシェイク時に担保する:
+    /// - サーバー: negotiate() で server_max_window_bits を含めない (デフォルト 15)
+    /// - クライアント: client_max_window_bits < 15 のレスポンスを拒否する
     pub fn new(config: &PerMessageDeflateConfig, is_client: bool) -> Self {
         let level = 6u32; // デフォルト圧縮レベル
         let reset_after_message = if is_client {
