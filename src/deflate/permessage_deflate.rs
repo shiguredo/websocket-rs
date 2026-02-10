@@ -53,12 +53,11 @@ impl Compressor {
 
     /// 圧縮レベルを設定
     ///
-    /// 注: 圧縮レベルの動的変更は flate2 の `any_zlib` feature が必要なため、
-    /// 次のメッセージからレベルが適用される（reset 時）。
+    /// no_context_takeover が有効な場合、次のメッセージから新しいレベルが適用される。
+    /// no_context_takeover が無効な場合、圧縮コンテキストの維持が必要なため
+    /// レベル変更は適用されない。
     pub fn set_level(&mut self, level: u32) {
         self.level = level.min(9);
-        // 次の reset 時に新しい Compress インスタンスを生成するか、
-        // または compress.reset() 後に適用する
     }
 
     /// データを圧縮
@@ -109,9 +108,9 @@ impl Compressor {
             compressed.truncate(compressed.len() - 4);
         }
 
-        // no_context_takeover の場合はリセット
+        // no_context_takeover の場合はリセット（set_level() の変更もここで反映される）
         if self.reset_after_message {
-            self.compress.reset();
+            self.compress = Compress::new(Compression::new(self.level), false);
         }
 
         Ok(compressed)

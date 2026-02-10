@@ -485,14 +485,14 @@ impl HandshakeValidator {
             .map(String::from);
 
         // 拡張の取得
-        let extensions = response
-            .get_header("Sec-WebSocket-Extensions")
-            .map(|v| {
-                v.split(',')
-                    .map(|s| s.trim().to_string())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はすべて統合して評価する
+        let extension_values = response.get_headers("Sec-WebSocket-Extensions");
+        let extensions: Vec<String> = extension_values
+            .iter()
+            .flat_map(|v| v.split(','))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
 
         Ok(Some(HandshakeResponse {
             protocol,

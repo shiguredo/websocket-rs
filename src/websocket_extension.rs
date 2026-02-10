@@ -248,6 +248,10 @@ impl Extension {
         if value.starts_with('"') && value.len() >= 2 {
             let inner = &value[1..];
             if let Some(end_quote) = Self::find_unescaped_quote(inner) {
+                // RFC 6455 Section 9.1: 閉じクォート後に余剰文字がある場合は ABNF 不適合
+                if end_quote + 1 < inner.len() {
+                    return None;
+                }
                 let quoted_content = &inner[..end_quote];
                 let unescaped = Self::unescape_quoted_string(quoted_content);
                 // RFC 6455 Section 9.1: 復号後の値は token ABNF に準拠する必要がある

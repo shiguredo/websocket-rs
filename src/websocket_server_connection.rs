@@ -220,6 +220,11 @@ impl WebSocketServerConnection {
     }
 
     /// 受信データを処理
+    ///
+    /// RFC 6455 Section 7.1.7: このメソッドが Err を返した場合、呼び出し側は
+    /// 以降の feed_recv_buf() 呼び出しを停止しなければならない。
+    /// Err 後も呼び出しを継続すると、Closing 状態でデータフレームが
+    /// 処理される可能性がある。
     pub fn feed_recv_buf(&mut self, buf: &[u8]) -> Result<(), Error> {
         match self.state {
             ConnectionState::Disconnected | ConnectionState::Connecting => {
