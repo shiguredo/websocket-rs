@@ -31,3 +31,17 @@ path = "fuzz_targets/fuzz_http_response.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_extension_parse_strict"
+path = "fuzz_targets/fuzz_extension_parse_strict.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_deflate_decompress"
+path = "fuzz_targets/fuzz_deflate_decompress.rs"
+test = false
+doc = false
+bench = false

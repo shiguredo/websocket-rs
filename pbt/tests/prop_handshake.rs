@@ -709,6 +709,159 @@ Connection: Upgrade\r\n\
 }
 
 // =============================================================================
+// Extension::parse_strict のテスト
+// =============================================================================
+
+proptest! {
+    /// parse_strict: quoted-string の閉じクォート後に余剰文字がある場合は拒否
+    #[test]
+    fn prop_parse_strict_rejects_trailing_after_quote(
+        token in "[a-z]{3,10}",
+        trailing in "[a-z]{1,5}",
+    ) {
+        let input = format!(r#"ext; param="{}"{}"#, token, trailing);
+        let result = Extension::parse_strict(&input);
+        prop_assert!(result.is_err());
+    }
+
+    /// parse_strict: quoted-string 内のスペース（token ABNF 違反）は拒否
+    #[test]
+    fn prop_parse_strict_rejects_space_in_quoted_string(
+        left in "[a-z]{1,10}",
+        right in "[a-z]{1,10}",
+    ) {
+        let input = format!(r#"ext; param="{} {}""#, left, right);
+        let result = Extension::parse_strict(&input);
+        prop_assert!(result.is_err());
+    }
+
+    /// parse_strict: quoted-string 内のエスケープされたダブルクォート（token ABNF 違反）は拒否
+    #[test]
+    fn prop_parse_strict_rejects_escaped_quote(
+        left in "[a-z]{1,10}",
+        right in "[a-z]{1,10}",
+    ) {
+        let input = format!(r#"ext; param="{}\"{}""#, left, right);
+        let result = Extension::parse_strict(&input);
+        // \" は復号後 " になるが、" は tchar に含まれないため拒否
+        prop_assert!(result.is_err());
+    }
+
+    /// parse_strict: quoted-string 内のエスケープされたバックスラッシュ（token ABNF 違反）は拒否
+    #[test]
+    fn prop_parse_strict_rejects_escaped_backslash(
+        left in "[a-z]{1,10}",
+        right in "[a-z]{1,10}",
+    ) {
+        let input = format!(r#"ext; param="{}\\{}""#, left, right);
+        let result = Extension::parse_strict(&input);
+        // \\ は復号後 \ になるが、\ は tchar に含まれないため拒否
+        prop_assert!(result.is_err());
+    }
+
+    /// parse_strict: 有効な token を quoted-string で囲んでも正しくパースされる
+    #[test]
+    fn prop_parse_strict_accepts_valid_quoted_token(
+        token in "[a-zA-Z0-9!#$%&'*+.^_`|~-]{1,20}",
+    ) {
+        let input = format!(r#"ext; param="{}""#, token);
+        let result = Extension::parse_strict(&input);
+        prop_assert!(result.is_ok());
+        let exts = result.unwrap();
+        prop_assert_eq!(exts.len(), 1);
+        prop_assert_eq!(&exts[0].params[0].value, &Some(token));
+    }
+
+    /// parse_strict: unquoted token がそのまま保持される
+    #[test]
+    fn prop_parse_strict_preserves_unquoted_token(
+        token in "[a-zA-Z0-9!#$%&'*+.^_`|~-]{1,20}",
+    ) {
+        let input = format!("ext; param={}", token);
+        let result = Extension::parse_strict(&input);
+        prop_assert!(result.is_ok());
+        let exts = result.unwrap();
+        prop_assert_eq!(exts.len(), 1);
+        prop_assert_eq!(&exts[0].params[0].value, &Some(token));
+    }
+
+    /// parse_strict: quoted-string 内のカンマは拡張区切りとして扱わない
+    #[test]
+    fn prop_parse_strict_respects_comma_in_quotes(
+        left in "[a-z]{1,5}",
+        right in "[a-z]{1,5}",
+    ) {
+        // "left,right" は token ABNF 違反（カンマは tchar に含まれない）なので拒否される
+        let input = format!(r#"ext; param="{},{}", other"#, left, right);
+        let result = Extension::parse_strict(&input);
+        prop_assert!(result.is_err());
+    }
+
+    /// parse_strict: quoted-string 内のセミコロンはパラメータ区切りとして扱わない
+    #[test]
+    fn prop_parse_strict_respects_semicolon_in_quotes(
+        left in "[a-z]{1,5}",
+        right in "[a-z]{1,5}",
+    ) {
+        // "left;right" は token ABNF 違反（セミコロンは tchar に含まれない）なので拒否される
+        let input = format!(r#"ext; param="{};{}""#, left, right);
+        let result = Extension::parse_strict(&input);
+        prop_assert!(result.is_err());
+    }
+
+    /// parse_strict: token に準拠しない非 quoted 値は拒否される
+    #[test]
+    fn prop_parse_strict_rejects_invalid_unquoted_value(
+        left in "[a-z]{1,5}",
+        right in "[a-z]{1,5}",
+    ) {
+        // スペースを含む非 quoted 値
+        let input = format!("ext; param={} {}", left, right);
+        let result = Extension::parse_strict(&input);
+        prop_assert!(result.is_err());
+    }
+}
+
+// =============================================================================
+// Extension::parse (loose) の quoted-string テスト
+// =============================================================================
+
+proptest! {
+    /// parse (loose): quoted-string 内のスペース（token ABNF 違反）で拡張全体を除外
+    #[test]
+    fn prop_parse_loose_excludes_space_in_quoted(
+        left in "[a-z]{1,10}",
+        right in "[a-z]{1,10}",
+    ) {
+        let input = format!(r#"ext; param="{} {}""#, left, right);
+        let extensions = Extension::parse(&input);
+        prop_assert!(extensions.is_empty());
+    }
+
+    /// parse (loose): 有効な token を quoted-string で囲んでも正しくパースされる
+    #[test]
+    fn prop_parse_loose_accepts_valid_quoted_token(
+        token in "[a-zA-Z0-9]{1,20}",
+    ) {
+        let input = format!(r#"ext; param="{}""#, token);
+        let extensions = Extension::parse(&input);
+        prop_assert_eq!(extensions.len(), 1);
+        prop_assert_eq!(&extensions[0].params[0].value, &Some(token));
+    }
+
+    /// parse (loose): token に準拠しない非 quoted 値で拡張全体を除外
+    #[test]
+    fn prop_parse_loose_excludes_invalid_unquoted(
+        left in "[a-z]{1,5}",
+        right in "[a-z]{1,5}",
+    ) {
+        let input = format!("ext; param={} {}", left, right);
+        let extensions = Extension::parse(&input);
+        prop_assert!(extensions.is_empty());
+    }
+}
+
+// =============================================================================
 // チャンク送信のテスト
 // =============================================================================
 

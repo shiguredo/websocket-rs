@@ -816,6 +816,159 @@ proptest! {
     }
 }
 
+// ==== deflate 統合テスト ====
+
+/// deflate 対応接続を作成して Connected 状態まで進める
+fn setup_connected_client_with_deflate()
+-> (WebSocketClientConnection<FixedRandom>, Timestamp, [u8; 16]) {
+    let options =
+        ClientConnectionOptions::new("example.com", "/ws").deflate(PerMessageDeflateConfig::new());
+    let random = FixedRandom::new();
+    let nonce = random.nonce;
+    let mut conn = WebSocketClientConnection::new(options, random);
+    let now = Timestamp::from_millis(0);
+
+    conn.connect().unwrap();
+    while conn.poll_output().is_some() {}
+
+    let accept = compute_accept(&nonce);
+    let response = create_valid_handshake_response(&accept, None, Some("permessage-deflate"));
+    conn.feed_recv_buf(&response, now).unwrap();
+
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    (conn, now, nonce)
+}
+
+proptest! {
+    /// 圧縮テキスト送信（RSV1 フラグとペイロード検証）
+    #[test]
+    fn prop_deflate_send_compressed_text(
+        text in "[\\x20-\\x7E]{65,200}",
+    ) {
+        let (mut conn, _, _) = setup_connected_client_with_deflate();
+
+        conn.send_text(&text).unwrap();
+
+        let output = conn.poll_output().unwrap();
+        match output {
+            ConnectionOutput::SendData(data) => {
+                // RSV1 が設定されていること（圧縮フレーム）
+                prop_assert_eq!(data[0] & 0x40, 0x40, "RSV1 should be set for compressed messages");
+                prop_assert_eq!(data[0] & 0x0F, 0x01, "opcode should be text");
+            }
+            _ => panic!("expected SendData"),
+        }
+    }
+
+    /// 圧縮テキスト受信（解凍検証）
+    #[test]
+    fn prop_deflate_receive_compressed_text(
+        text in "[\\x20-\\x7E]{1,200}",
+    ) {
+        let (mut conn, now, _) = setup_connected_client_with_deflate();
+
+        // サーバー側コーデックでテキストを圧縮
+        let mut server_deflate =
+            shiguredo_websocket::PerMessageDeflate::new_server(PerMessageDeflateConfig::new());
+        let compressed = server_deflate.compress(text.as_bytes()).unwrap();
+
+        // 圧縮フレームを構築: FIN=1, RSV1=1, opcode=text(1)
+        let mut frame = vec![0xC1]; // FIN + RSV1 + text
+        if compressed.len() >= 126 {
+            frame.push(126);
+            frame.extend_from_slice(&(compressed.len() as u16).to_be_bytes());
+        } else {
+            frame.push(compressed.len() as u8);
+        }
+        frame.extend_from_slice(&compressed);
+
+        conn.feed_recv_buf(&frame, now).unwrap();
+
+        let mut found = false;
+        while let Some(event) = conn.poll_event() {
+            if let ConnectionEvent::TextMessage(received) = event {
+                prop_assert_eq!(received, text);
+                found = true;
+                break;
+            }
+        }
+        prop_assert!(found, "TextMessage event not found");
+    }
+
+    /// deflate ネゴシエーション（ハンドシェイクでの拡張合意）
+    #[test]
+    fn prop_deflate_negotiation(_dummy in Just(())) {
+        let (conn, _, _) = setup_connected_client_with_deflate();
+
+        prop_assert!(conn.extensions().contains(&"permessage-deflate".to_string()));
+    }
+
+    /// 小メッセージの非圧縮（しきい値以下）
+    #[test]
+    fn prop_deflate_small_message_not_compressed(
+        text in "[\\x20-\\x7E]{1,10}",
+    ) {
+        let (mut conn, _, _) = setup_connected_client_with_deflate();
+
+        conn.send_text(&text).unwrap();
+
+        let output = conn.poll_output().unwrap();
+        match output {
+            ConnectionOutput::SendData(data) => {
+                // RSV1 が設定されていないこと（非圧縮）
+                prop_assert_eq!(data[0] & 0x40, 0x00, "RSV1 should not be set for small messages");
+            }
+            _ => panic!("expected SendData"),
+        }
+    }
+
+    /// Zip Bomb 保護（最大解凍サイズ超過）
+    #[test]
+    fn prop_deflate_zip_bomb_protection(
+        repeat_count in 3usize..10,
+    ) {
+        let max_decompressed = 100usize;
+        let options = ClientConnectionOptions::new("example.com", "/ws")
+            .deflate(PerMessageDeflateConfig::new())
+            .max_decompressed_size(max_decompressed);
+        let random = FixedRandom::new();
+        let nonce = random.nonce;
+        let mut conn = WebSocketClientConnection::new(options, random);
+        let now = Timestamp::from_millis(0);
+
+        conn.connect().unwrap();
+        while conn.poll_output().is_some() {}
+
+        let accept = compute_accept(&nonce);
+        let response = create_valid_handshake_response(&accept, None, Some("permessage-deflate"));
+        conn.feed_recv_buf(&response, now).unwrap();
+        while conn.poll_event().is_some() {}
+        while conn.poll_output().is_some() {}
+
+        // max_decompressed を超えるデータを圧縮
+        let mut server_deflate =
+            shiguredo_websocket::PerMessageDeflate::new_server(PerMessageDeflateConfig::new());
+        let large_data = "A".repeat(max_decompressed * repeat_count);
+        let compressed = server_deflate.compress(large_data.as_bytes()).unwrap();
+
+        let mut frame = vec![0xC1];
+        if compressed.len() >= 126 {
+            frame.push(126);
+            frame.extend_from_slice(&(compressed.len() as u16).to_be_bytes());
+        } else {
+            frame.push(compressed.len() as u8);
+        }
+        frame.extend_from_slice(&compressed);
+
+        let result = conn.feed_recv_buf(&frame, now);
+        prop_assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        prop_assert!(err_msg.contains("exceeds maximum limit"));
+    }
+}
+
 // ==== 不正な入力に対する耐性テスト ====
 
 proptest! {

@@ -186,17 +186,16 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_http11"
-version = "2026.1.0-canary.0"
+version = "2026.1.0-canary.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b005120623e2c64f7273561c06b5dfa4152a02015b5dddaf672483134239dac8"
+checksum = "310081a616f9f1ccbec69ccca266014d01684ea0fa4608ef98252f82a361ae6d"
 
 [[package]]
 name = "shiguredo_websocket"
-version = "2026.1.0-canary.0"
+version = "2026.1.0-canary.3"
 dependencies = [
  "base64",
  "flate2",
- "getrandom",
  "sha1",
  "shiguredo_http11",
 ]

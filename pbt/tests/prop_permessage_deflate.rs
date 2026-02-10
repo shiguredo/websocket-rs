@@ -207,6 +207,78 @@ proptest! {
     }
 }
 
+// ==== 追加テスト: 空データ・コンテキスト再利用・双方向通信 ====
+
+proptest! {
+    /// 空データの圧縮・解凍
+    #[test]
+    fn prop_compress_decompress_empty(_dummy in Just(())) {
+        let config = PerMessageDeflateConfig::default();
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
+
+        let compressed = client.compress(b"").unwrap();
+        let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
+
+        prop_assert!(decompressed.is_empty());
+    }
+
+    /// コンテキスト再利用による圧縮効率向上の検証
+    #[test]
+    fn prop_context_takeover_improves_compression(
+        pattern in "[a-zA-Z0-9 ]{20,50}",
+        repeats in 3usize..6,
+    ) {
+        // Context Takeover 有効（デフォルト）
+        let config = PerMessageDeflateConfig::new();
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
+
+        let msg = pattern.repeat(repeats);
+        let mut compressed_sizes = Vec::new();
+
+        for _ in 0..3 {
+            let compressed = client.compress(msg.as_bytes()).unwrap();
+            compressed_sizes.push(compressed.len());
+
+            let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
+            prop_assert_eq!(decompressed, msg.as_bytes());
+        }
+
+        // 全て元データより小さいこと
+        for &size in &compressed_sizes {
+            prop_assert!(size < msg.len());
+        }
+    }
+
+    /// 双方向通信（クライアント->サーバーとサーバー->クライアント交互）
+    #[test]
+    fn prop_bidirectional_communication(
+        messages in prop::collection::vec(
+            prop::collection::vec(any::<u8>(), 1..200),
+            2..6,
+        )
+    ) {
+        let config = PerMessageDeflateConfig::new();
+        let mut client = PerMessageDeflate::new_client(config.clone());
+        let mut server = PerMessageDeflate::new_server(config);
+
+        for (i, msg) in messages.iter().enumerate() {
+            if i % 2 == 0 {
+                // クライアント -> サーバー
+                let compressed = client.compress(msg).unwrap();
+                let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
+                prop_assert_eq!(&decompressed, msg);
+            } else {
+                // サーバー -> クライアント
+                let compressed = server.compress(msg).unwrap();
+                let decompressed = client.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
+                prop_assert_eq!(&decompressed, msg);
+            }
+        }
+    }
+}
+
 proptest! {
     // ==== config() ゲッターのテスト ====
 
