@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::error::Error;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -291,15 +293,36 @@ impl HandshakeRequestValidator {
             .to_string();
         validate_key(&key)?;
 
+        // RFC 6455 Section 4.2.1 step 10:
+        // Sec-WebSocket-Protocol の各要素は token (1*tchar) でなければならない (MUST)
+        // すべての要素が一意でなければならない (MUST)
         // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はリスト値として統合する
         let protocols = {
             let values = request.get_headers("Sec-WebSocket-Protocol");
-            values
+            let protocols: Vec<String> = values
                 .iter()
                 .flat_map(|v| v.split(','))
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
+                .collect();
+            for p in &protocols {
+                if !is_valid_token(p) {
+                    return Err(Error::handshake_rejected(format!(
+                        "invalid Sec-WebSocket-Protocol value: {}",
+                        p
+                    )));
+                }
+            }
+            let mut seen = HashSet::new();
+            for p in &protocols {
+                if !seen.insert(p.as_str()) {
+                    return Err(Error::handshake_rejected(format!(
+                        "duplicate Sec-WebSocket-Protocol value: {}",
+                        p
+                    )));
+                }
+            }
+            protocols
         };
 
         // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はリスト値として統合する
@@ -515,6 +538,21 @@ pub fn calculate_accept_from_key(key: &str) -> String {
     let hash = hasher.finalize();
 
     STANDARD.encode(hash)
+}
+
+/// RFC 7230 の token ABNF に準拠するかチェックする
+///
+/// token = 1*tchar
+/// tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
+///         "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
+fn is_valid_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes().all(|b| {
+            matches!(b,
+                b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' |
+                b'^' | b'_' | b'`' | b'|' | b'~' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z'
+            )
+        })
 }
 
 fn validate_key(key: &str) -> Result<(), Error> {

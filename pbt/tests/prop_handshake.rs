@@ -917,3 +917,147 @@ proptest! {
         prop_assert!(result.is_ok());
     }
 }
+
+// =============================================================================
+// Sec-WebSocket-Protocol の token 検証・一意性チェックのテスト
+// =============================================================================
+
+proptest! {
+    /// token ABNF に違反する Sec-WebSocket-Protocol 値は拒否される
+    ///
+    /// カンマはリスト区切りとして split されるため除外する。
+    /// スペースは trim で除去されるため除外する。
+    #[test]
+    fn prop_invalid_protocol_token_rejected(
+        invalid_char in prop::sample::select(vec!['(', ')', '<', '>', '@', ';', ':', '\\', '"', '/', '[', ']', '?', '=', '{', '}']),
+        prefix in "[a-z]{1,5}",
+        suffix in "[a-z]{1,5}",
+    ) {
+        let key = generate_valid_ws_key();
+        let invalid_protocol = format!("{}{}{}", prefix, invalid_char, suffix);
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Protocol: {}\r\n\
+             \r\n",
+            key, invalid_protocol
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+
+    /// 重複する Sec-WebSocket-Protocol 値は拒否される
+    #[test]
+    fn prop_duplicate_protocol_rejected(
+        protocol in "[a-z]{3,10}",
+    ) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Protocol: {}, {}\r\n\
+             \r\n",
+            key, protocol, protocol
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+
+    /// 有効な token の Sec-WebSocket-Protocol 値は受理される
+    #[test]
+    fn prop_valid_protocol_token_accepted(
+        protocol in "[a-zA-Z][a-zA-Z0-9!#$%&'*+.^_`|~-]{0,19}",
+    ) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Protocol: {}\r\n\
+             \r\n",
+            key, protocol
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_ok());
+        let req = result.unwrap().unwrap();
+        prop_assert_eq!(req.protocols, vec![protocol]);
+    }
+
+    /// 一意な複数プロトコルは受理される
+    #[test]
+    fn prop_unique_multiple_protocols_accepted(
+        p1 in "[a-z]{3,8}",
+        p2 in "[A-Z]{3,8}",
+    ) {
+        // p1 と p2 が同一でないことを保証（大小が異なるため常に異なる）
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Protocol: {}, {}\r\n\
+             \r\n",
+            key, p1, p2
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_ok());
+        let req = result.unwrap().unwrap();
+        prop_assert_eq!(req.protocols, vec![p1, p2]);
+    }
+
+    /// 複数ヘッダー行に分散した重複プロトコルも拒否される
+    #[test]
+    fn prop_duplicate_protocol_across_headers_rejected(
+        protocol in "[a-z]{3,10}",
+    ) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Protocol: {}\r\n\
+             Sec-WebSocket-Protocol: {}\r\n\
+             \r\n",
+            key, protocol, protocol
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+}
