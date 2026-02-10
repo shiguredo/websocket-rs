@@ -655,7 +655,7 @@ checksum = "b48daa3ba978fc33bd28958e63038f59bf67b0508478e940b8f3571595999ad7"
 
 [[package]]
 name = "shiguredo_websocket"
-version = "2026.1.0-canary.2"
+version = "2026.1.0-canary.3"
 dependencies = [
  "base64",
  "flate2",
