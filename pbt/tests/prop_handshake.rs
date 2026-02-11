@@ -101,7 +101,7 @@ proptest! {
     #[test]
     fn prop_nonce_format(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
-        let encoded = request.build(nonce);
+        let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
 
         // 必須ヘッダーが含まれる
@@ -127,7 +127,7 @@ proptest! {
         nonce in any::<[u8; 16]>()
     ) {
         let request = HandshakeRequest::new(&path, &host);
-        let encoded = request.build(nonce);
+        let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
 
         let expected_get = format!("GET {} HTTP/1.1", path);
@@ -143,7 +143,7 @@ proptest! {
         nonce in any::<[u8; 16]>()
     ) {
         let request = HandshakeRequest::new("/", "example.com").origin(&origin);
-        let encoded = request.build(nonce);
+        let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
 
         let expected_origin = format!("Origin: {}", origin);
@@ -157,7 +157,7 @@ proptest! {
         nonce in any::<[u8; 16]>()
     ) {
         let request = HandshakeRequest::new("/", "example.com").protocol(&protocol);
-        let encoded = request.build(nonce);
+        let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
 
         let expected_protocol = format!("Sec-WebSocket-Protocol: {}", protocol);
@@ -174,7 +174,7 @@ proptest! {
         for p in &protocols {
             request = request.protocol(p);
         }
-        let encoded = request.build(nonce);
+        let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
 
         let expected_protocols = format!("Sec-WebSocket-Protocol: {}", protocols.join(", "));
@@ -188,7 +188,7 @@ proptest! {
         nonce in any::<[u8; 16]>()
     ) {
         let request = HandshakeRequest::new("/", "example.com").extension(&extension);
-        let encoded = request.build(nonce);
+        let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
 
         let expected_extension = format!("Sec-WebSocket-Extensions: {}", extension);
@@ -204,7 +204,7 @@ proptest! {
     ) {
         let request = HandshakeRequest::new("/", "example.com")
             .header(&header_name, &header_value);
-        let encoded = request.build(nonce);
+        let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
 
         let expected_header = format!("{}: {}", header_name, header_value);
@@ -1057,6 +1057,122 @@ proptest! {
         let mut validator = HandshakeRequestValidator::new();
         validator.feed(request.as_bytes());
         let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+}
+
+// =============================================================================
+// 空要素ヘッダーの拒否テスト (RFC 6455 ABNF 1#extension / 1#token)
+// =============================================================================
+
+proptest! {
+    /// サーバー側: Sec-WebSocket-Extensions にカンマのみの値は拒否される
+    #[test]
+    fn prop_server_extensions_empty_elements_rejected(
+        commas in ",{1,5}",
+    ) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Extensions: {}\r\n\
+             \r\n",
+            key, commas
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+
+    /// クライアント側: サーバーレスポンスの Sec-WebSocket-Extensions にカンマのみの値は拒否される
+    #[test]
+    fn prop_client_extensions_empty_elements_rejected(
+        nonce in any::<[u8; 16]>(),
+        commas in ",{1,5}",
+    ) {
+        let accept = calculate_expected_accept(&nonce);
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: {}\r\n\
+             \r\n",
+            accept, commas
+        );
+
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+
+    /// サーバー側: Sec-WebSocket-Protocol にカンマのみの値は拒否される
+    #[test]
+    fn prop_server_protocol_empty_elements_rejected(
+        commas in ",{1,5}",
+    ) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Protocol: {}\r\n\
+             \r\n",
+            key, commas
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+}
+
+// =============================================================================
+// build() のプロトコル検証テスト
+// =============================================================================
+
+proptest! {
+    /// build() は不正な token 文字を含むプロトコルを拒否する
+    #[test]
+    fn prop_build_rejects_invalid_protocol_token(
+        invalid_char in prop::sample::select(vec!['(', ')', '<', '>', '@', ';', ':', '\\', '"', '/', '[', ']', '?', '=', '{', '}']),
+        prefix in "[a-z]{1,5}",
+        suffix in "[a-z]{1,5}",
+        nonce in any::<[u8; 16]>(),
+    ) {
+        let invalid_protocol = format!("{}{}{}", prefix, invalid_char, suffix);
+        let request = HandshakeRequest::new("/", "example.com")
+            .protocol(&invalid_protocol);
+        let result = request.build(nonce);
+
+        prop_assert!(result.is_err());
+    }
+
+    /// build() は重複プロトコルを拒否する
+    #[test]
+    fn prop_build_rejects_duplicate_protocol(
+        protocol in "[a-z]{3,10}",
+        nonce in any::<[u8; 16]>(),
+    ) {
+        let request = HandshakeRequest::new("/", "example.com")
+            .protocol(&protocol)
+            .protocol(&protocol);
+        let result = request.build(nonce);
 
         prop_assert!(result.is_err());
     }

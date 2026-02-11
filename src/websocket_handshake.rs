@@ -66,8 +66,30 @@ impl HandshakeRequest {
 
     /// ハンドシェイクリクエストをビルドする
     ///
-    /// 戻り値: (エンコードされたリクエスト, 16 バイトの nonce)
-    pub fn build(&self, nonce: [u8; 16]) -> Vec<u8> {
+    /// 戻り値: エンコードされたリクエスト
+    pub fn build(&self, nonce: [u8; 16]) -> Result<Vec<u8>, Error> {
+        // RFC 6455 Section 4.2.1: Sec-WebSocket-Protocol の各要素は token でなければならない
+        for p in &self.protocols {
+            if !is_valid_token(p) {
+                return Err(Error::invalid_input(format!(
+                    "invalid Sec-WebSocket-Protocol value: {}",
+                    p
+                )));
+            }
+        }
+        // RFC 6455 Section 4.2.1: すべての要素が一意でなければならない
+        {
+            let mut seen = HashSet::new();
+            for p in &self.protocols {
+                if !seen.insert(p.as_str()) {
+                    return Err(Error::invalid_input(format!(
+                        "duplicate Sec-WebSocket-Protocol value: {}",
+                        p
+                    )));
+                }
+            }
+        }
+
         let key = STANDARD.encode(nonce);
 
         let mut request = Request::new("GET", &self.path)
@@ -93,7 +115,7 @@ impl HandshakeRequest {
             request = request.header(name, value);
         }
 
-        request.encode()
+        Ok(request.encode())
     }
 }
 
@@ -305,6 +327,13 @@ impl HandshakeRequestValidator {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
+            // RFC 6455 Section 4.2.1: 1#token
+            // ヘッダーが存在するが有効な token が 0 個の場合は ABNF 違反
+            if !values.is_empty() && protocols.is_empty() {
+                return Err(Error::handshake_rejected(
+                    "malformed Sec-WebSocket-Protocol header: no valid protocols",
+                ));
+            }
             for p in &protocols {
                 if !is_valid_token(p) {
                     return Err(Error::handshake_rejected(format!(
@@ -328,12 +357,20 @@ impl HandshakeRequestValidator {
         // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はリスト値として統合する
         let extensions = {
             let values = request.get_headers("Sec-WebSocket-Extensions");
-            values
+            let extensions: Vec<String> = values
                 .iter()
                 .flat_map(|v| v.split(','))
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
+                .collect();
+            // RFC 6455 Section 9.1: extension-list = 1#extension
+            // ヘッダーが存在するが有効な拡張が 0 個の場合は ABNF 違反
+            if !values.is_empty() && extensions.is_empty() {
+                return Err(Error::handshake_rejected(
+                    "malformed Sec-WebSocket-Extensions header: no valid extensions",
+                ));
+            }
+            extensions
         };
 
         let origin = request.get_header("Origin").map(String::from);
@@ -516,6 +553,13 @@ impl HandshakeValidator {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+        // RFC 6455 Section 9.1: extension-list = 1#extension
+        // ヘッダーが存在するが有効な拡張が 0 個の場合は ABNF 違反
+        if !extension_values.is_empty() && extensions.is_empty() {
+            return Err(Error::handshake_rejected(
+                "malformed Sec-WebSocket-Extensions header: no valid extensions",
+            ));
+        }
 
         Ok(Some(HandshakeResponse {
             protocol,

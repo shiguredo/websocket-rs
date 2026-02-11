@@ -47,7 +47,7 @@ proptest! {
     #[test]
     fn prop_section_4_1_7_websocket_key_format(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
-        let encoded = request.build(nonce);
+        let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
 
         // Sec-WebSocket-Key を抽出
@@ -69,13 +69,13 @@ proptest! {
     ) {
         // プロトコルなし
         let request1 = HandshakeRequest::new("/", "example.com");
-        let encoded1 = request1.build(nonce);
+        let encoded1 = request1.build(nonce).unwrap();
         let s1 = String::from_utf8(encoded1).unwrap();
         prop_assert!(!s1.contains("Sec-WebSocket-Protocol"));
 
         // プロトコルあり
         let request2 = HandshakeRequest::new("/", "example.com").protocol(&protocol);
-        let encoded2 = request2.build(nonce);
+        let encoded2 = request2.build(nonce).unwrap();
         let s2 = String::from_utf8(encoded2).unwrap();
         let expected = format!("Sec-WebSocket-Protocol: {}", protocol);
         prop_assert!(s2.contains(&expected));

@@ -389,7 +389,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             request = request.header(name, value);
         }
 
-        let encoded = request.build(self.nonce);
+        let encoded = request.build(self.nonce)?;
 
         // ハンドシェイクバリデーターを作成
         self.handshake_validator = Some(HandshakeValidator::new(self.nonce));
