@@ -545,8 +545,14 @@ impl HandshakeValidator {
             .map(String::from);
 
         // 拡張の取得
-        // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はすべて統合して評価する
+        // RFC 6455 Section 4.2.2: サーバーレスポンスでは Sec-WebSocket-Extensions ヘッダーは
+        // 最大 1 行のみ許容される（複数行は MUST NOT）
         let extension_values = response.get_headers("Sec-WebSocket-Extensions");
+        if extension_values.len() > 1 {
+            return Err(Error::handshake_rejected(
+                "multiple Sec-WebSocket-Extensions headers in response",
+            ));
+        }
         let extensions: Vec<String> = extension_values
             .iter()
             .flat_map(|v| v.split(','))

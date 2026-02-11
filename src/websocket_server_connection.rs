@@ -336,6 +336,38 @@ impl WebSocketServerConnection {
                     // サーバー自身が送信するレスポンスなので、ClientResponse コンテキストで検証
                     match PerMessageDeflateConfig::from_extension_for_client_response(&ext) {
                         Ok(config) => {
+                            // RFC 7692 Section 7.2.1: 合意した server_max_window_bits で
+                            // 圧縮する必要がある。現在の実装では window_bits=15 固定
+                            // (flate2 の制約) のため、server_max_window_bits < 15 は
+                            // サポートしない
+                            if let Some(smwb) = config.server_max_window_bits
+                                && smwb < 15
+                            {
+                                return Err(Error::handshake_rejected(format!(
+                                    "server_max_window_bits={} is not supported (only 15 is supported)",
+                                    smwb
+                                )));
+                            }
+
+                            // RFC 7692 Section 7.1.2.2: クライアントが client_max_window_bits を
+                            // offer していない場合、レスポンスに含めてはならない (MUST NOT)
+                            if ext.get_param("client_max_window_bits").is_some() {
+                                let client_offered_cmwb =
+                                    request.extensions.iter().any(|req_ext_str| {
+                                        Extension::parse(req_ext_str).iter().any(|req_ext| {
+                                            req_ext.name == "permessage-deflate"
+                                                && req_ext
+                                                    .get_param("client_max_window_bits")
+                                                    .is_some()
+                                        })
+                                    });
+                                if !client_offered_cmwb {
+                                    return Err(Error::handshake_rejected(
+                                        "client_max_window_bits included without client offer",
+                                    ));
+                                }
+                            }
+
                             self.deflate = Some(PerMessageDeflate::new_server(config));
                         }
                         Err(_) => {
