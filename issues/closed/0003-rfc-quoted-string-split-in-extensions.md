@@ -61,3 +61,13 @@ permessage-deflate 以外の拡張をサポートする時点で対応する。
 quoted-string を考慮した extension-list パーサーを実装する。
 
 参考: RFC 7230 Section 7 "ABNF List Extension: #rule"
+
+## 対応内容 (2026-02-26)
+
+未修正のまま closed とする。ソースコードに `TODO:` コメントとファイルパスを残して将来の対応を明示した。
+
+- `src/websocket_handshake.rs` のリクエスト解析側 `flat_map(|v| v.split(','))` 直前
+- `src/websocket_handshake.rs` のレスポンス解析側 `flat_map(|v| v.split(','))` 直前
+- `src/websocket_handshake.rs` の `validate_extension_entry` 内 `ext.split(';')` 直前
+
+permessage-deflate 以外の拡張を実装する際に stateful パーサーへ置き換えること。

@@ -378,6 +378,11 @@ impl HandshakeRequestValidator {
         // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はリスト値として統合する
         let extensions = {
             let values = request.get_headers("Sec-WebSocket-Extensions");
+            // TODO: issues/closed/0003-rfc-quoted-string-split-in-extensions.md
+            // RFC 7230 Section 7 の #rule に準拠した quoted-string 対応パーサーへの置き換え
+            // 現在は ',' で単純分割しており、extension-param 値が quoted-string の場合に誤分割する。
+            // permessage-deflate (RFC 7692) のパラメータはすべて token のため実害はないが、
+            // 将来の拡張実装時には stateful パーサーへの置き換えが必要。
             let extensions: Vec<String> = values
                 .iter()
                 .flat_map(|v| v.split(','))
@@ -577,6 +582,11 @@ impl HandshakeValidator {
                 "duplicate Sec-WebSocket-Extensions header in HTTP response",
             ));
         }
+        // TODO: issues/closed/0003-rfc-quoted-string-split-in-extensions.md
+        // RFC 7230 Section 7 の #rule に準拠した quoted-string 対応パーサーへの置き換え
+        // 現在は ',' で単純分割しており、extension-param 値が quoted-string の場合に誤分割する。
+        // permessage-deflate (RFC 7692) のパラメータはすべて token のため実害はないが、
+        // 将来の拡張実装時には stateful パーサーへの置き換えが必要。
         let extensions: Vec<String> = extension_values
             .iter()
             .flat_map(|v| v.split(','))
@@ -638,6 +648,9 @@ fn is_valid_token(s: &str) -> bool {
 /// extension       = extension-token *( ";" extension-param )
 /// extension-param = token [ "=" ( token / ( DQUOTE *QDTEXT DQUOTE ) ) ]
 fn validate_extension_entry(ext: &str) -> Result<(), Error> {
+    // TODO: issues/closed/0003-rfc-quoted-string-split-in-extensions.md
+    // ';' による単純分割は quoted-string 内の ';' を誤分割する。
+    // 上流の ',' 分割と同様に stateful パーサーへの置き換えが必要。
     let parts: Vec<&str> = ext.split(';').collect();
     let token = parts[0].trim();
     if !is_valid_token(token) {
