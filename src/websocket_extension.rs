@@ -526,6 +526,13 @@ impl PerMessageDeflateConfig {
                 "server_max_window_bits" => {
                     match &param.value {
                         Some(value) => {
+                            // RFC 7692 Section 7.1.2.1: 先頭ゼロは不正
+                            if value.starts_with('0') && value.len() > 1 {
+                                return Err(ExtensionParseError::InvalidValue(format!(
+                                    "server_max_window_bits: leading zeros are not allowed '{}'",
+                                    value
+                                )));
+                            }
                             let bits = value.parse::<u8>().map_err(|_| {
                                 ExtensionParseError::InvalidValue(format!(
                                     "server_max_window_bits: invalid value '{}'",
@@ -553,6 +560,13 @@ impl PerMessageDeflateConfig {
                 }
                 "client_max_window_bits" => {
                     if let Some(value) = &param.value {
+                        // RFC 7692 Section 7.1.2.2: 先頭ゼロは不正
+                        if value.starts_with('0') && value.len() > 1 {
+                            return Err(ExtensionParseError::InvalidValue(format!(
+                                "client_max_window_bits: leading zeros are not allowed '{}'",
+                                value
+                            )));
+                        }
                         let bits = value.parse::<u8>().map_err(|_| {
                             ExtensionParseError::InvalidValue(format!(
                                 "client_max_window_bits: invalid value '{}'",

@@ -459,7 +459,16 @@ impl WebSocketServerConnection {
     }
 
     /// ハンドシェイクを拒否
-    pub fn reject_handshake(&mut self, status_code: u16, reason: &str) -> Result<(), Error> {
+    ///
+    /// `headers` には追加レスポンスヘッダーを指定できる。
+    /// バージョン不一致時は RFC 6455 Section 4.4 の MUST に従い
+    /// `("Sec-WebSocket-Version", "13")` を含めること。
+    pub fn reject_handshake(
+        &mut self,
+        status_code: u16,
+        reason: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<(), Error> {
         if self.state != ConnectionState::Connecting {
             return Err(Error::invalid_state("handshake is not in progress"));
         }
@@ -468,7 +477,10 @@ impl WebSocketServerConnection {
         self.pending_frame_data.clear();
         self.handshake_validator.reset();
 
-        let response = Response::new(status_code, reason).header("Connection", "close");
+        let mut response = Response::new(status_code, reason).header("Connection", "close");
+        for (name, value) in headers {
+            response = response.header(name, value);
+        }
         self.output_queue
             .push_back(ConnectionOutput::SendData(response.encode()));
 

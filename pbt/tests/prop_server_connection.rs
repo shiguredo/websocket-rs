@@ -167,9 +167,40 @@ proptest! {
         let request = create_valid_handshake_request(&key, None, None);
 
         conn.feed_recv_buf(&request).unwrap();
-        conn.reject_handshake(403, "Forbidden").unwrap();
+        conn.reject_handshake(403, "Forbidden", &[]).unwrap();
 
         prop_assert_eq!(conn.state(), ConnectionState::Closed);
+    }
+
+    /// reject_handshake() で渡した任意のヘッダーが出力に含まれる
+    ///
+    /// RFC 6455 Section 4.4: バージョン不一致時は Sec-WebSocket-Version MUST
+    #[test]
+    fn prop_handshake_reject_with_headers(
+        key in prop::array::uniform16(any::<u8>()),
+        header_name in "[A-Za-z][A-Za-z0-9-]{2,15}",
+        header_value in "[A-Za-z0-9]{1,20}",
+    ) {
+        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
+        let request = create_valid_handshake_request(&key, None, None);
+
+        conn.feed_recv_buf(&request).unwrap();
+        conn.reject_handshake(426, "Upgrade Required", &[(header_name.as_str(), header_value.as_str())]).unwrap();
+
+        prop_assert_eq!(conn.state(), ConnectionState::Closed);
+
+        // 出力に渡したヘッダーが含まれることを確認
+        let expected = format!("{}: {}", header_name, header_value);
+        let mut found = false;
+        while let Some(output) = conn.poll_output() {
+            if let ConnectionOutput::SendData(data) = output {
+                let s = String::from_utf8_lossy(&data);
+                if s.contains(&expected) {
+                    found = true;
+                }
+            }
+        }
+        prop_assert!(found, "header '{}' must be present in reject response", expected);
     }
 }
 

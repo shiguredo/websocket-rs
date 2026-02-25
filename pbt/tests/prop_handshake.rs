@@ -1292,6 +1292,56 @@ proptest! {
     }
 }
 
+// =============================================================================
+// RFC 7692: window_bits 先頭ゼロ拒否テスト
+// =============================================================================
+
+proptest! {
+    /// server_max_window_bits に先頭ゼロが含まれる場合は拒否される
+    ///
+    /// RFC 7692 Section 7.1.2.1: a decimal integer value without leading zeroes
+    #[test]
+    fn prop_server_max_window_bits_leading_zeros_rejected(
+        valid_bits in 8u8..=15,
+        zero_count in 1usize..=3,
+    ) {
+        let s = valid_bits.to_string();
+        let value = format!("{:0>width$}", s, width = s.len() + zero_count);
+        let ext = Extension::new("permessage-deflate")
+            .param("server_max_window_bits", Some(value.as_str()));
+        let result = PerMessageDeflateConfig::from_extension_for_server_request(&ext);
+        prop_assert!(result.is_err(), "leading zeros must be rejected: {}", value);
+    }
+
+    /// client_max_window_bits に先頭ゼロが含まれる場合は拒否される
+    ///
+    /// RFC 7692 Section 7.1.2.2: a decimal integer value without leading zeroes
+    #[test]
+    fn prop_client_max_window_bits_leading_zeros_rejected(
+        valid_bits in 8u8..=15,
+        zero_count in 1usize..=3,
+    ) {
+        let s = valid_bits.to_string();
+        let value = format!("{:0>width$}", s, width = s.len() + zero_count);
+        let ext = Extension::new("permessage-deflate")
+            .param("client_max_window_bits", Some(value.as_str()));
+        let result = PerMessageDeflateConfig::from_extension_for_server_request(&ext);
+        prop_assert!(result.is_err(), "leading zeros must be rejected: {}", value);
+    }
+
+    /// 先頭ゼロなしの有効な window_bits は受理される
+    #[test]
+    fn prop_window_bits_valid_values_accepted(
+        bits in 8u8..=15,
+    ) {
+        let value = bits.to_string();
+        let ext = Extension::new("permessage-deflate")
+            .param("server_max_window_bits", Some(&value));
+        let result = PerMessageDeflateConfig::from_extension_for_server_request(&ext);
+        prop_assert!(result.is_ok(), "valid value must be accepted: {}", value);
+    }
+}
+
 proptest! {
     /// HandshakeRequest::build で予約済みヘッダーを追加するとエラーになる
     ///
