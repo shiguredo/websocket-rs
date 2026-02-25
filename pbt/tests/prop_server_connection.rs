@@ -914,6 +914,52 @@ proptest! {
         let result = conn.close(CloseCode::NORMAL, "");
         prop_assert!(result.is_err());
     }
+
+    /// Connecting 状態で close() を呼び出すとエラーになる
+    ///
+    /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
+    #[test]
+    fn prop_close_rejected_in_connecting_state(
+        key in prop::array::uniform16(any::<u8>()),
+        code in prop::sample::select(vec![
+            CloseCode::NORMAL,
+            CloseCode::GOING_AWAY,
+            CloseCode::PROTOCOL_ERROR,
+        ]),
+        reason in "[\\x20-\\x7E]{0,50}".prop_map(|s| s.to_string()),
+    ) {
+        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
+        let request = create_valid_handshake_request(&key, None, None);
+
+        conn.feed_recv_buf(&request).unwrap();
+        // accept() を呼ばず Connecting 状態のまま
+        prop_assert_eq!(conn.state(), ConnectionState::Connecting);
+
+        // close() はエラーになるはず
+        let result = conn.close(code, &reason);
+        prop_assert!(result.is_err(), "close() should fail in Connecting state");
+
+        prop_assert_eq!(conn.state(), ConnectionState::Connecting);
+    }
+
+    /// Disconnected 状態で close() を呼び出すとエラーになる
+    ///
+    /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
+    #[test]
+    fn prop_close_rejected_in_disconnected_state(
+        code in prop::sample::select(vec![
+            CloseCode::NORMAL,
+            CloseCode::GOING_AWAY,
+            CloseCode::PROTOCOL_ERROR,
+        ]),
+        reason in "[\\x20-\\x7E]{0,50}".prop_map(|s| s.to_string()),
+    ) {
+        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
+        prop_assert_eq!(conn.state(), ConnectionState::Disconnected);
+
+        let result = conn.close(code, &reason);
+        prop_assert!(result.is_err(), "close() should fail in Disconnected state");
+    }
 }
 
 // ==== UTF-8 不正エラーのテスト ====
@@ -939,6 +985,37 @@ proptest! {
         // RFC 6455 準拠: 無効な UTF-8 は即座にエラーを返す
         let result = conn.feed_recv_buf(&encoded);
         prop_assert!(result.is_err(), "Invalid UTF-8 should return error");
+    }
+}
+
+// ==== accept_handshake 予約済みヘッダー拒否のテスト ====
+
+proptest! {
+    /// accept_handshake で予約済みヘッダーを additional_headers に渡すとエラーになる
+    ///
+    /// RFC 6455 Section 4.2.2: 予約済みヘッダーは MUST NOT appear more than once
+    #[test]
+    fn prop_accept_handshake_rejects_reserved_header(
+        key in prop::array::uniform16(any::<u8>()),
+        reserved in prop::sample::select(vec![
+            "Upgrade",
+            "Connection",
+            "Sec-WebSocket-Accept",
+            "Sec-WebSocket-Protocol",
+            "Sec-WebSocket-Extensions",
+        ]),
+        value in "[a-zA-Z0-9]{1,20}",
+    ) {
+        use shiguredo_websocket::ServerHandshakeResponse;
+
+        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
+        let request = create_valid_handshake_request(&key, None, None);
+        conn.feed_recv_buf(&request).unwrap();
+
+        let response = ServerHandshakeResponse::new().header(reserved, &value);
+        let result = conn.accept_handshake(response);
+
+        prop_assert!(result.is_err(), "accept_handshake() should reject reserved header '{}'", reserved);
     }
 }
 

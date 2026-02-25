@@ -1291,3 +1291,29 @@ proptest! {
         prop_assert!(result.is_ok());
     }
 }
+
+proptest! {
+    /// HandshakeRequest::build で予約済みヘッダーを追加するとエラーになる
+    ///
+    /// RFC 6455 Section 4.1: 予約済みヘッダーは MUST NOT appear more than once
+    #[test]
+    fn prop_build_rejects_reserved_header(
+        reserved in prop::sample::select(vec![
+            "Host",
+            "Upgrade",
+            "Connection",
+            "Sec-WebSocket-Key",
+            "Sec-WebSocket-Version",
+            "Sec-WebSocket-Protocol",
+            "Sec-WebSocket-Extensions",
+        ]),
+        value in "[a-zA-Z0-9]{1,20}",
+        nonce in any::<[u8; 16]>(),
+    ) {
+        let request = HandshakeRequest::new("/ws", "example.com")
+            .header(reserved, &value);
+
+        let result = request.build(nonce);
+        prop_assert!(result.is_err(), "build() should reject reserved header '{}'", reserved);
+    }
+}

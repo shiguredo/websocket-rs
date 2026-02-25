@@ -90,6 +90,26 @@ impl HandshakeRequest {
             }
         }
 
+        // RFC 6455 Section 4.1: 予約済みヘッダーとの重複チェック
+        // これらのヘッダーは MUST appear かつ MUST NOT appear more than once
+        const RESERVED: &[&str] = &[
+            "host",
+            "upgrade",
+            "connection",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "sec-websocket-protocol",
+            "sec-websocket-extensions",
+        ];
+        for (name, _) in &self.additional_headers {
+            if RESERVED.contains(&name.to_ascii_lowercase().as_str()) {
+                return Err(Error::invalid_input(format!(
+                    "additional header '{}' conflicts with a reserved WebSocket header",
+                    name
+                )));
+            }
+        }
+
         let key = STANDARD.encode(nonce);
 
         let mut request = Request::new("GET", &self.path)

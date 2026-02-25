@@ -315,6 +315,24 @@ impl WebSocketServerConnection {
             }
         }
 
+        // RFC 6455 Section 4.2.2: 予約済みヘッダーとの重複チェック
+        // これらのヘッダーは MUST appear かつ MUST NOT appear more than once
+        const RESERVED: &[&str] = &[
+            "upgrade",
+            "connection",
+            "sec-websocket-accept",
+            "sec-websocket-protocol",
+            "sec-websocket-extensions",
+        ];
+        for (name, _) in &response.additional_headers {
+            if RESERVED.contains(&name.to_ascii_lowercase().as_str()) {
+                return Err(Error::invalid_input(format!(
+                    "additional header '{}' conflicts with a reserved WebSocket header",
+                    name
+                )));
+            }
+        }
+
         let accept = calculate_accept_from_key(&request.key);
         let mut response_builder = Response::new(101, "Switching Protocols")
             .header("Upgrade", "websocket")
@@ -523,9 +541,13 @@ impl WebSocketServerConnection {
     ///
     /// RFC 6455 Section 7.4.1: 送信禁止のクローズコード (1005, 1006, 1015) は拒否される
     /// RFC 6455 Section 5.5: reason は 123 バイト以下でなければならない
+    /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
     pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
-        if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
-            return Err(Error::invalid_state("connection is already closed"));
+        if !matches!(
+            self.state,
+            ConnectionState::Connected | ConnectionState::Closing
+        ) {
+            return Err(Error::invalid_state("connection is not established"));
         }
 
         // RFC 6455 Section 7.4.1: 送信禁止のクローズコードをチェック

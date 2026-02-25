@@ -533,6 +533,35 @@ proptest! {
         }
         prop_assert!(found, "Close frame not sent");
     }
+
+    /// Connecting 状態で close() を呼び出すとエラーになる
+    ///
+    /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
+    #[test]
+    fn prop_close_rejected_in_connecting_state(
+        code in prop::sample::select(vec![
+            CloseCode::NORMAL,
+            CloseCode::GOING_AWAY,
+            CloseCode::PROTOCOL_ERROR,
+        ]),
+        reason in "[\\x20-\\x7E]{0,50}".prop_map(|s| s.to_string()),
+    ) {
+        let options = ClientConnectionOptions::new("example.com", "/ws");
+        let random = FixedRandom::new();
+        let mut conn = WebSocketClientConnection::new(options, random);
+
+        conn.connect().unwrap();
+        // ハンドシェイクレスポンスを送らず Connecting 状態のまま
+        prop_assert_eq!(conn.state(), ConnectionState::Connecting);
+
+        // close() はエラーになるはず
+        let result = conn.close(code, &reason);
+        prop_assert!(result.is_err(), "close() should fail in Connecting state");
+
+        // フレームが出力されていないこと
+        while conn.poll_output().is_some() {}
+        prop_assert_eq!(conn.state(), ConnectionState::Connecting);
+    }
 }
 
 // ==== 状態遷移のテスト ====
