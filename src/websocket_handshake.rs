@@ -371,26 +371,9 @@ impl HandshakeRequestValidator {
                     "malformed Sec-WebSocket-Extensions header: no valid extensions",
                 ));
             }
-            // RFC 6455 Section 9.1: extension-token は token ABNF に準拠しなければならない
+            // RFC 6455 Section 9.1: extension-token / extension-param の ABNF を検証
             for ext in &extensions {
-                let parts: Vec<&str> = ext.split(';').collect();
-                let token = parts[0].trim();
-                if !is_valid_token(token) {
-                    return Err(Error::handshake_rejected(format!(
-                        "invalid Sec-WebSocket-Extensions token: {}",
-                        token
-                    )));
-                }
-                // RFC 6455 Section 9.1: extension = extension-token *( ";" extension-param )
-                // ";" の後は必ず extension-param が必要。trailing ';' は ABNF 違反。
-                for part in parts.iter().skip(1) {
-                    if part.trim().is_empty() {
-                        return Err(Error::handshake_rejected(format!(
-                            "trailing ';' in Sec-WebSocket-Extensions: '{}'",
-                            ext
-                        )));
-                    }
-                }
+                validate_extension_entry(ext)?;
             }
             extensions
         };
@@ -587,15 +570,9 @@ impl HandshakeValidator {
                 "malformed Sec-WebSocket-Extensions header: no valid extensions",
             ));
         }
-        // RFC 6455 Section 9.1: extension-token は token ABNF に準拠しなければならない
+        // RFC 6455 Section 9.1: extension-token / extension-param の ABNF を検証
         for ext in &extensions {
-            let token = ext.split(';').next().unwrap_or("").trim();
-            if !is_valid_token(token) {
-                return Err(Error::handshake_rejected(format!(
-                    "invalid Sec-WebSocket-Extensions token: {}",
-                    token
-                )));
-            }
+            validate_extension_entry(ext)?;
         }
 
         Ok(Some(HandshakeResponse {
@@ -634,6 +611,75 @@ fn is_valid_token(s: &str) -> bool {
                 b'^' | b'_' | b'`' | b'|' | b'~' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z'
             )
         })
+}
+
+/// RFC 6455 Section 9.1 の extension ABNF を検証する
+///
+/// extension       = extension-token *( ";" extension-param )
+/// extension-param = token [ "=" ( token / ( DQUOTE *QDTEXT DQUOTE ) ) ]
+fn validate_extension_entry(ext: &str) -> Result<(), Error> {
+    let parts: Vec<&str> = ext.split(';').collect();
+    let token = parts[0].trim();
+    if !is_valid_token(token) {
+        return Err(Error::handshake_rejected(format!(
+            "invalid Sec-WebSocket-Extensions token: {}",
+            token
+        )));
+    }
+    for part in parts.iter().skip(1) {
+        let param = part.trim();
+        if param.is_empty() {
+            return Err(Error::handshake_rejected(format!(
+                "trailing ';' in Sec-WebSocket-Extensions: '{}'",
+                ext
+            )));
+        }
+        match param.split_once('=') {
+            Some((name, value)) => {
+                let name = name.trim();
+                let value = value.trim();
+                if !is_valid_token(name) {
+                    return Err(Error::handshake_rejected(format!(
+                        "invalid extension-param name: '{}'",
+                        name
+                    )));
+                }
+                if value.starts_with('"') {
+                    // quoted-string: DQUOTE *QDTEXT DQUOTE
+                    if !value.ends_with('"') || value.len() < 2 {
+                        return Err(Error::handshake_rejected(format!(
+                            "invalid quoted-string in extension-param: '{}'",
+                            param
+                        )));
+                    }
+                    let inner = &value[1..value.len() - 1];
+                    for b in inner.bytes() {
+                        // QDTEXT = HTAB / SP / %x21 / %x23-5B / %x5D-7E
+                        if !matches!(b, b'\t' | b' ' | 0x21 | 0x23..=0x5B | 0x5D..=0x7E) {
+                            return Err(Error::handshake_rejected(format!(
+                                "invalid character in quoted-string: '{}'",
+                                param
+                            )));
+                        }
+                    }
+                } else if !is_valid_token(value) {
+                    return Err(Error::handshake_rejected(format!(
+                        "invalid extension-param value: '{}'",
+                        param
+                    )));
+                }
+            }
+            None => {
+                if !is_valid_token(param) {
+                    return Err(Error::handshake_rejected(format!(
+                        "invalid extension-param name: '{}'",
+                        param
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_key(key: &str) -> Result<(), Error> {

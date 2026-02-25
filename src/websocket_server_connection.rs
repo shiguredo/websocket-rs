@@ -328,63 +328,63 @@ impl WebSocketServerConnection {
             response_builder = response_builder.header(name, value);
         }
 
-        let encoded = response_builder.encode();
-        self.output_queue
-            .push_back(ConnectionOutput::SendData(encoded));
-
-        self.negotiated_protocol = response.protocol.clone();
-        self.negotiated_extensions = response.extensions.clone();
-
         // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
-        self.deflate = None;
+        // RFC 7692 Section 7: 検証をレスポンス送信前に行い、エラー時は送信しない
+        let mut deflate = None;
         for ext_str in &response.extensions {
             let extensions = Extension::parse(ext_str);
             for ext in extensions {
                 if ext.name == "permessage-deflate" {
                     // サーバー自身が送信するレスポンスなので、ClientResponse コンテキストで検証
-                    match PerMessageDeflateConfig::from_extension_for_client_response(&ext) {
-                        Ok(config) => {
-                            // RFC 7692 Section 7.2.1: 合意した server_max_window_bits で
-                            // 圧縮する必要がある。現在の実装では window_bits=15 固定
-                            // (flate2 の制約) のため、server_max_window_bits < 15 は
-                            // サポートしない
-                            if let Some(smwb) = config.server_max_window_bits
-                                && smwb < 15
-                            {
-                                return Err(Error::handshake_rejected(format!(
-                                    "server_max_window_bits={} is not supported (only 15 is supported)",
-                                    smwb
-                                )));
-                            }
+                    let config = PerMessageDeflateConfig::from_extension_for_client_response(&ext)
+                        .map_err(|e| {
+                            Error::handshake_rejected(format!(
+                                "invalid permessage-deflate parameters: {:?}",
+                                e
+                            ))
+                        })?;
 
-                            // RFC 7692 Section 7.1.2.2: クライアントが client_max_window_bits を
-                            // offer していない場合、レスポンスに含めてはならない (MUST NOT)
-                            if ext.get_param("client_max_window_bits").is_some() {
-                                let client_offered_cmwb =
-                                    request.extensions.iter().any(|req_ext_str| {
-                                        Extension::parse(req_ext_str).iter().any(|req_ext| {
-                                            req_ext.name == "permessage-deflate"
-                                                && req_ext
-                                                    .get_param("client_max_window_bits")
-                                                    .is_some()
-                                        })
-                                    });
-                                if !client_offered_cmwb {
-                                    return Err(Error::handshake_rejected(
-                                        "client_max_window_bits included without client offer",
-                                    ));
-                                }
-                            }
+                    // RFC 7692 Section 7.2.1: 合意した server_max_window_bits で
+                    // 圧縮する必要がある。現在の実装では window_bits=15 固定
+                    // (flate2 の制約) のため、server_max_window_bits < 15 は
+                    // サポートしない
+                    if let Some(smwb) = config.server_max_window_bits
+                        && smwb < 15
+                    {
+                        return Err(Error::handshake_rejected(format!(
+                            "server_max_window_bits={} is not supported (only 15 is supported)",
+                            smwb
+                        )));
+                    }
 
-                            self.deflate = Some(PerMessageDeflate::new_server(config));
-                        }
-                        Err(_) => {
-                            // 不正なパラメータは無視
+                    // RFC 7692 Section 7.1.2.2: クライアントが client_max_window_bits を
+                    // offer していない場合、レスポンスに含めてはならない (MUST NOT)
+                    if ext.get_param("client_max_window_bits").is_some() {
+                        let client_offered_cmwb = request.extensions.iter().any(|req_ext_str| {
+                            Extension::parse(req_ext_str).iter().any(|req_ext| {
+                                req_ext.name == "permessage-deflate"
+                                    && req_ext.get_param("client_max_window_bits").is_some()
+                            })
+                        });
+                        if !client_offered_cmwb {
+                            return Err(Error::handshake_rejected(
+                                "client_max_window_bits included without client offer",
+                            ));
                         }
                     }
+
+                    deflate = Some(PerMessageDeflate::new_server(config));
                 }
             }
         }
+
+        let encoded = response_builder.encode();
+        self.output_queue
+            .push_back(ConnectionOutput::SendData(encoded));
+
+        self.deflate = deflate;
+        self.negotiated_protocol = response.protocol.clone();
+        self.negotiated_extensions = response.extensions.clone();
 
         self.set_state(ConnectionState::Connected);
         self.event_queue.push_back(ConnectionEvent::Connected {
