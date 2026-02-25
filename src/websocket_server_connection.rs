@@ -280,8 +280,14 @@ impl WebSocketServerConnection {
         }
 
         for extension in &response.extensions {
-            let parsed = Extension::parse(extension);
             // RFC 6455 Section 9.1: ABNF 不適合の拡張文字列は接続を失敗させなければならない (MUST)
+            // parse_strict を使い、部分的に不正な拡張を見逃さないようにする
+            let parsed = Extension::parse_strict(extension).map_err(|e| {
+                Error::handshake_rejected(format!(
+                    "invalid extension response '{}': {}",
+                    extension, e
+                ))
+            })?;
             if parsed.is_empty() {
                 return Err(Error::handshake_rejected(format!(
                     "invalid extension response: '{}'",
@@ -330,6 +336,19 @@ impl WebSocketServerConnection {
 
         // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
         // RFC 7692 Section 7: 検証をレスポンス送信前に行い、エラー時は送信しない
+
+        // RFC 7692 Section 7.1.2.1: クライアントが offer した server_max_window_bits を取得する
+        let client_offered_smwb: Option<u8> = request
+            .extensions
+            .iter()
+            .flat_map(|s| Extension::parse(s))
+            .filter(|e| e.name == "permessage-deflate")
+            .find_map(|e| {
+                e.get_param("server_max_window_bits")
+                    .and_then(|p| p.value.as_deref())
+                    .and_then(|v| v.parse::<u8>().ok())
+            });
+
         let mut deflate = None;
         for ext_str in &response.extensions {
             let extensions = Extension::parse(ext_str);
@@ -354,6 +373,18 @@ impl WebSocketServerConnection {
                         return Err(Error::handshake_rejected(format!(
                             "server_max_window_bits={} is not supported (only 15 is supported)",
                             smwb
+                        )));
+                    }
+
+                    // RFC 7692 Section 7.1.2.1: レスポンスの server_max_window_bits は
+                    // クライアントの offer 値以下でなければならない (same or smaller)
+                    if let (Some(smwb), Some(offered)) =
+                        (config.server_max_window_bits, client_offered_smwb)
+                        && smwb > offered
+                    {
+                        return Err(Error::handshake_rejected(format!(
+                            "server_max_window_bits={} exceeds client offer={}",
+                            smwb, offered
                         )));
                     }
 

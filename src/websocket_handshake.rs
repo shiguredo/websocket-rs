@@ -645,22 +645,59 @@ fn validate_extension_entry(ext: &str) -> Result<(), Error> {
                     )));
                 }
                 if value.starts_with('"') {
-                    // quoted-string: DQUOTE *QDTEXT DQUOTE
-                    if !value.ends_with('"') || value.len() < 2 {
+                    // RFC 6455 Section 9.1:
+                    // quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
+                    // qdtext = HTAB / SP / %x21 / %x23-5B / %x5D-7E
+                    // quoted-pair = "\" CHAR
+                    // unescape 後の値は token ABNF に準拠する必要がある (MUST)
+                    let bytes = value.as_bytes();
+                    let mut i = 1; // 開き DQUOTE をスキップ
+                    let mut unescaped = String::new();
+                    let mut closed = false;
+                    while i < bytes.len() {
+                        let b = bytes[i];
+                        if b == b'\\' {
+                            i += 1;
+                            if i >= bytes.len() {
+                                return Err(Error::handshake_rejected(format!(
+                                    "incomplete escape sequence in quoted-string: '{}'",
+                                    param
+                                )));
+                            }
+                            unescaped.push(bytes[i] as char);
+                        } else if b == b'"' {
+                            if i + 1 != bytes.len() {
+                                return Err(Error::handshake_rejected(format!(
+                                    "trailing characters after closing DQUOTE: '{}'",
+                                    param
+                                )));
+                            }
+                            closed = true;
+                            break;
+                        } else {
+                            // QDTEXT = HTAB / SP / %x21 / %x23-5B / %x5D-7E
+                            if !matches!(b, b'\t' | b' ' | 0x21 | 0x23..=0x5B | 0x5D..=0x7E) {
+                                return Err(Error::handshake_rejected(format!(
+                                    "invalid character in quoted-string: '{}'",
+                                    param
+                                )));
+                            }
+                            unescaped.push(b as char);
+                        }
+                        i += 1;
+                    }
+                    if !closed {
                         return Err(Error::handshake_rejected(format!(
-                            "invalid quoted-string in extension-param: '{}'",
+                            "unclosed quoted-string in extension-param: '{}'",
                             param
                         )));
                     }
-                    let inner = &value[1..value.len() - 1];
-                    for b in inner.bytes() {
-                        // QDTEXT = HTAB / SP / %x21 / %x23-5B / %x5D-7E
-                        if !matches!(b, b'\t' | b' ' | 0x21 | 0x23..=0x5B | 0x5D..=0x7E) {
-                            return Err(Error::handshake_rejected(format!(
-                                "invalid character in quoted-string: '{}'",
-                                param
-                            )));
-                        }
+                    // RFC 6455 Section 9.1: unescape 後の値は token ABNF に準拠する必要がある
+                    if !is_valid_token(&unescaped) {
+                        return Err(Error::handshake_rejected(format!(
+                            "quoted-string value after unescaping is not a valid token: '{}'",
+                            param
+                        )));
                     }
                 } else if !is_valid_token(value) {
                     return Err(Error::handshake_rejected(format!(
