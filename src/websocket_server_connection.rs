@@ -280,8 +280,16 @@ impl WebSocketServerConnection {
         }
 
         for extension in &response.extensions {
+            let parsed = Extension::parse(extension);
+            // RFC 6455 Section 9.1: ABNF 不適合の拡張文字列は接続を失敗させなければならない (MUST)
+            if parsed.is_empty() {
+                return Err(Error::handshake_rejected(format!(
+                    "invalid extension response: '{}'",
+                    extension
+                )));
+            }
             let mut supported = true;
-            for ext in Extension::parse(extension) {
+            for ext in &parsed {
                 if request
                     .extensions
                     .iter()
@@ -943,6 +951,16 @@ impl WebSocketServerConnection {
                     // クライアント要求をパース
                     match PerMessageDeflateConfig::from_extension_for_server_request(&ext) {
                         Ok(client_request) => {
+                            // RFC 7692 Section 7.1.2.1: server_max_window_bits が offer された場合、
+                            // サーバーは同値以下を応答に含めることで受け入れる。
+                            // flate2 は window_bits=15 固定のため、15 未満の offer はサポートできない。
+                            if client_request
+                                .server_max_window_bits
+                                .is_some_and(|v| v < 15)
+                            {
+                                // この offer はスキップして次を試す
+                                continue;
+                            }
                             // クライアント要求とサーバー設定をマージ
                             return Some(PerMessageDeflateConfig::negotiate(
                                 &client_request,

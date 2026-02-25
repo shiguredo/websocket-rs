@@ -100,6 +100,10 @@ impl Extension {
                 if name.is_empty() {
                     return None;
                 }
+                // RFC 6455 Section 9.1: extension-token は token ABNF に準拠する必要がある
+                if !Self::is_valid_token(&name) {
+                    return None;
+                }
 
                 let mut params = Vec::new();
                 for p in parts_iter {
@@ -109,14 +113,23 @@ impl Extension {
                     }
 
                     if let Some((param_name, value)) = p.split_once('=') {
+                        let param_name = param_name.trim();
+                        // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
+                        if !Self::is_valid_token(param_name) {
+                            return None;
+                        }
                         let value = value.trim();
                         // RFC 6455 Section 9.1: 値が token に準拠しない場合は拡張全体を除外
                         let parsed_value = Self::parse_param_value(value)?;
                         params.push(ExtensionParam {
-                            name: param_name.trim().to_string(),
+                            name: param_name.to_string(),
                             value: Some(parsed_value),
                         });
                     } else {
+                        // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
+                        if !Self::is_valid_token(p) {
+                            return None;
+                        }
                         params.push(ExtensionParam {
                             name: p.to_string(),
                             value: None,
@@ -150,6 +163,13 @@ impl Extension {
                 .filter(|n| !n.is_empty())
                 .ok_or_else(|| format!("empty extension name in '{}'", ext))?
                 .to_string();
+            // RFC 6455 Section 9.1: extension-token は token ABNF に準拠する必要がある
+            if !Self::is_valid_token(&name) {
+                return Err(format!(
+                    "invalid extension name '{}': not a valid token",
+                    name
+                ));
+            }
 
             let mut params = Vec::new();
             for p in parts_iter {
@@ -159,6 +179,14 @@ impl Extension {
                 }
 
                 if let Some((param_name, value)) = p.split_once('=') {
+                    let param_name = param_name.trim();
+                    // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
+                    if !Self::is_valid_token(param_name) {
+                        return Err(format!(
+                            "invalid parameter name in extension '{}': '{}' is not a valid token",
+                            name, param_name
+                        ));
+                    }
                     let value = value.trim();
                     let parsed_value = Self::parse_param_value(value).ok_or_else(|| {
                         format!(
@@ -167,10 +195,17 @@ impl Extension {
                         )
                     })?;
                     params.push(ExtensionParam {
-                        name: param_name.trim().to_string(),
+                        name: param_name.to_string(),
                         value: Some(parsed_value),
                     });
                 } else {
+                    // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
+                    if !Self::is_valid_token(p) {
+                        return Err(format!(
+                            "invalid parameter name in extension '{}': '{}' is not a valid token",
+                            name, p
+                        ));
+                    }
                     params.push(ExtensionParam {
                         name: p.to_string(),
                         value: None,
@@ -570,11 +605,10 @@ impl PerMessageDeflateConfig {
     /// no_context_takeover はどちらかが要求すれば有効になる。
     pub fn negotiate(client_request: &Self, server_config: &Self) -> Self {
         Self {
-            // 現在の実装では window_bits=15 固定 (flate2 の制約) のため、
-            // server_max_window_bits は含めない (デフォルト 15 を使用)
-            // RFC 7692 Section 7.1.2.1: クライアントが server_max_window_bits を
-            // offer しても、サーバーはパラメータを含めないことで拒否できる
-            server_max_window_bits: None,
+            // RFC 7692 Section 7.1.2.1: クライアントが server_max_window_bits を offer した場合、
+            // サーバーは同値以下を応答に含めることで受け入れる。
+            // 15 未満の offer は select_deflate() で除外済みのため、ここでは offer 値をそのまま使用する。
+            server_max_window_bits: client_request.server_max_window_bits,
             // client_max_window_bits: クライアントが offer した場合のみ含める
             // RFC 7692: クライアントが offer していなければサーバーは含めてはならない
             client_max_window_bits: match (
