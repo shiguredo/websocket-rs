@@ -354,6 +354,7 @@ impl HandshakeRequestValidator {
             protocols
         };
 
+        // RFC 6455 Section 9.1: 複数の Sec-WebSocket-Extensions ヘッダー行は許容される
         // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はリスト値として統合する
         let extensions = {
             let values = request.get_headers("Sec-WebSocket-Extensions");
@@ -369,6 +370,16 @@ impl HandshakeRequestValidator {
                 return Err(Error::handshake_rejected(
                     "malformed Sec-WebSocket-Extensions header: no valid extensions",
                 ));
+            }
+            // RFC 6455 Section 9.1: extension-token は token ABNF に準拠しなければならない
+            for ext in &extensions {
+                let token = ext.split(';').next().unwrap_or("").trim();
+                if !is_valid_token(token) {
+                    return Err(Error::handshake_rejected(format!(
+                        "invalid Sec-WebSocket-Extensions token: {}",
+                        token
+                    )));
+                }
             }
             extensions
         };
@@ -545,14 +556,8 @@ impl HandshakeValidator {
             .map(String::from);
 
         // 拡張の取得
-        // RFC 6455 Section 4.2.2: サーバーレスポンスでは Sec-WebSocket-Extensions ヘッダーは
-        // 最大 1 行のみ許容される（複数行は MUST NOT）
+        // RFC 6455 Section 4.2.2 / Section 9.1: 複数の Sec-WebSocket-Extensions ヘッダー行は許容される
         let extension_values = response.get_headers("Sec-WebSocket-Extensions");
-        if extension_values.len() > 1 {
-            return Err(Error::handshake_rejected(
-                "multiple Sec-WebSocket-Extensions headers in response",
-            ));
-        }
         let extensions: Vec<String> = extension_values
             .iter()
             .flat_map(|v| v.split(','))
@@ -565,6 +570,16 @@ impl HandshakeValidator {
             return Err(Error::handshake_rejected(
                 "malformed Sec-WebSocket-Extensions header: no valid extensions",
             ));
+        }
+        // RFC 6455 Section 9.1: extension-token は token ABNF に準拠しなければならない
+        for ext in &extensions {
+            let token = ext.split(';').next().unwrap_or("").trim();
+            if !is_valid_token(token) {
+                return Err(Error::handshake_rejected(format!(
+                    "invalid Sec-WebSocket-Extensions token: {}",
+                    token
+                )));
+            }
         }
 
         Ok(Some(HandshakeResponse {
