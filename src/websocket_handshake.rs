@@ -373,12 +373,23 @@ impl HandshakeRequestValidator {
             }
             // RFC 6455 Section 9.1: extension-token は token ABNF に準拠しなければならない
             for ext in &extensions {
-                let token = ext.split(';').next().unwrap_or("").trim();
+                let parts: Vec<&str> = ext.split(';').collect();
+                let token = parts[0].trim();
                 if !is_valid_token(token) {
                     return Err(Error::handshake_rejected(format!(
                         "invalid Sec-WebSocket-Extensions token: {}",
                         token
                     )));
+                }
+                // RFC 6455 Section 9.1: extension = extension-token *( ";" extension-param )
+                // ";" の後は必ず extension-param が必要。trailing ';' は ABNF 違反。
+                for part in parts.iter().skip(1) {
+                    if part.trim().is_empty() {
+                        return Err(Error::handshake_rejected(format!(
+                            "trailing ';' in Sec-WebSocket-Extensions: '{}'",
+                            ext
+                        )));
+                    }
                 }
             }
             extensions
@@ -556,8 +567,13 @@ impl HandshakeValidator {
             .map(String::from);
 
         // 拡張の取得
-        // RFC 6455 Section 4.2.2 / Section 9.1: 複数の Sec-WebSocket-Extensions ヘッダー行は許容される
+        // RFC 6455 Section 11.3.2: HTTP レスポンスでは Sec-WebSocket-Extensions は 1 回のみ許容
         let extension_values = response.get_headers("Sec-WebSocket-Extensions");
+        if extension_values.len() > 1 {
+            return Err(Error::handshake_rejected(
+                "duplicate Sec-WebSocket-Extensions header in HTTP response",
+            ));
+        }
         let extensions: Vec<String> = extension_values
             .iter()
             .flat_map(|v| v.split(','))

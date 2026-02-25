@@ -174,8 +174,13 @@ impl Extension {
             let mut params = Vec::new();
             for p in parts_iter {
                 let p = p.trim();
+                // RFC 6455 Section 9.1: extension = extension-token *( ";" extension-param )
+                // ";" の後は必ず extension-param が必要。空は ABNF 違反。
                 if p.is_empty() {
-                    continue;
+                    return Err(format!(
+                        "trailing ';' in extension '{}': extension-param required after ';'",
+                        name
+                    ));
                 }
 
                 if let Some((param_name, value)) = p.split_once('=') {

@@ -1177,3 +1177,117 @@ proptest! {
         prop_assert!(result.is_err());
     }
 }
+
+// =============================================================================
+// RFC 6455 Section 9.1: trailing ';' ABNF 違反テスト
+// =============================================================================
+
+proptest! {
+    /// parse_strict: trailing ';' は ABNF 違反として拒否される
+    ///
+    /// RFC 6455 Section 9.1: extension = extension-token *( ";" extension-param )
+    /// ";" の後は必ず extension-param が必要。
+    #[test]
+    fn prop_parse_strict_rejects_trailing_semicolon(
+        name in "[a-z][a-z0-9-]{2,10}",
+    ) {
+        let input = format!("{};", name);
+        let result = Extension::parse_strict(&input);
+        prop_assert!(result.is_err());
+    }
+
+    /// parse_strict: 有効な拡張はそのまま受理される（正常系の確認）
+    #[test]
+    fn prop_parse_strict_accepts_valid_extension(
+        name in "[a-z][a-z0-9-]{2,10}",
+    ) {
+        let result = Extension::parse_strict(&name);
+        prop_assert!(result.is_ok());
+        prop_assert_eq!(result.unwrap().len(), 1);
+    }
+
+    /// HandshakeRequestValidator: trailing ';' を持つ拡張ヘッダーは拒否される
+    ///
+    /// RFC 6455 Section 9.1: ABNF に適合しない場合は接続を失敗させなければならない。
+    #[test]
+    fn prop_request_validator_rejects_trailing_semicolon_in_extension(
+        name in "[a-z][a-z0-9-]{2,10}",
+    ) {
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: example.com\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Extensions: {};\r\n\
+             \r\n",
+            key, name
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+}
+
+// =============================================================================
+// RFC 6455 Section 11.3.2: HTTP レスポンス重複ヘッダーテスト
+// =============================================================================
+
+proptest! {
+    /// HandshakeValidator: レスポンスで Sec-WebSocket-Extensions が複数行ある場合は拒否される
+    ///
+    /// RFC 6455 Section 11.3.2: MUST NOT appear more than once in an HTTP response.
+    #[test]
+    fn prop_response_duplicate_extension_headers_rejected(
+        nonce in any::<[u8; 16]>(),
+        ext1 in "[a-z][a-z0-9-]{2,10}",
+        ext2 in "[a-z][a-z0-9-]{2,10}",
+    ) {
+        let accept = calculate_expected_accept(&nonce);
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: {}\r\n\
+             Sec-WebSocket-Extensions: {}\r\n\
+             \r\n",
+            accept, ext1, ext2
+        );
+
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err());
+    }
+
+    /// HandshakeValidator: レスポンスで Sec-WebSocket-Extensions が 1 行のみの場合は受理される
+    #[test]
+    fn prop_response_single_extension_header_accepted(
+        nonce in any::<[u8; 16]>(),
+        ext in "[a-z][a-z0-9-]{2,10}",
+    ) {
+        let accept = calculate_expected_accept(&nonce);
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: {}\r\n\
+             \r\n",
+            accept, ext
+        );
+
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_ok());
+    }
+}
