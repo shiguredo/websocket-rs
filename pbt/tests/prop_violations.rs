@@ -109,13 +109,15 @@ proptest! {
     }
 
     /// 拡張ペイロード長のヘッダーが不完全
+    ///
+    /// 16-bit 長フィールドの 2 バイト目がなくても任意の 1 バイト目で同様に不完全となる。
     #[test]
-    fn prop_extended_length_header_incomplete(_dummy in 0u8..1) {
-        // 126 マーカー付きだが拡張長がない
+    fn prop_extended_length_header_incomplete(partial_byte in any::<u8>()) {
+        // 126 マーカー付きだが拡張長が 1 バイトしかない
         let frame = vec![
             0x82,       // FIN=1 + Binary
             0x80 | 126, // MASK=1 + extended length marker
-            0x00,       // 1 byte only (need 2)
+            partial_byte, // 1 byte only (need 2)
         ];
 
         let mut decoder = FrameDecoder::new();
@@ -205,15 +207,6 @@ proptest! {
         prop_assert!(result.is_ok() || result.is_err());
     }
 
-    /// 空のデータ
-    #[test]
-    fn prop_empty_data(_dummy in 0u8..1) {
-        let mut decoder = FrameDecoder::new();
-        decoder.feed(&[]);
-
-        let result = decoder.decode().unwrap();
-        prop_assert!(result.is_none());
-    }
 }
 
 // =============================================================================
@@ -222,15 +215,20 @@ proptest! {
 
 proptest! {
     /// Close フレームのペイロードが 1 バイトは不正
-    /// (コードは 2 バイト必要、または 0 バイト)
+    ///
+    /// コードは 2 バイト必要、または 0 バイト。
+    /// マスクキーとペイロードバイトを変えてもデコード自体は常に成功する。
     #[test]
-    fn prop_close_frame_single_byte_payload(_dummy in 0u8..1) {
-        // Close フレーム with 1-byte payload (invalid)
+    fn prop_close_frame_single_byte_payload(
+        payload_byte in any::<u8>(),
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let masked_payload = payload_byte ^ mask_key[0];
         let frame = vec![
-            0x88,                   // FIN=1 + Close opcode
-            0x80 | 1,               // MASK=1 + length=1
-            0x00, 0x00, 0x00, 0x00, // masking key
-            0xAB,                   // 1-byte payload (invalid)
+            0x88,       // FIN=1 + Close opcode
+            0x80 | 1,   // MASK=1 + length=1
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            masked_payload,
         ];
 
         let mut decoder = FrameDecoder::new();

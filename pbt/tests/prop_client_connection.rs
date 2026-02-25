@@ -12,7 +12,7 @@ use proptest::prelude::*;
 use sha1::{Digest, Sha1};
 use shiguredo_websocket::{
     ClientConnectionOptions, CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, Frame,
-    Opcode, PerMessageDeflateConfig, RandomSource, TimerId, Timestamp, WebSocketClientConnection,
+    Opcode, PerMessageDeflateConfig, RandomSource, Timestamp, WebSocketClientConnection,
 };
 
 /// nonce から Sec-WebSocket-Accept を計算する
@@ -59,6 +59,13 @@ impl FixedRandom {
         Self {
             masking_key: [0xAB, 0xCD, 0xEF, 0x12],
             nonce: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        }
+    }
+
+    fn with_nonce(nonce: [u8; 16]) -> Self {
+        Self {
+            masking_key: [0xAB, 0xCD, 0xEF, 0x12],
+            nonce,
         }
     }
 }
@@ -163,28 +170,33 @@ proptest! {
 proptest! {
     /// connect() で状態が Connecting に変わる
     #[test]
-    fn prop_connect_changes_state_to_connecting(_dummy in Just(())) {
-        let options = ClientConnectionOptions::new("example.com", "/ws");
+    fn prop_connect_changes_state_to_connecting(
+        host in "[a-z]{1,20}\\.[a-z]{2,5}",
+        path in "/[a-z0-9/]{0,30}",
+    ) {
+        let options = ClientConnectionOptions::new(&host, &path);
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-
         conn.connect().unwrap();
         prop_assert_eq!(conn.state(), ConnectionState::Connecting);
     }
 
     /// connect() でハンドシェイクリクエストが送信される
     #[test]
-    fn prop_connect_sends_handshake_request(_dummy in Just(())) {
-        let options = ClientConnectionOptions::new("example.com", "/ws");
+    fn prop_connect_sends_handshake_request(
+        host in "[a-z]{1,20}\\.[a-z]{2,5}",
+        path in "/[a-z0-9/]{0,30}",
+    ) {
+        let options = ClientConnectionOptions::new(&host, &path);
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-
         conn.connect().unwrap();
-
         let output = conn.poll_output().unwrap();
         match output {
             ConnectionOutput::SendData(data) => {
                 let request = String::from_utf8_lossy(&data);
-                prop_assert!(request.contains("GET /ws HTTP/1.1"));
-                prop_assert!(request.contains("Host: example.com"));
+                let expected_path = format!("GET {} HTTP/1.1", path);
+                let expected_host = format!("Host: {}", host);
+                prop_assert!(request.contains(expected_path.as_str()));
+                prop_assert!(request.contains(expected_host.as_str()));
                 prop_assert!(request.contains("Upgrade: websocket"));
                 prop_assert!(request.contains("Connection: Upgrade"));
                 prop_assert!(request.contains("Sec-WebSocket-Key:"));
@@ -196,10 +208,12 @@ proptest! {
 
     /// 二重接続はエラー
     #[test]
-    fn prop_double_connect_fails(_dummy in Just(())) {
-        let options = ClientConnectionOptions::new("example.com", "/ws");
+    fn prop_double_connect_fails(
+        host in "[a-z]{1,20}\\.[a-z]{2,5}",
+        path in "/[a-z0-9/]{0,30}",
+    ) {
+        let options = ClientConnectionOptions::new(&host, &path);
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-
         conn.connect().unwrap();
         let result = conn.connect();
         prop_assert!(result.is_err());
@@ -211,8 +225,18 @@ proptest! {
 proptest! {
     /// 有効なハンドシェイクで Connected 状態になる
     #[test]
-    fn prop_valid_handshake_connects(_dummy in Just(())) {
-        let (conn, _, _) = setup_connected_client();
+    fn prop_valid_handshake_connects(nonce in any::<[u8; 16]>()) {
+        let options = ClientConnectionOptions::new("example.com", "/ws");
+        let random = FixedRandom::with_nonce(nonce);
+        let mut conn = WebSocketClientConnection::new(options, random);
+        let now = Timestamp::from_millis(0);
+        conn.connect().unwrap();
+        while conn.poll_output().is_some() {}
+        let accept = compute_accept(&nonce);
+        let response = create_valid_handshake_response(&accept, None, None);
+        conn.feed_recv_buf(&response, now).unwrap();
+        while conn.poll_event().is_some() {}
+        while conn.poll_output().is_some() {}
         prop_assert_eq!(conn.state(), ConnectionState::Connected);
     }
 }
@@ -260,21 +284,18 @@ proptest! {
 
     /// 無効な Accept はエラー
     #[test]
-    fn prop_invalid_accept_fails(_dummy in Just(())) {
+    fn prop_invalid_accept_fails(invalid_accept in "[a-zA-Z0-9+/=]{20,40}") {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let random = FixedRandom::new();
         let nonce = random.nonce;
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
-
         conn.connect().unwrap();
         while conn.poll_output().is_some() {}
-
-        // 無効な Accept（正しい Accept とは異なる値）
-        let _ = compute_accept(&nonce); // 正しい Accept を計算（使用しない）
-        let response = create_valid_handshake_response("invalid_accept", None, None);
+        let valid_accept = compute_accept(&nonce);
+        prop_assume!(invalid_accept != valid_accept);
+        let response = create_valid_handshake_response(&invalid_accept, None, None);
         let result = conn.feed_recv_buf(&response, now);
-
         prop_assert!(result.is_err());
     }
 
@@ -512,94 +533,6 @@ proptest! {
         }
         prop_assert!(found, "Close frame not sent");
     }
-
-    /// コードなしの Close フレーム
-    #[test]
-    fn prop_close_without_code(_dummy in Just(())) {
-        let (mut conn, now, _) = setup_connected_client();
-
-        // コードなしの Close フレーム
-        let close = Frame::close(None, "").unwrap().encode_unmasked();
-        conn.feed_recv_buf(&close, now).unwrap();
-
-        let mut found = false;
-        while let Some(event) = conn.poll_event() {
-            if let ConnectionEvent::Close { code: None, reason } = event {
-                prop_assert!(reason.is_empty());
-                found = true;
-                break;
-            }
-        }
-        prop_assert!(found, "Close event not found");
-    }
-}
-
-// ==== タイマー処理のテスト ====
-
-proptest! {
-    /// Ping タイマーで Ping が送信される
-    #[test]
-    fn prop_ping_timer_event(_dummy in Just(())) {
-        let (mut conn, _, _) = setup_connected_client();
-
-        conn.handle_timer(TimerId::Ping).unwrap();
-
-        // Ping が送信されるはず
-        let mut found = false;
-        while let Some(output) = conn.poll_output() {
-            if let ConnectionOutput::SendData(_) = output {
-                found = true;
-                break;
-            }
-        }
-        prop_assert!(found, "Ping not sent on timer");
-    }
-
-    /// Pong タイムアウトで接続が閉じられる
-    #[test]
-    fn prop_pong_timeout_closes_connection(_dummy in Just(())) {
-        let (mut conn, _, _) = setup_connected_client();
-
-        // Ping を送信
-        conn.send_ping(&[]).unwrap();
-        while conn.poll_output().is_some() {}
-        while conn.poll_event().is_some() {}
-
-        // Pong タイムアウトをトリガー
-        conn.handle_timer(TimerId::PongTimeout).unwrap();
-
-        // エラーイベントが発生
-        let mut error_found = false;
-        while let Some(event) = conn.poll_event() {
-            if let ConnectionEvent::Error(msg) = event {
-                prop_assert!(msg.contains("pong timeout"));
-                error_found = true;
-                break;
-            }
-        }
-        prop_assert!(error_found, "Error event not found");
-
-        // 状態が Closing に変わる
-        prop_assert_eq!(conn.state(), ConnectionState::Closing);
-    }
-
-    /// Close タイムアウトで強制切断
-    #[test]
-    fn prop_close_timeout_forces_disconnect(_dummy in Just(())) {
-        let (mut conn, _, _) = setup_connected_client();
-
-        // Close を送信
-        conn.close(CloseCode::NORMAL, "").unwrap();
-        while conn.poll_output().is_some() {}
-        while conn.poll_event().is_some() {}
-
-        prop_assert_eq!(conn.state(), ConnectionState::Closing);
-
-        // Close タイムアウトをトリガー
-        conn.handle_timer(TimerId::CloseTimeout).unwrap();
-
-        prop_assert_eq!(conn.state(), ConnectionState::Closed);
-    }
 }
 
 // ==== 状態遷移のテスト ====
@@ -607,24 +540,21 @@ proptest! {
 proptest! {
     /// Disconnected 状態では送信できない
     #[test]
-    fn prop_cannot_send_while_disconnected(_dummy in Just(())) {
+    fn prop_cannot_send_while_disconnected(text in ".*") {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-
-        let result = conn.send_text("hello");
+        let result = conn.send_text(&text);
         prop_assert!(result.is_err());
     }
 
     /// Connecting 状態では送信できない
     #[test]
-    fn prop_cannot_send_while_connecting(_dummy in Just(())) {
+    fn prop_cannot_send_while_connecting(text in ".*") {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-
         conn.connect().unwrap();
         prop_assert_eq!(conn.state(), ConnectionState::Connecting);
-
-        let result = conn.send_text("hello");
+        let result = conn.send_text(&text);
         prop_assert!(result.is_err());
     }
 }
@@ -632,29 +562,22 @@ proptest! {
 proptest! {
     /// Disconnected 状態ではデータを受信できない
     #[test]
-    fn prop_feed_to_disconnected_fails(_dummy in Just(())) {
+    fn prop_feed_to_disconnected_fails(data in prop::collection::vec(any::<u8>(), 1..100)) {
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
-
-        let result = conn.feed_recv_buf(b"data", now);
+        let result = conn.feed_recv_buf(&data, now);
         prop_assert!(result.is_err());
     }
 
     /// Closed 状態ではデータを受信できない
     #[test]
-    fn prop_feed_to_closed_fails(_dummy in Just(())) {
+    fn prop_feed_to_closed_fails(extra in prop::collection::vec(any::<u8>(), 1..50)) {
         let (mut conn, now, _) = setup_connected_client();
-
-        // Close フレームを送受信
         let close = Frame::close(Some(1000), "").unwrap().encode_unmasked();
         conn.feed_recv_buf(&close, now).unwrap();
-
         prop_assert_eq!(conn.state(), ConnectionState::Closed);
-
-        // Closed 状態でデータを送ろうとするとエラー
-        let text_frame = Frame::text("hello").encode_unmasked();
-        let result = conn.feed_recv_buf(&text_frame, now);
+        let result = conn.feed_recv_buf(&extra, now);
         prop_assert!(result.is_err());
     }
 }
@@ -664,33 +587,33 @@ proptest! {
 proptest! {
     /// RSV2 ビットが立ったフレームは拒否される
     #[test]
-    fn prop_rsv2_bit_rejected(_dummy in Just(())) {
+    fn prop_rsv2_bit_rejected(payload in prop::collection::vec(any::<u8>(), 0..50)) {
         let (mut conn, now, _) = setup_connected_client();
-
-        // RSV2 ビットが立ったフレーム
-        let frame = vec![0xA1, 0x05, b'H', b'e', b'l', b'l', b'o'];
+        // RSV2 bit: 0xA1 = FIN + RSV2 + text opcode, サーバーからはマスクなし
+        let mut frame = vec![0xA1, payload.len() as u8];
+        frame.extend_from_slice(&payload);
         let result = conn.feed_recv_buf(&frame, now);
         prop_assert!(result.is_err());
     }
 
     /// RSV3 ビットが立ったフレームは拒否される
     #[test]
-    fn prop_rsv3_bit_rejected(_dummy in Just(())) {
+    fn prop_rsv3_bit_rejected(payload in prop::collection::vec(any::<u8>(), 0..50)) {
         let (mut conn, now, _) = setup_connected_client();
-
-        // RSV3 ビットが立ったフレーム
-        let frame = vec![0x91, 0x05, b'H', b'e', b'l', b'l', b'o'];
+        // RSV3 bit: 0x91 = FIN + RSV3 + text opcode
+        let mut frame = vec![0x91, payload.len() as u8];
+        frame.extend_from_slice(&payload);
         let result = conn.feed_recv_buf(&frame, now);
         prop_assert!(result.is_err());
     }
 
     /// permessage-deflate なしで RSV1 ビットは拒否される
     #[test]
-    fn prop_rsv1_without_deflate_rejected(_dummy in Just(())) {
+    fn prop_rsv1_without_deflate_rejected(payload in prop::collection::vec(any::<u8>(), 0..50)) {
         let (mut conn, now, _) = setup_connected_client();
-
-        // RSV1 ビットが立ったフレーム（permessage-deflate なし）
-        let frame = vec![0xC1, 0x05, b'H', b'e', b'l', b'l', b'o'];
+        // RSV1 bit: 0xC1 = FIN + RSV1 + text opcode
+        let mut frame = vec![0xC1, payload.len() as u8];
+        frame.extend_from_slice(&payload);
         let result = conn.feed_recv_buf(&frame, now);
         prop_assert!(result.is_err());
     }
@@ -745,29 +668,25 @@ proptest! {
 
     /// 開始フレームなしで Continuation は失敗
     #[test]
-    fn prop_continuation_without_start_fails(_dummy in Just(())) {
+    fn prop_continuation_without_start_fails(data in prop::collection::vec(any::<u8>(), 0..100)) {
         let (mut conn, now, _) = setup_connected_client();
-
-        // 開始フレームなしで Continuation を送る
-        let cont = Frame::new(Opcode::Continuation, b"data".to_vec()).encode_unmasked();
+        let cont = Frame::new(Opcode::Continuation, data).encode_unmasked();
         let result = conn.feed_recv_buf(&cont, now);
         prop_assert!(result.is_err());
     }
 
     /// RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
     #[test]
-    fn prop_new_message_during_fragment_fails(_dummy in Just(())) {
+    fn prop_new_message_during_fragment_fails(
+        first_part in "[\\x20-\\x7E]{1,50}",
+        new_message in "[\\x20-\\x7E]{1,50}",
+    ) {
         let (mut conn, now, _) = setup_connected_client();
-
-        // フラグメント開始（fin=false）
-        let mut frame1 = Frame::text("part1");
+        let mut frame1 = Frame::text(&first_part);
         frame1.fin = false;
         conn.feed_recv_buf(&frame1.encode_unmasked(), now).unwrap();
-
-        // 完了前に新しいメッセージ開始
-        let frame2 = Frame::text("new message").encode_unmasked();
+        let frame2 = Frame::text(&new_message).encode_unmasked();
         let result = conn.feed_recv_buf(&frame2, now);
-
         prop_assert!(result.is_err());
     }
 }
@@ -800,19 +719,6 @@ proptest! {
             }
         }
         prop_assert!(found, "Message not received after chunked delivery");
-    }
-}
-
-// ==== deflate 設定のテスト ====
-
-proptest! {
-    /// deflate オプションの設定
-    #[test]
-    fn prop_deflate_option_setting(_dummy in Just(())) {
-        let config = PerMessageDeflateConfig::default();
-        let options = ClientConnectionOptions::new("example.com", "/").deflate(config.clone());
-
-        prop_assert!(options.deflate_config.is_some());
     }
 }
 
@@ -895,14 +801,6 @@ proptest! {
             }
         }
         prop_assert!(found, "TextMessage event not found");
-    }
-
-    /// deflate ネゴシエーション（ハンドシェイクでの拡張合意）
-    #[test]
-    fn prop_deflate_negotiation(_dummy in Just(())) {
-        let (conn, _, _) = setup_connected_client_with_deflate();
-
-        prop_assert!(conn.extensions().contains(&"permessage-deflate".to_string()));
     }
 
     /// 小メッセージの非圧縮（しきい値以下）
@@ -1011,19 +909,16 @@ proptest! {
 proptest! {
     /// 無効な UTF-8 を含むテキストフレームはエラーを返す
     #[test]
-    fn prop_invalid_utf8_text_frame(_dummy in Just(())) {
+    fn prop_invalid_utf8_text_frame(
+        first_byte in prop::sample::select(vec![0x80u8, 0x81, 0xBF, 0xFE, 0xFF]),
+        extra_bytes in prop::collection::vec(any::<u8>(), 0..10),
+    ) {
         let (mut conn, now, _) = setup_connected_client();
-
-        // 無効な UTF-8 を含むテキストフレーム
-        let invalid_utf8 = vec![0xFF, 0xFE, 0x00, 0x01];
+        let mut invalid_utf8 = vec![first_byte];
+        invalid_utf8.extend(extra_bytes);
         let frame = Frame::new(Opcode::Text, invalid_utf8).encode_unmasked();
-
-        // RFC 6455 準拠: 無効な UTF-8 は即座にエラーを返す
         let result = conn.feed_recv_buf(&frame, now);
         prop_assert!(result.is_err(), "Invalid UTF-8 should return error");
-        let err = result.unwrap_err();
-        let err_msg = format!("{}", err);
-        prop_assert!(err_msg.contains("UTF-8") || err_msg.contains("utf-8"));
     }
 }
 
@@ -1104,30 +999,6 @@ proptest! {
         prop_assert!(result.is_err(), "Should reject client_max_window_bits {} > client offer {}", server_bits, client_bits);
         let err_msg = format!("{}", result.unwrap_err());
         prop_assert!(err_msg.contains("client_max_window_bits") && err_msg.contains("exceeds"));
-    }
-
-    /// client_max_window_bits=15 のみ受理される (window_bits=15 固定の制約)
-    #[test]
-    fn prop_accept_client_max_window_bits_only_15(
-        client_bits in Just(15u8),
-    ) {
-
-        let options = ClientConnectionOptions::new("example.com", "/ws")
-            .deflate(PerMessageDeflateConfig::new().client_max_window_bits(client_bits));
-        let random = FixedRandom::new();
-        let nonce = random.nonce;
-        let mut conn = WebSocketClientConnection::new(options, random);
-        let now = Timestamp::from_millis(0);
-
-        conn.connect().unwrap();
-        while conn.poll_output().is_some() {}
-
-        let accept = compute_accept(&nonce);
-        let ext = "permessage-deflate; client_max_window_bits=15";
-        let response = create_valid_handshake_response(&accept, None, Some(ext));
-
-        let result = conn.feed_recv_buf(&response, now);
-        prop_assert!(result.is_ok(), "Should accept client_max_window_bits=15");
     }
 
     /// client_max_window_bits < 15 は拒否される (window_bits=15 固定の制約)

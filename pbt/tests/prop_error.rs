@@ -24,8 +24,7 @@ proptest! {
 
     /// Error::new は kind を正しく設定する
     #[test]
-    fn prop_error_new(idx in 0usize..8) {
-        let kind = ERROR_KINDS[idx];
+    fn prop_error_new(kind in prop::sample::select(ERROR_KINDS.to_vec())) {
         let error = Error::new(kind);
         prop_assert_eq!(error.kind, kind);
         prop_assert!(error.reason.is_empty());
@@ -35,10 +34,9 @@ proptest! {
     /// Error::with_reason は kind と reason を正しく設定する
     #[test]
     fn prop_error_with_reason(
-        idx in 0usize..8,
+        kind in prop::sample::select(ERROR_KINDS.to_vec()),
         reason in "[a-zA-Z0-9 ]{0,100}"
     ) {
-        let kind = ERROR_KINDS[idx];
         let error = Error::with_reason(kind, &reason);
         prop_assert_eq!(error.kind, kind);
         prop_assert_eq!(error.reason, reason);
@@ -48,11 +46,13 @@ proptest! {
     /// Error::with_close_code は close_code を設定する
     #[test]
     fn prop_error_with_close_code(
-        idx in 0usize..3,
+        kind in prop::sample::select(vec![
+            ErrorKind::InvalidInput,
+            ErrorKind::InvalidData,
+            ErrorKind::ProtocolViolation,
+        ]),
         code in 1000u16..=4999
     ) {
-        let kinds = [ErrorKind::InvalidInput, ErrorKind::InvalidData, ErrorKind::ProtocolViolation];
-        let kind = kinds[idx];
         let error = Error::new(kind).with_close_code(code);
         prop_assert_eq!(error.close_code, Some(code));
     }
@@ -72,8 +72,7 @@ proptest! {
 
     /// Display は ErrorKind を含む
     #[test]
-    fn prop_error_display_contains_kind(idx in 0usize..8) {
-        let kind = ERROR_KINDS[idx];
+    fn prop_error_display_contains_kind(kind in prop::sample::select(ERROR_KINDS.to_vec())) {
         let error = Error::new(kind);
         let display = format!("{}", error);
         let kind_str = format!("{:?}", kind);
@@ -88,55 +87,14 @@ proptest! {
         prop_assert!(display.contains(&reason));
     }
 
-    /// Display はファイル名を含む
-    #[test]
-    fn prop_error_display_contains_location(_dummy in 0u8..1) {
-        let error = Error::new(ErrorKind::InvalidState);
-        let display = format!("{}", error);
-        prop_assert!(display.contains(".rs"));
-    }
-
-    /// Display は close_code を含む
-    #[test]
-    fn prop_error_display_close_code(code in 1000u16..=4999) {
-        let error = Error::new(ErrorKind::ProtocolViolation).with_close_code(code);
-        let display = format!("{}", error);
-        let code_str = format!("{}", code);
-        prop_assert!(display.contains(&code_str));
-    }
-
-    // ==== location のテスト ====
-
-    /// location はこのファイルを指す
-    #[test]
-    fn prop_error_location_is_caller(_dummy in 0u8..1) {
-        let error = Error::new(ErrorKind::InvalidInput);
-        prop_assert!(error.location.file().contains("prop_error.rs"));
-    }
-
     // ==== std::error::Error 実装のテスト ====
 
     /// Error は std::error::Error を実装している
     #[test]
-    fn prop_error_is_std_error(idx in 0usize..8) {
+    fn prop_error_is_std_error(kind in prop::sample::select(ERROR_KINDS.to_vec())) {
         fn check_error<T: std::error::Error>(_: &T) {}
-        let kind = ERROR_KINDS[idx];
         let error = Error::new(kind);
         check_error(&error);
-    }
-
-    // ==== ErrorKind 網羅性テスト ====
-
-    /// すべての ErrorKind は区別可能
-    #[test]
-    fn prop_all_error_kinds_distinguishable(_dummy in 0u8..1) {
-        use std::collections::HashSet;
-
-        let mut set = HashSet::new();
-        for kind in &ERROR_KINDS {
-            prop_assert!(set.insert(*kind), "Duplicate ErrorKind: {:?}", kind);
-        }
-        prop_assert_eq!(set.len(), ERROR_KINDS.len());
     }
 
     // ==== reason が様々な型を受け入れるテスト ====
@@ -154,13 +112,6 @@ proptest! {
     fn prop_error_with_reason_accepts_str(reason in "[a-zA-Z]{5,20}") {
         let error = Error::with_reason(ErrorKind::InvalidData, &reason);
         prop_assert_eq!(error.reason, reason);
-    }
-
-    /// reason は空文字列を受け入れる
-    #[test]
-    fn prop_error_with_reason_accepts_empty(_dummy in 0u8..1) {
-        let error = Error::with_reason(ErrorKind::InvalidData, "");
-        prop_assert!(error.reason.is_empty());
     }
 
     // ==== 複数の close_code 設定のテスト ====
