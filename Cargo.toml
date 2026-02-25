@@ -9,6 +9,7 @@ description = "WebSocket Library"
 homepage = "https://github.com/shiguredo/websocket-rs"
 repository = "https://github.com/shiguredo/websocket-rs"
 readme = "README.md"
+include = ["/src/**", "/LICENSE", "/README.md"]
 
 [dependencies]
 # https://github.com/marshallpierce/rust-base64
