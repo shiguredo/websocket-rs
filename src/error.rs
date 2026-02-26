@@ -26,6 +26,9 @@ pub enum ErrorKind {
     /// ハンドシェイクが拒否された
     HandshakeRejected,
 
+    /// サポートされていない WebSocket バージョンを要求された
+    VersionNotSupported,
+
     /// 無効な UTF-8 データ
     InvalidUtf8,
 }
@@ -105,6 +108,11 @@ impl Error {
     #[allow(dead_code)]
     pub(crate) fn handshake_rejected<T: Into<String>>(reason: T) -> Self {
         Self::with_reason(ErrorKind::HandshakeRejected, reason)
+    }
+
+    #[track_caller]
+    pub(crate) fn version_not_supported<T: Into<String>>(received: T) -> Self {
+        Self::with_reason(ErrorKind::VersionNotSupported, received)
     }
 
     #[track_caller]

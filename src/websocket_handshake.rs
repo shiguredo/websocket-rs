@@ -312,10 +312,7 @@ impl HandshakeRequestValidator {
         match request.get_header("Sec-WebSocket-Version") {
             Some("13") => {}
             Some(v) => {
-                return Err(Error::handshake_rejected(format!(
-                    "unsupported WebSocket version: {}",
-                    v
-                )));
+                return Err(Error::version_not_supported(v));
             }
             None => return Err(Error::handshake_rejected("missing Sec-WebSocket-Version")),
         }
