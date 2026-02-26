@@ -36,7 +36,7 @@ use shiguredo_websocket::{
     RandomSource, WebSocketClientConnection, Timestamp,
 };
 
-// 乱数ソースの実装
+// 乱数ソースの実装 (getrandom を使う場合)
 struct SecureRandom;
 
 impl RandomSource for SecureRandom {
@@ -49,6 +49,23 @@ impl RandomSource for SecureRandom {
     fn nonce(&mut self) -> [u8; 16] {
         let mut nonce = [0u8; 16];
         getrandom::fill(&mut nonce).expect("failed to generate nonce");
+        nonce
+    }
+}
+
+// 乱数ソースの実装 (aws-lc-rs を使う場合)
+struct AwsLcRandom;
+
+impl RandomSource for AwsLcRandom {
+    fn masking_key(&mut self) -> [u8; 4] {
+        let mut key = [0u8; 4];
+        aws_lc_rs::rand::fill(&mut key).expect("failed to generate masking key");
+        key
+    }
+
+    fn nonce(&mut self) -> [u8; 16] {
+        let mut nonce = [0u8; 16];
+        aws_lc_rs::rand::fill(&mut nonce).expect("failed to generate nonce");
         nonce
     }
 }
