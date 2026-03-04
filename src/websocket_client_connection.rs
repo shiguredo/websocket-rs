@@ -736,6 +736,19 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         // RFC 7692 Section 7.1.2: クライアントがリクエストした拡張に対して
         // サーバーが不正なレスポンスを返した場合は接続失敗
         // RFC 6455 Section 9.1: 上の検証で ABNF 適合性は確認済み
+        // RFC 7692 line 427-429, 431-436, 1015: サーバーは offer の中から 1 つを選んで受諾する。
+        // 複数の permessage-deflate 要素は不正なレスポンスとして Fail しなければならない (MUST)。
+        let pmce_count = response
+            .extensions
+            .iter()
+            .flat_map(|s| Extension::parse_strict(s).into_iter().flatten())
+            .filter(|e| e.name == "permessage-deflate")
+            .count();
+        if pmce_count > 1 {
+            return Err(Error::handshake_rejected(
+                "server returned multiple permessage-deflate elements",
+            ));
+        }
         for ext_str in &response.extensions {
             let extensions = Extension::parse_strict(ext_str).map_err(|e| {
                 Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {}", e))
