@@ -18,6 +18,15 @@ use crate::websocket_opcode::Opcode;
 use crate::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};
 use shiguredo_http11::Response;
 
+/// ハンドシェイク受理待ち中の最大バッファサイズ（1MB）
+const MAX_PENDING_FRAME_DATA: usize = 1024 * 1024;
+
+/// デフォルトの最大フレームサイズ（64MB）
+pub const DEFAULT_MAX_FRAME_SIZE: usize = 64 * 1024 * 1024;
+
+/// デフォルトの最大メッセージサイズ（64MB）
+pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+
 /// デフォルトの最大解凍サイズ（16MB）
 pub const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 16 * 1024 * 1024;
 
@@ -36,6 +45,10 @@ pub struct ServerConnectionOptions {
     pub pong_timeout_millis: u64,
     /// クローズタイムアウト（ミリ秒）
     pub close_timeout_millis: u64,
+    /// 最大フレームサイズ（メモリ DoS 対策）
+    pub max_frame_size: usize,
+    /// 最大メッセージサイズ（フラグメント累積サイズ制限）
+    pub max_message_size: usize,
     /// 最大解凍サイズ（Zip Bomb 対策）
     pub max_decompressed_size: usize,
 }
@@ -49,6 +62,8 @@ impl Default for ServerConnectionOptions {
             ping_interval_millis: 30_000, // 30秒
             pong_timeout_millis: 10_000,  // 10秒
             close_timeout_millis: 5_000,  // 5秒
+            max_frame_size: DEFAULT_MAX_FRAME_SIZE,
+            max_message_size: DEFAULT_MAX_MESSAGE_SIZE,
             max_decompressed_size: DEFAULT_MAX_DECOMPRESSED_SIZE,
         }
     }
@@ -85,6 +100,18 @@ impl ServerConnectionOptions {
         self
     }
 
+    /// 最大フレームサイズを設定（メモリ DoS 対策）
+    pub fn max_frame_size(mut self, size: usize) -> Self {
+        self.max_frame_size = size;
+        self
+    }
+
+    /// 最大メッセージサイズを設定（フラグメント累積サイズ制限）
+    pub fn max_message_size(mut self, size: usize) -> Self {
+        self.max_message_size = size;
+        self
+    }
+
     /// 最大解凍サイズを設定（Zip Bomb 対策）
     pub fn max_decompressed_size(mut self, size: usize) -> Self {
         self.max_decompressed_size = size;
@@ -110,6 +137,10 @@ impl FragmentBuffer {
 
     fn is_empty(&self) -> bool {
         self.opcode.is_none()
+    }
+
+    fn len(&self) -> usize {
+        self.payload.len()
     }
 
     fn start(&mut self, opcode: Opcode, payload: Vec<u8>, compressed: bool) {
@@ -249,7 +280,17 @@ impl WebSocketServerConnection {
         result
     }
 
-    /// ハンドシェイクを自動で受諾
+    /// ハンドシェイクを自動で受諾する
+    ///
+    /// # セキュリティ上の注意
+    ///
+    /// この関数は `ServerHandshakeRequest` が保持する `origin` および `path` を検証しない。
+    /// ブラウザ + Cookie 認証の環境でこの関数を使用すると、
+    /// CSWSH (Cross-Site WebSocket Hijacking) の踏み台になる可能性がある。
+    ///
+    /// 信頼できないクライアントからの接続を受け付ける場合は、
+    /// `pending_request()` で `ServerHandshakeRequest` を取得し、
+    /// `origin` / `path` を自前で検証したうえで `accept_handshake()` を呼ぶこと。
     pub fn accept_handshake_auto(&mut self) -> Result<(), Error> {
         let request = self
             .pending_request
@@ -704,6 +745,11 @@ impl WebSocketServerConnection {
 
     fn process_handshake(&mut self, buf: &[u8]) -> Result<(), Error> {
         if self.pending_request.is_some() {
+            if self.pending_frame_data.len() + buf.len() > MAX_PENDING_FRAME_DATA {
+                return Err(Error::protocol_violation(
+                    "pending frame data exceeds limit while awaiting handshake acceptance",
+                ));
+            }
             self.pending_frame_data.extend_from_slice(buf);
             return Ok(());
         }
@@ -760,6 +806,11 @@ impl WebSocketServerConnection {
     }
 
     fn handle_frame(&mut self, frame: Frame) -> Result<(), Error> {
+        // フレームサイズチェック（コントロールフレームは RFC 6455 で 125 バイト以下が保証済み）
+        if !frame.opcode.is_control() && frame.payload.len() > self.options.max_frame_size {
+            self.close_internal(CloseCode::MESSAGE_TOO_BIG, "frame payload too large");
+            return Err(Error::protocol_violation("frame payload too large"));
+        }
         // RSV ビットチェック（permessage-deflate 以外は禁止）
         if frame.rsv2 || frame.rsv3 {
             self.close_internal(CloseCode::PROTOCOL_ERROR, "reserved bits set");
@@ -827,6 +878,10 @@ impl WebSocketServerConnection {
             self.emit_message(frame.opcode, payload)?;
         } else {
             // フラグメント開始 (RSV1 は最初のフレームにのみ設定される)
+            if frame.payload.len() > self.options.max_message_size {
+                self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large");
+                return Err(Error::protocol_violation("message too large"));
+            }
             self.fragment_buffer
                 .start(frame.opcode, frame.payload, frame.rsv1);
         }
@@ -845,6 +900,12 @@ impl WebSocketServerConnection {
         }
 
         self.fragment_buffer.append(&frame.payload);
+
+        // フラグメント累積サイズチェック
+        if self.fragment_buffer.len() > self.options.max_message_size {
+            self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large");
+            return Err(Error::protocol_violation("message too large"));
+        }
 
         if frame.fin {
             let (opcode, payload, compressed) = self.fragment_buffer.take();
