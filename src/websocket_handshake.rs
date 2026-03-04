@@ -259,6 +259,21 @@ impl HandshakeRequestValidator {
             )));
         }
 
+        // RFC 6455 Section 4.2.1 (line 1143-1146), Section 4.1 (line 939-942):
+        // Request-URI は origin-form (/ 始まり) または absolute http/https URI でなければならない。
+        // HTTP デコーダーが origin-form / absolute-form の構文検証と
+        // GET メソッドへの authority-form / asterisk-form 拒否を担保しているが、
+        // absolute-form のスキームが http/https 以外 (ws/wss 等) の場合は WebSocket 層で拒否する。
+        if !request.uri.starts_with('/') {
+            let lower = request.uri.to_ascii_lowercase();
+            if !lower.starts_with("http://") && !lower.starts_with("https://") {
+                return Err(Error::handshake_rejected(format!(
+                    "invalid Request-URI: must be origin-form or absolute http/https URI: {}",
+                    request.uri
+                )));
+            }
+        }
+
         let host = request
             .get_header("Host")
             .ok_or_else(|| Error::handshake_rejected("missing Host header"))?
