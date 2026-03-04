@@ -110,6 +110,21 @@ impl HandshakeRequest {
             }
         }
 
+        // RFC 6455 Section 4.1 (line 939-942):
+        // Request-URI は origin-form (/ 始まり) または absolute http/https URI でなければならない (MUST)
+        {
+            let lower = self.path.to_ascii_lowercase();
+            if !self.path.starts_with('/')
+                && !lower.starts_with("http://")
+                && !lower.starts_with("https://")
+            {
+                return Err(Error::invalid_input(format!(
+                    "invalid path: must be origin-form or absolute http/https URI: {}",
+                    self.path
+                )));
+            }
+        }
+
         let key = STANDARD.encode(nonce);
 
         let mut request = Request::new("GET", &self.path)
