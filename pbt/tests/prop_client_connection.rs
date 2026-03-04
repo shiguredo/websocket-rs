@@ -1056,3 +1056,30 @@ proptest! {
         prop_assert!(err_msg.contains("is not supported"));
     }
 }
+
+// ==== RFC 6455 Section 7.1.7: failed フラグのテスト ====
+
+proptest! {
+    /// process_frames() がエラーを返した後の feed_recv_buf() 再呼び出しで即座に Err が返る
+    ///
+    /// RFC 6455 Section 7.1.7: Fail the WebSocket Connection 後は
+    /// データ処理を継続してはならない (MUST NOT)
+    #[test]
+    fn prop_failed_flag_prevents_reprocessing(
+        payload in prop::collection::vec(any::<u8>(), 0..50),
+    ) {
+        let (mut conn, now, _) = setup_connected_client();
+
+        // RSV2 ビットが立ったフレームでエラーを発生させる（サーバーからはマスクなし）
+        let mut bad_frame = vec![0xA1, payload.len() as u8];
+        bad_frame.extend_from_slice(&payload);
+
+        // 最初の呼び出しはエラーになる
+        let first = conn.feed_recv_buf(&bad_frame, now);
+        prop_assert!(first.is_err());
+
+        // 2 回目以降も即座にエラーになる (failed フラグ)
+        let second = conn.feed_recv_buf(&[], now);
+        prop_assert!(second.is_err());
+    }
+}

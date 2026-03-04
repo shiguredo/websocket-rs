@@ -10,8 +10,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use proptest::prelude::*;
 use shiguredo_websocket::{
-    CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, Frame, PerMessageDeflateConfig,
-    ServerConnectionOptions, WebSocketServerConnection,
+    CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, ErrorKind, Frame,
+    PerMessageDeflateConfig, ServerConnectionOptions, WebSocketServerConnection,
 };
 
 /// 有効なハンドシェイクリクエストを生成
@@ -1074,5 +1074,115 @@ proptest! {
 
         // 状態が Closed に変わる（close_sent が true なので返信は送られない）
         prop_assert_eq!(conn.state(), ConnectionState::Closed);
+    }
+}
+
+// ==== RFC 6455 Section 7.1.7: failed フラグのテスト ====
+
+proptest! {
+    /// エラー後に feed_recv_buf() を呼ぶと即座に Err が返る
+    ///
+    /// RFC 6455 Section 7.1.7: Fail the WebSocket Connection 後は
+    /// データ処理を継続してはならない (MUST NOT)
+    #[test]
+    fn prop_failed_flag_prevents_reprocessing(
+        payload in prop::collection::vec(any::<u8>(), 1..50),
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server();
+
+        // RSV2 ビットが立ったフレームでエラーを発生させる
+        let len = payload.len() as u8;
+        let mut bad_frame = vec![0xA1, 0x80 | len];
+        bad_frame.extend_from_slice(&mask_key);
+        let masked: Vec<u8> = payload.iter().enumerate()
+            .map(|(i, &b)| b ^ mask_key[i % 4])
+            .collect();
+        bad_frame.extend_from_slice(&masked);
+
+        // 最初の呼び出しはエラーになる
+        let first = conn.feed_recv_buf(&bad_frame);
+        prop_assert!(first.is_err());
+
+        // 2 回目以降も即座にエラーになる (failed フラグ)
+        let second = conn.feed_recv_buf(&[]);
+        prop_assert!(second.is_err());
+    }
+}
+
+// ==== RFC 6455 Section 4.2.2 / 4.4: VersionNotSupported 時の 426 応答テスト ====
+
+/// バージョン不一致のハンドシェイクリクエストを生成
+fn create_wrong_version_handshake_request(key: &[u8; 16], version: u8) -> Vec<u8> {
+    let encoded_key = STANDARD.encode(key);
+    format!(
+        "GET /websocket HTTP/1.1\r\n\
+         Host: example.com\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Key: {}\r\n\
+         Sec-WebSocket-Version: {}\r\n\
+         \r\n",
+        encoded_key, version
+    )
+    .into_bytes()
+}
+
+proptest! {
+    /// バージョン不一致時に 426 応答と Sec-WebSocket-Version: 13 が送信される
+    ///
+    /// RFC 6455 Section 4.4: サーバーはサポートするバージョンを
+    /// Sec-WebSocket-Version ヘッダーで返さなければならない (MUST)
+    #[test]
+    fn prop_version_not_supported_sends_426(
+        key in prop::array::uniform16(any::<u8>()),
+        version in prop::sample::select(vec![0u8, 1, 7, 8, 12, 14, 255]),
+    ) {
+        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
+        let request = create_wrong_version_handshake_request(&key, version);
+
+        let result = conn.feed_recv_buf(&request);
+
+        // VersionNotSupported エラーが返る
+        prop_assert!(result.is_err());
+        let err = result.unwrap_err();
+        prop_assert_eq!(err.kind, ErrorKind::VersionNotSupported);
+
+        // 状態は Closed になる
+        prop_assert_eq!(conn.state(), ConnectionState::Closed);
+
+        // 出力に 426 応答が含まれ、Sec-WebSocket-Version: 13 ヘッダーが存在する
+        let mut found_426 = false;
+        let mut found_version_header = false;
+        while let Some(output) = conn.poll_output() {
+            if let ConnectionOutput::SendData(data) = output {
+                let response = String::from_utf8_lossy(&data);
+                if response.contains("426") {
+                    found_426 = true;
+                }
+                if response.contains("Sec-WebSocket-Version: 13") {
+                    found_version_header = true;
+                }
+            }
+        }
+        prop_assert!(found_426, "426 response not sent for version mismatch");
+        prop_assert!(found_version_header, "Sec-WebSocket-Version: 13 header not sent");
+    }
+
+    /// バージョン不一致後に feed_recv_buf() を呼ぶと即座に Err が返る
+    #[test]
+    fn prop_version_not_supported_failed_flag(
+        key in prop::array::uniform16(any::<u8>()),
+    ) {
+        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
+        // バージョン 0 を送る（不正）
+        let request = create_wrong_version_handshake_request(&key, 0);
+
+        let first = conn.feed_recv_buf(&request);
+        prop_assert!(first.is_err());
+
+        // failed フラグが立っているので 2 回目も即座にエラー
+        let second = conn.feed_recv_buf(&[]);
+        prop_assert!(second.is_err());
     }
 }

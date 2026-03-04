@@ -297,6 +297,12 @@ pub struct WebSocketClientConnection<R: RandomSource> {
     /// Pong 待ち
     awaiting_pong: bool,
 
+    /// RFC 6455 Section 7.1.7: 接続失敗フラグ
+    ///
+    /// feed_recv_buf() が Err を返した後は true になり、
+    /// 以降の feed_recv_buf() 呼び出しを即座に Err で弾く。
+    failed: bool,
+
     /// イベントキュー
     event_queue: VecDeque<ConnectionEvent>,
     /// 出力キュー
@@ -338,6 +344,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             close_sent: false,
             close_received: false,
             awaiting_pong: false,
+            failed: false,
             event_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             random,
@@ -406,18 +413,23 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
     /// 受信データを処理
     ///
-    /// RFC 6455 Section 7.1.7: このメソッドが Err を返した場合、呼び出し側は
-    /// 以降の feed_recv_buf() 呼び出しを停止しなければならない。
-    /// Err 後も呼び出しを継続すると、Closing 状態でデータフレームが
-    /// 処理される可能性がある。
+    /// RFC 6455 Section 7.1.7: このメソッドが Err を返した後は
+    /// 以降の呼び出しも即座に Err を返す。
     pub fn feed_recv_buf(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
-        match self.state {
+        if self.failed {
+            return Err(Error::invalid_state("connection has failed"));
+        }
+        let result = match self.state {
             ConnectionState::Connecting => self.process_handshake(buf, now),
             ConnectionState::Connected | ConnectionState::Closing => self.process_frames(buf, now),
             ConnectionState::Disconnected | ConnectionState::Closed => {
-                Err(Error::invalid_state("connection is closed"))
+                return Err(Error::invalid_state("connection is closed"));
             }
+        };
+        if result.is_err() {
+            self.failed = true;
         }
+        result
     }
 
     /// テキストメッセージを送信
