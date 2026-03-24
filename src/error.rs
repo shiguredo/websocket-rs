@@ -31,6 +31,26 @@ pub enum ErrorKind {
 
     /// 無効な UTF-8 データ
     InvalidUtf8,
+
+    /// WebSocket ハンドシェイクで 101 以外の HTTP レスポンスを受信した
+    ///
+    /// RFC 6455 Section 4.1: クライアントは 101 以外のレスポンスを
+    /// HTTP procedures に従って処理する必要がある
+    HttpResponse,
+}
+
+/// HTTP レスポンス情報
+///
+/// WebSocket ハンドシェイクで 101 以外のレスポンスを受信した場合に、
+/// HTTP procedures を実行するために必要な情報を保持する
+#[derive(Debug, Clone)]
+pub struct HttpResponseInfo {
+    /// HTTP ステータスコード
+    pub status_code: u16,
+    /// HTTP reason phrase
+    pub reason_phrase: String,
+    /// HTTP レスポンスヘッダー
+    pub headers: Vec<(String, String)>,
 }
 
 /// エラー型
@@ -51,6 +71,9 @@ pub struct Error {
 
     /// WebSocket クローズコード（該当する場合）
     pub close_code: Option<u16>,
+
+    /// HTTP レスポンス情報（101 以外のレスポンスを受信した場合）
+    pub http_response: Option<Box<HttpResponseInfo>>,
 }
 
 impl Error {
@@ -69,6 +92,7 @@ impl Error {
             location: Location::caller(),
             backtrace: Backtrace::capture(),
             close_code: None,
+            http_response: None,
         }
     }
 
@@ -134,6 +158,17 @@ impl Error {
     pub fn with_close_code(mut self, code: u16) -> Self {
         self.close_code = Some(code);
         self
+    }
+
+    /// HTTP レスポンスエラーを生成する
+    ///
+    /// WebSocket ハンドシェイクで 101 以外の HTTP レスポンスを受信した場合に使用する
+    #[track_caller]
+    pub(crate) fn http_response(info: HttpResponseInfo) -> Self {
+        let reason = format!("HTTP {} {}", info.status_code, info.reason_phrase);
+        let mut err = Self::with_reason(ErrorKind::HttpResponse, reason);
+        err.http_response = Some(Box::new(info));
+        err
     }
 }
 

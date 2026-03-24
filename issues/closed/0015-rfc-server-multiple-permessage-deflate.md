@@ -38,3 +38,9 @@ RFC 7692 Section 7.1.2 (refs/rfc7692.txt:722):
 ## 修正方針
 
 `accept_handshake()` 内で `response.extensions` をパースした時点で `permessage-deflate` が 2 つ以上含まれている場合は `Err` を返す。クライアント側 (line 741-751) と同等のバリデーションをサーバー側にも追加する。
+
+## 解決方法
+
+`accept_handshake()` 内の拡張バリデーションループ直後に、`response.extensions` をパースして `permessage-deflate` 要素が 2 つ以上含まれる場合は `handshake_rejected` エラーを返すチェックを追加した。クライアント側と同等のバリデーション。
+
+Completed: 2026-03-25

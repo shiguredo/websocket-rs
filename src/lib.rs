@@ -83,7 +83,7 @@ mod websocket_server_connection;
 
 pub use buf::{ByteSliceExt, VecExt};
 pub use deflate::{Compressor, Decompressor, PerMessageDeflate};
-pub use error::{Error, ErrorKind};
+pub use error::{Error, ErrorKind, HttpResponseInfo};
 pub use time::Timestamp;
 pub use websocket_client_connection::{
     ClientConnectionOptions, ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource,

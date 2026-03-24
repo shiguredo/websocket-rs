@@ -516,12 +516,13 @@ impl HandshakeValidator {
         &self,
         response: &ResponseHead,
     ) -> Result<Option<HandshakeResponse>, Error> {
-        // ステータスコードの検証
+        // RFC 6455 Section 4.1: 101 以外の HTTP レスポンスは HTTP procedures に従って処理する
         if response.status_code != 101 {
-            return Err(Error::handshake_rejected(format!(
-                "unexpected status code: {} {}",
-                response.status_code, response.reason_phrase
-            )));
+            return Err(Error::http_response(crate::error::HttpResponseInfo {
+                status_code: response.status_code,
+                reason_phrase: response.reason_phrase.clone(),
+                headers: response.headers.clone(),
+            }));
         }
 
         // Upgrade ヘッダーの検証（トークンとして検証）

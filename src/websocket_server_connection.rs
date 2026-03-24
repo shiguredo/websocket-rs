@@ -370,6 +370,22 @@ impl WebSocketServerConnection {
             }
         }
 
+        // RFC 7692 Section 7 / 8.4: サーバーは offer から 1 つの permessage-deflate を選んで返す。
+        // 複数の permessage-deflate 要素を含むレスポンスは不正。
+        {
+            let pmce_count: usize = response
+                .extensions
+                .iter()
+                .flat_map(|s| Extension::parse(s))
+                .filter(|e| e.name == "permessage-deflate")
+                .count();
+            if pmce_count > 1 {
+                return Err(Error::handshake_rejected(
+                    "response contains multiple permessage-deflate elements",
+                ));
+            }
+        }
+
         // RFC 6455 Section 4.2.2: 予約済みヘッダーとの重複チェック
         // これらのヘッダーは MUST appear かつ MUST NOT appear more than once
         const RESERVED: &[&str] = &[
@@ -772,7 +788,11 @@ impl WebSocketServerConnection {
                 self.reject_handshake(426, "Upgrade Required", &[("Sec-WebSocket-Version", "13")])?;
                 Err(e)
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                // RFC 6455 Section 4.2.1: ハンドシェイク違反時は HTTP エラーレスポンスを返す (MUST)
+                self.reject_handshake(400, "Bad Request", &[])?;
+                Err(e)
+            }
         }
     }
 

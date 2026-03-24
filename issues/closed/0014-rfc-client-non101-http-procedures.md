@@ -26,3 +26,14 @@ RFC 6455 Section 4.1 (refs/rfc6455.txt:1030):
 ## 修正方針
 
 101 以外のレスポンスを受けた場合に、ステータスコード・ヘッダー・ボディを構造化した形で返す専用のエラーバリアントを設ける。上位層がレスポンス情報に基づいてリダイレクト・認証等の HTTP 的処理を実行できるようにする。
+
+## 解決方法
+
+1. `ErrorKind::HttpResponse` バリアントを追加
+2. `HttpResponseInfo` 構造体を追加（`status_code`, `reason_phrase`, `headers` を保持）
+3. `Error` に `http_response: Option<HttpResponseInfo>` フィールドを追加
+4. `validate_response()` で 101 以外のレスポンスを受けた場合に `Error::http_response()` を使い、HTTP レスポンスの構造化情報を保持したエラーを返すようにした
+
+これにより上位層は `error.kind == ErrorKind::HttpResponse` で判別し、`error.http_response` から `Location` ヘッダー (3xx) や `WWW-Authenticate` ヘッダー (401) 等を取得して HTTP procedures を実行できる。
+
+Completed: 2026-03-25

@@ -28,3 +28,9 @@ MUST 要件であり、例外規定はない。
 ## 修正方針
 
 `Err(e)` の一般分岐でも `reject_handshake(400, "Bad Request", &[])` を送出してから `Err(e)` を返す。
+
+## 解決方法
+
+`src/websocket_server_connection.rs` の `process_handshake()` 内、`Err(e)` の一般分岐で `reject_handshake(400, "Bad Request", &[])` を呼び出してから `Err(e)` を返すようにした。これにより `VersionNotSupported` (426) と同様に、全てのハンドシェイクバリデーション失敗で HTTP エラーレスポンスが送出される。
+
+Completed: 2026-03-25
