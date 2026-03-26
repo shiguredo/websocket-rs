@@ -1,0 +1,47 @@
+[package]
+name = "fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+shiguredo_websocket = { path = ".." }
+
+[[bin]]
+name = "fuzz_frame_decode"
+path = "fuzz_targets/fuzz_frame_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_handshake"
+path = "fuzz_targets/fuzz_handshake.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_http_response"
+path = "fuzz_targets/fuzz_http_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_extension_parse_strict"
+path = "fuzz_targets/fuzz_extension_parse_strict.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_deflate_decompress"
+path = "fuzz_targets/fuzz_deflate_decompress.rs"
+test = false
+doc = false
+bench = false
