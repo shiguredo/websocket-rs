@@ -1,6 +1,6 @@
 [package]
 name = "shiguredo_websocket"
-version = "2026.1.0-canary.6"
+version = "2026.1.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Shiguredo Inc."]
@@ -12,13 +12,9 @@ readme = "README.md"
 include = ["/src/**", "/LICENSE", "/README.md"]
 
 [dependencies]
-# https://github.com/marshallpierce/rust-base64
 base64 = "0.22"
-# https://github.com/RustCrypto/hashes/tree/master/sha1
 sha1 = "0.10"
-# https://github.com/rust-lang/flate2-rs
 flate2 = "1.1"
-# https://github.com/shiguredo/http11-rs
 shiguredo_http11 = "2026.1.1"
 
 [workspace]
