@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 
 use crate::error::Error;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
+use base64ct::{Base64, Encoding};
 use sha1::{Digest, Sha1};
 use shiguredo_http11::{HttpHead, Request, RequestDecoder, ResponseDecoder, ResponseHead};
 
@@ -125,7 +124,7 @@ impl HandshakeRequest {
             }
         }
 
-        let key = STANDARD.encode(nonce);
+        let key = Base64::encode_string(nonce.as_slice());
 
         let mut request = Request::new("GET", &self.path)
             .header("Host", &self.host)
@@ -642,7 +641,7 @@ impl HandshakeValidator {
 
 /// Sec-WebSocket-Accept の値を計算する
 pub fn calculate_accept(nonce: &[u8; 16]) -> String {
-    let key = STANDARD.encode(nonce);
+    let key = Base64::encode_string(nonce.as_slice());
     calculate_accept_from_key(&key)
 }
 
@@ -653,7 +652,7 @@ pub fn calculate_accept_from_key(key: &str) -> String {
     hasher.update(combined.as_bytes());
     let hash = hasher.finalize();
 
-    STANDARD.encode(hash)
+    Base64::encode_string(hash.as_slice())
 }
 
 /// RFC 7230 の token ABNF に準拠するかチェックする
@@ -781,8 +780,7 @@ fn validate_extension_entry(ext: &str) -> Result<(), Error> {
 }
 
 fn validate_key(key: &str) -> Result<(), Error> {
-    let decoded = STANDARD
-        .decode(key)
+    let decoded = Base64::decode_vec(key)
         .map_err(|_| Error::handshake_rejected("invalid Sec-WebSocket-Key"))?;
     if decoded.len() != 16 {
         return Err(Error::handshake_rejected("invalid Sec-WebSocket-Key"));

@@ -11,6 +11,9 @@
 
 ## develop
 
+- [CHANGE] base64 クレートを base64ct 1.8 に切り替えるようにする
+  - @voluntas
+
 ### misc
 
 

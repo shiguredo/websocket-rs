@@ -12,7 +12,7 @@ readme = "README.md"
 include = ["/src/**", "/LICENSE", "/README.md"]
 
 [dependencies]
-base64 = "0.22"
+base64ct = { version = "1.8", features = ["std"] }
 sha1 = "0.10"
 flate2 = "1.1"
 shiguredo_http11 = "2026.1.1"

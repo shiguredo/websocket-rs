@@ -3,7 +3,7 @@
 //! WebSocket プロトコル (RFC 6455) の各セクションに対応したテスト
 //! このテストが全て通れば RFC 6455 の主要な要件を満たしている
 
-use base64::Engine;
+use base64ct::{Base64, Encoding};
 use proptest::prelude::*;
 use sha1::{Digest, Sha1};
 use shiguredo_websocket::{
@@ -57,7 +57,7 @@ proptest! {
         let key = key_line.split(':').nth(1).unwrap().trim();
 
         // base64 デコードして 16 バイトであることを確認
-        let decoded = base64::engine::general_purpose::STANDARD.decode(key).unwrap();
+        let decoded = Base64::decode_vec(key).unwrap();
         prop_assert_eq!(decoded.len(), 16);
     }
 
@@ -89,17 +89,17 @@ proptest! {
 /// Sec-WebSocket-Accept の計算
 fn calculate_accept(nonce: &[u8; 16]) -> String {
     const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    let key = base64::engine::general_purpose::STANDARD.encode(nonce);
+    let key = Base64::encode_string(nonce.as_slice());
     let combined = format!("{}{}", key, WEBSOCKET_GUID);
     let mut hasher = Sha1::new();
     hasher.update(combined.as_bytes());
     let hash = hasher.finalize();
-    base64::engine::general_purpose::STANDARD.encode(hash)
+    Base64::encode_string(hash.as_slice())
 }
 
 /// 有効な WebSocket キーを生成
 fn generate_valid_ws_key() -> String {
-    base64::engine::general_purpose::STANDARD.encode(b"0123456789ABCDEF")
+    Base64::encode_string(b"0123456789ABCDEF")
 }
 
 proptest! {
@@ -223,7 +223,7 @@ proptest! {
     /// Section 4.2.1: Sec-WebSocket-Key は 16 バイトの base64
     #[test]
     fn prop_section_4_2_1_websocket_key_16_bytes(nonce in any::<[u8; 16]>()) {
-        let key = base64::engine::general_purpose::STANDARD.encode(nonce);
+        let key = Base64::encode_string(nonce.as_slice());
         let request = format!(
             "GET / HTTP/1.1\r\n\
              Host: example.com\r\n\

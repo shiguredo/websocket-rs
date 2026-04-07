@@ -7,5 +7,5 @@ publish = false
 [dev-dependencies]
 shiguredo_websocket = { path = "../" }
 proptest = "1"
-base64 = "0.22"
+base64ct = { version = "1.8", features = ["std"] }
 sha1 = "0.10"

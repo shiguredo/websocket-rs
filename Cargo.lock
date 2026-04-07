@@ -44,10 +44,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "base64"
-version = "0.22.1"
+name = "base64ct"
+version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bit-set"
@@ -471,7 +471,7 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 name = "pbt"
 version = "0.0.0"
 dependencies = [
- "base64",
+ "base64ct",
  "proptest",
  "sha1",
  "shiguredo_websocket",
@@ -825,7 +825,7 @@ checksum = "50203212be42844ef00003e05fe57f0b19a80b33d9d35745c48efc01e5d2fb63"
 name = "shiguredo_websocket"
 version = "2026.1.0"
 dependencies = [
- "base64",
+ "base64ct",
  "flate2",
  "sha1",
  "shiguredo_http11",

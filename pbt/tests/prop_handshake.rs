@@ -5,7 +5,7 @@
 //! - エラーケースのハンドリング
 //! - エッジケースの検出
 
-use base64::Engine;
+use base64ct::{Base64, Encoding};
 use proptest::prelude::*;
 use shiguredo_websocket::{
     Extension, HandshakeRequest, HandshakeRequestValidator, HandshakeValidator,
@@ -244,7 +244,7 @@ proptest! {
 
 /// 有効な WebSocket キーを生成
 fn generate_valid_ws_key() -> String {
-    base64::engine::general_purpose::STANDARD.encode(b"0123456789ABCDEF")
+    Base64::encode_string(b"0123456789ABCDEF")
 }
 
 proptest! {
@@ -429,14 +429,14 @@ fn calculate_expected_accept(nonce: &[u8; 16]) -> String {
     use sha1::{Digest, Sha1};
     const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-    let key = base64::engine::general_purpose::STANDARD.encode(nonce);
+    let key = Base64::encode_string(nonce.as_slice());
     let combined = format!("{}{}", key, WEBSOCKET_GUID);
 
     let mut hasher = Sha1::new();
     hasher.update(combined.as_bytes());
     let hash = hasher.finalize();
 
-    base64::engine::general_purpose::STANDARD.encode(hash)
+    Base64::encode_string(hash.as_slice())
 }
 
 proptest! {
