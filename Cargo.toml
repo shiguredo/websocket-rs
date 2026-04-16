@@ -3,25 +3,24 @@ name = "shiguredo_websocket"
 version = "2026.1.0"
 edition = "2024"
 rust-version = "1.88"
-authors = ["Shiguredo Inc."]
-license = "Apache-2.0"
 description = "WebSocket Library"
+readme = "README.md"
 homepage = "https://github.com/shiguredo/websocket-rs"
 repository = "https://github.com/shiguredo/websocket-rs"
-readme = "README.md"
-include = ["/src/**", "/LICENSE", "/README.md"]
-
-[dependencies]
-base64ct = { version = "1.8", features = ["std"] }
-sha1 = "0.10"
-flate2 = "1.1"
-shiguredo_http11 = "2026.1.1"
+license = "Apache-2.0"
+include = ["/LICENSE", "/README.md", "/src/**"]
 
 [workspace]
 members = [
-    "examples/websocket_client",
-    "examples/websocket_server",
-    "examples/websocket_reverse_proxy",
-    "pbt",
+  "examples/websocket_client",
+  "examples/websocket_reverse_proxy",
+  "examples/websocket_server",
+  "pbt",
 ]
 exclude = ["fuzz"]
+
+[dependencies]
+base64ct = { version = "1.8", features = ["std"] }
+flate2 = "1.1"
+sha1 = "0.10"
+shiguredo_http11 = "2026.1.1"
