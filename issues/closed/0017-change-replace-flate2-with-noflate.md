@@ -1,6 +1,7 @@
 # flate2 依存を noflate に置き換える
 
 Created: 2026-04-18
+Completed: 2026-04-18
 Model: Opus 4.7
 
 ## 優先度
@@ -36,3 +37,18 @@ P2
 - `src/websocket_client_connection.rs` / `src/websocket_server_connection.rs` の window_bits 制約コメントを noflate 版に更新
 - `pbt/tests/prop_permessage_deflate.rs` の `prop_compression_levels_preserve_data` を削除
 - `CHANGES.md` の `## develop` に `[CHANGE]` エントリを追加
+
+## 解決方法
+
+- `Cargo.toml`: `flate2 = "1.1"` を削除し `noflate = "0.0.3"` を追加した。
+- `src/deflate/permessage_deflate.rs` を `noflate::{Decoder, Encoder}` ベースで全面書き換え:
+  - `Compressor::compress` は `encoder.feed` → `encoder.sync_flush` → `encoder.output` + `advance` → RFC 7692 トレーラ (`0x00 0x00 0xFF 0xFF`) を `truncate` → `reset_after_message` 時は `encoder.reset_history()` の手順。
+  - `Decompressor::decompress` は入力を 8 KiB チャンク + トレーラに分けて `decoder.feed` し、毎チャンクで累積出力サイズを `max_size` と比較して Zip Bomb を防ぐ。`reset_after_message` 時は `Decoder::new()` で作り直す。
+  - 旧 `level` フィールド、`Compressor::set_level`、`Decompressor::reset`、`PerMessageDeflate::set_compression_level` を削除。
+  - 旧来の max_iterations ガードは不要になったため削除（noflate の feed は need-more-bytes を `Ok(())` で返すため無限ループしない）。
+- `src/websocket_server_connection.rs` / `src/websocket_client_connection.rs` の window_bits 制約コメントを「flate2 の制約」から「noflate の制約」に書き換え。
+- `pbt/tests/prop_permessage_deflate.rs`: `prop_compression_levels_preserve_data` を削除。残り 15 件の PBT はすべて成功。
+- `CHANGES.md`: `## develop` に `[CHANGE]` エントリを 3 件追記。
+- `fuzz/Cargo.lock`: `cargo update` で依存グラフを更新。
+
+テスト結果: `cargo test --workspace` で全テスト合格 (331 件)、`cargo clippy --workspace --all-targets` で警告なし。

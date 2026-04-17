@@ -2,7 +2,7 @@
 //!
 //! WebSocket メッセージの DEFLATE 圧縮/解凍を提供する。
 
-use flate2::{Compress, Compression, FlushCompress};
+use noflate::{Decoder, Encoder};
 
 use crate::error::Error;
 use crate::websocket_extension::PerMessageDeflateConfig;
@@ -11,13 +11,17 @@ use crate::websocket_extension::PerMessageDeflateConfig;
 /// RFC 7692 Section 7.2.1: 0x00 0x00 0xFF 0xFF
 const DEFLATE_TRAILER: [u8; 4] = [0x00, 0x00, 0xFF, 0xFF];
 
+/// 解凍時に feed する入力チャンクサイズ
+///
+/// チャンクごとに出力サイズを検証することで、Zip Bomb 攻撃時に
+/// 内部バッファが無制限に拡大する前に制限超過を検出できる。
+const DECOMPRESS_FEED_CHUNK: usize = 8192;
+
 /// permessage-deflate コンプレッサー
 pub struct Compressor {
-    /// DEFLATE コンテキスト
-    compress: Compress,
-    /// 圧縮レベル (0-9)
-    level: u32,
-    /// メッセージ毎にリセットするか（no_context_takeover）
+    /// DEFLATE エンコーダー
+    encoder: Encoder,
+    /// メッセージ毎にコンテキストをリセットするか（no_context_takeover）
     reset_after_message: bool,
 }
 
@@ -29,15 +33,13 @@ impl Compressor {
     ///
     /// # 制限事項
     ///
-    /// window_bits のカスタマイズは flate2 の `any_zlib` feature が必要なため、
-    /// 現在の実装ではデフォルト値 (15) を使用する。
+    /// noflate は LZ77 ウィンドウサイズを 32 KiB（window_bits=15）固定で使用する。
     ///
     /// RFC 7692 Section 7.2.1 では、合意した window bits を超える LZ77 ウィンドウを
     /// 使用してはならないと規定されている。この制約はハンドシェイク時に担保する:
     /// - サーバー: negotiate() で server_max_window_bits を含めない (デフォルト 15)
     /// - クライアント: client_max_window_bits < 15 のレスポンスを拒否する
     pub fn new(config: &PerMessageDeflateConfig, is_client: bool) -> Self {
-        let level = 6u32; // デフォルト圧縮レベル
         let reset_after_message = if is_client {
             config.client_no_context_takeover
         } else {
@@ -45,88 +47,46 @@ impl Compressor {
         };
 
         Self {
-            compress: Compress::new(Compression::new(level), false), // raw deflate
-            level,
+            encoder: Encoder::new(),
             reset_after_message,
         }
     }
 
-    /// 圧縮レベルを設定
-    ///
-    /// no_context_takeover が有効な場合、次のメッセージから新しいレベルが適用される。
-    /// no_context_takeover が無効な場合、圧縮コンテキストの維持が必要なため
-    /// レベル変更は適用されない。
-    pub fn set_level(&mut self, level: u32) {
-        self.level = level.min(9);
-    }
-
     /// データを圧縮
     ///
-    /// RFC 7692 Section 7.2.1 に従い、圧縮データから終端の 0x00 0x00 0xFF 0xFF を除去
+    /// RFC 7692 Section 7.2.1 に従い、圧縮データから終端の 0x00 0x00 0xFF 0xFF を除去する。
     pub fn compress(&mut self, data: &[u8]) -> Result<Vec<u8>, Error> {
-        let mut compressed = Vec::new();
-        let mut output_buf = [0u8; 8192];
-        let mut input_pos = 0;
+        self.encoder
+            .feed(data)
+            .map_err(|e| Error::invalid_data(format!("compression failed: {}", e)))?;
+        self.encoder
+            .sync_flush()
+            .map_err(|e| Error::invalid_data(format!("compression flush failed: {}", e)))?;
 
-        // すべての入力を消費
-        while input_pos < data.len() {
-            let before_in = self.compress.total_in();
-            let before_out = self.compress.total_out();
-
-            self.compress
-                .compress(&data[input_pos..], &mut output_buf, FlushCompress::None)
-                .map_err(|e| Error::invalid_data(format!("compression failed: {}", e)))?;
-
-            let consumed = (self.compress.total_in() - before_in) as usize;
-            let produced = (self.compress.total_out() - before_out) as usize;
-
-            input_pos += consumed;
-            if produced > 0 {
-                compressed.extend_from_slice(&output_buf[..produced]);
-            }
-        }
-
-        // Sync フラッシュ（最大 10 回で十分）
-        for _ in 0..10 {
-            let before_out = self.compress.total_out();
-
-            self.compress
-                .compress(&[], &mut output_buf, FlushCompress::Sync)
-                .map_err(|e| Error::invalid_data(format!("compression flush failed: {}", e)))?;
-
-            let produced = (self.compress.total_out() - before_out) as usize;
-            if produced > 0 {
-                compressed.extend_from_slice(&output_buf[..produced]);
-            }
-            if produced < output_buf.len() {
-                break;
-            }
-        }
+        let mut out = self.encoder.output().to_vec();
+        self.encoder.advance(out.len());
 
         // RFC 7692: 終端の 0x00 0x00 0xFF 0xFF を除去
-        if compressed.ends_with(&DEFLATE_TRAILER) {
-            compressed.truncate(compressed.len() - 4);
+        if out.ends_with(&DEFLATE_TRAILER) {
+            out.truncate(out.len() - 4);
         }
 
-        // no_context_takeover の場合はリセット（set_level() の変更もここで反映される）
+        // no_context_takeover の場合は LZ77 履歴をリセット
         if self.reset_after_message {
-            self.compress = Compress::new(Compression::new(self.level), false);
+            self.encoder.reset_history();
         }
 
-        Ok(compressed)
+        Ok(out)
     }
 }
 
 /// permessage-deflate デコンプレッサー
 pub struct Decompressor {
-    /// DEFLATE コンテキスト
-    decompress: flate2::Decompress,
-    /// メッセージ毎にリセットするか（no_context_takeover）
+    /// DEFLATE デコーダー
+    decoder: Decoder,
+    /// メッセージ毎にコンテキストをリセットするか（no_context_takeover）
     reset_after_message: bool,
 }
-
-/// 解凍時のチャンクサイズ
-const DECOMPRESS_CHUNK_SIZE: usize = 8192;
 
 impl Decompressor {
     /// 新しいデコンプレッサーを生成
@@ -138,8 +98,7 @@ impl Decompressor {
     ///
     /// # 制限事項
     ///
-    /// window_bits のカスタマイズは flate2 の `any_zlib` feature が必要なため、
-    /// 現在の実装ではデフォルト値 (15) を使用する。
+    /// noflate は LZ77 ウィンドウサイズを 32 KiB（window_bits=15）固定で使用する。
     ///
     /// 解凍側では window_bits=15（最大値）を使用するため、相手がどの window bits で
     /// 圧縮しても解凍可能であり、RFC 7692 準拠性の問題は発生しない。
@@ -153,7 +112,7 @@ impl Decompressor {
         };
 
         Self {
-            decompress: flate2::Decompress::new(false), // raw deflate
+            decoder: Decoder::new(),
             reset_after_message,
         }
     }
@@ -163,83 +122,47 @@ impl Decompressor {
     /// RFC 7692 Section 7.2.2 に従い、終端の 0x00 0x00 0xFF 0xFF を追加してから解凍する。
     /// 展開後のサイズが `max_size` を超えた場合はエラーを返す（Zip Bomb 対策）。
     pub fn decompress(&mut self, data: &[u8], max_size: usize) -> Result<Vec<u8>, Error> {
-        // RFC 7692: 終端の 0x00 0x00 0xFF 0xFF を追加
-        let mut input = data.to_vec();
-        input.extend_from_slice(&DEFLATE_TRAILER);
-
         let mut decompressed = Vec::new();
-        let mut output_buf = [0u8; DECOMPRESS_CHUNK_SIZE];
-        let mut input_pos = 0;
 
-        // ループ回数の上限（無限ループ防止）
-        let max_iterations = (max_size / DECOMPRESS_CHUNK_SIZE) + 100;
-        let mut iterations = 0;
+        // RFC 7692: 入力末尾に 0x00 0x00 0xFF 0xFF を追加
+        // 入力をチャンク分割して feed し、都度出力サイズを検証することで
+        // Zip Bomb 攻撃時の内部バッファ拡大を制限する
+        let feed_chain = data
+            .chunks(DECOMPRESS_FEED_CHUNK)
+            .chain(core::iter::once(DEFLATE_TRAILER.as_slice()));
 
-        loop {
-            iterations += 1;
-            if iterations > max_iterations {
-                if self.reset_after_message {
-                    self.decompress.reset(false);
-                }
-                return Err(Error::invalid_data(
-                    "decompression exceeded iteration limit",
-                ));
-            }
-
-            let before_in = self.decompress.total_in();
-            let before_out = self.decompress.total_out();
-
-            // RFC 7692 のトレーラーは sync flush マーカーなので Sync を使用
-            let status = self
-                .decompress
-                .decompress(
-                    &input[input_pos..],
-                    &mut output_buf,
-                    flate2::FlushDecompress::Sync,
-                )
+        for chunk in feed_chain {
+            self.decoder
+                .feed(chunk)
                 .map_err(|e| Error::invalid_data(format!("decompression failed: {}", e)))?;
 
-            let consumed = (self.decompress.total_in() - before_in) as usize;
-            let produced = (self.decompress.total_out() - before_out) as usize;
-
-            input_pos += consumed;
-
-            if produced > 0 {
-                // 最大サイズを超えた場合はエラー
-                if decompressed.len() + produced > max_size {
-                    if self.reset_after_message {
-                        self.decompress.reset(false);
-                    }
-                    return Err(Error::invalid_data(format!(
-                        "decompressed size exceeds maximum limit of {} bytes",
-                        max_size
-                    )));
-                }
-                decompressed.extend_from_slice(&output_buf[..produced]);
+            let produced = self.decoder.output();
+            if decompressed.len().saturating_add(produced.len()) > max_size {
+                self.reset_if_needed();
+                return Err(Error::invalid_data(format!(
+                    "decompressed size exceeds maximum limit of {} bytes",
+                    max_size
+                )));
             }
 
-            match status {
-                flate2::Status::StreamEnd => break,
-                flate2::Status::Ok | flate2::Status::BufError => {
-                    // 入力がすべて消費され、出力もなければ終了
-                    if input_pos >= input.len() && produced == 0 {
-                        break;
-                    }
-                }
-            }
+            let produced_len = produced.len();
+            decompressed.extend_from_slice(produced);
+            self.decoder.advance(produced_len);
         }
 
-        // no_context_takeover の場合はリセット
+        // no_context_takeover の場合は Decoder を作り直してコンテキストをリセット
         if self.reset_after_message {
-            self.decompress.reset(false);
+            self.decoder = Decoder::new();
         }
 
         Ok(decompressed)
     }
 
-    /// コンテキストをリセット
-    pub fn reset(&mut self) {
-        self.decompress.reset(false);
+    /// エラー時のリセット処理
+    fn reset_if_needed(&mut self) {
+        if self.reset_after_message {
+            self.decoder = Decoder::new();
+        }
     }
 }
 
@@ -289,11 +212,6 @@ impl PerMessageDeflate {
     /// 展開後のサイズが `max_size` を超えた場合はエラーを返す（Zip Bomb 対策）。
     pub fn decompress(&mut self, data: &[u8], max_size: usize) -> Result<Vec<u8>, Error> {
         self.decompressor.decompress(data, max_size)
-    }
-
-    /// 圧縮レベルを設定
-    pub fn set_compression_level(&mut self, level: u32) {
-        self.compressor.set_level(level);
     }
 
     /// 圧縮するべきかどうかを判定

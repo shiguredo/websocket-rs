@@ -21,6 +21,6 @@ exclude = ["fuzz"]
 
 [dependencies]
 base64ct = { version = "1.8", features = ["std"] }
-flate2 = "1.1"
+noflate = "0.0.3"
 sha1 = "0.10"
 shiguredo_http11 = "2026.1"

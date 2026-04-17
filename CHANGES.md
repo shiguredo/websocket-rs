@@ -13,6 +13,14 @@
 
 - [CHANGE] base64 クレートを base64ct 1.8 に切り替えるようにする
   - @voluntas
+- [CHANGE] flate2 依存を noflate に置き換えてゼロ依存化する
+  - @voluntas
+- [CHANGE] `PerMessageDeflate::set_compression_level` を削除する
+  - RFC 7692 のネゴシエーション対象外の内部 API であり、置き換え先の noflate に対応機能が無いため
+  - @voluntas
+- [CHANGE] `Decompressor::reset` を削除する
+  - 内部処理に統合する
+  - @voluntas
 
 ### misc
 
