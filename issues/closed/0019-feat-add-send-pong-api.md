@@ -1,6 +1,7 @@
 # 0019: WebSocketClientConnection と WebSocketServerConnection に send_pong API を追加する
 
 Created: 2026-04-28
+Completed: 2026-04-28
 Model: Claude Opus 4.7
 
 ## 種別
@@ -66,3 +67,18 @@ RFC 6455 §5.5 により、コントロールフレームのペイロードは 1
 ## 参考資料
 
 - RFC 6455 §5.5.3 Pong: https://datatracker.ietf.org/doc/html/rfc6455#section-5.5.3
+
+## 解決方法
+
+- `src/websocket_client_connection.rs` および `src/websocket_server_connection.rs` の
+  `send_ping` 直後に `send_pong(&mut self, data: &[u8]) -> Result<(), Error>` を追加した
+  - 内部で `Frame::pong(data.to_vec())?` (既存のファクトリ) を使用し、`send_frame` で送出
+  - ペイロード長 125 バイト超過チェックは `Frame::pong` 側で実施
+  - `send_ping` と異なり `awaiting_pong` や `PongTimeout` の更新は行わない (unsolicited Pong は応答待ちを伴わない)
+  - コードコメントに RFC 6455 §5.5.3 の根拠と「将来改訂される可能性」を明記 (AGENTS.md 準拠)
+- `pbt/tests/prop_client_connection.rs` に `prop_send_pong_emits_pong_frame` を追加
+  - `send_pong` で送信されたバイト列の先頭が `FIN=1, RSV=0, Opcode=Pong, MASK=1, Length=data.len()` になることを検証
+- `pbt/tests/prop_server_connection.rs` に同名 PBT を追加
+  - サーバー側はマスクなしでヘッダ後にペイロードがそのまま続くことを検証
+  - `Opcode` を import に追加
+- `CHANGES.md` の `## develop` に `[ADD]` エントリを追記

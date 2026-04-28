@@ -9,7 +9,7 @@
 use base64ct::{Base64, Encoding};
 use proptest::prelude::*;
 use shiguredo_websocket::{
-    CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, ErrorKind, Frame,
+    CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, ErrorKind, Frame, Opcode,
     PerMessageDeflateConfig, ServerConnectionOptions, WebSocketServerConnection,
 };
 
@@ -379,6 +379,39 @@ proptest! {
             }
         }
         prop_assert!(found, "Pong event not found");
+    }
+
+    /// send_pong で送信した Pong フレームが FIN=1, RSV=0, Opcode=Pong, unmasked の形式で出力される
+    /// RFC 6455 §5.5.3: unsolicited Pong フレームの送信を許可する
+    /// RFC 6455 §5.1: サーバーからクライアントへのフレームはマスクしない
+    #[test]
+    fn prop_send_pong_emits_pong_frame(
+        data in prop::collection::vec(any::<u8>(), 0..=125),
+    ) {
+        let mut conn = setup_connected_server();
+
+        // 接続セットアップ時の出力を捨てる
+        while conn.poll_output().is_some() {}
+
+        conn.send_pong(&data).unwrap();
+
+        let mut sent = Vec::new();
+        while let Some(output) = conn.poll_output() {
+            if let ConnectionOutput::SendData(buf) = output {
+                sent.extend_from_slice(&buf);
+            }
+        }
+        prop_assert!(sent.len() >= 2, "Pong frame is at least 2 bytes (header)");
+
+        // FIN=1, RSV=0, Opcode=Pong
+        prop_assert_eq!(sent[0], 0x80 | Opcode::Pong.as_u8());
+        // サーバー側はマスクなし、ペイロード長 (0..=125 の範囲なので 7bit に収まる)
+        prop_assert_eq!(sent[1] & 0x80, 0x00);
+        prop_assert_eq!(sent[1] & 0x7F, data.len() as u8);
+        // ヘッダ 2 バイト + ペイロード = 全体長
+        prop_assert_eq!(sent.len(), 2 + data.len());
+        // ペイロードがそのまま入っている
+        prop_assert_eq!(&sent[2..], data.as_slice());
     }
 }
 

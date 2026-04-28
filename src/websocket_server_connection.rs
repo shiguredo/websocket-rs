@@ -620,6 +620,21 @@ impl WebSocketServerConnection {
         Ok(())
     }
 
+    /// Pong を送信
+    ///
+    /// RFC 6455 Section 5.5.3: unsolicited な Pong フレームの送信は許可されており、
+    /// 一方向のハートビートとして使える。本 API はそのために提供する。
+    /// data は 125 バイト以下でなければならない (RFC 6455 Section 5.5)。
+    /// 注: RFC 6455 は今後改訂される可能性があり、その場合本 API の挙動も見直す。
+    pub fn send_pong(&mut self, data: &[u8]) -> Result<(), Error> {
+        self.check_connected()?;
+
+        let frame = Frame::pong(data.to_vec())?;
+        self.send_frame(frame);
+
+        Ok(())
+    }
+
     /// 接続をクローズ
     ///
     /// RFC 6455 Section 7.4.1: 送信禁止のクローズコード (1005, 1006, 1015) は拒否される

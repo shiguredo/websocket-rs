@@ -465,6 +465,34 @@ proptest! {
         }
         prop_assert!(found, "Pong event not found");
     }
+
+    /// send_pong で送信した Pong フレームが FIN=1, RSV=0, Opcode=Pong, masked の形式で出力される
+    /// RFC 6455 §5.5.3: unsolicited Pong フレームの送信を許可する
+    #[test]
+    fn prop_send_pong_emits_pong_frame(
+        data in prop::collection::vec(any::<u8>(), 0..=125),
+    ) {
+        let (mut conn, _now, _) = setup_connected_client();
+
+        // 接続セットアップ時の出力を捨てる
+        while conn.poll_output().is_some() {}
+
+        conn.send_pong(&data).unwrap();
+
+        let mut sent = Vec::new();
+        while let Some(output) = conn.poll_output() {
+            if let ConnectionOutput::SendData(buf) = output {
+                sent.extend_from_slice(&buf);
+            }
+        }
+        prop_assert!(sent.len() >= 6, "Pong frame is at least 6 bytes (header + 4 byte mask)");
+
+        // FIN=1, RSV=0, Opcode=Pong
+        prop_assert_eq!(sent[0], 0x80 | Opcode::Pong.as_u8());
+        // クライアント側マスクビット=1、ペイロード長 (0..=125 の範囲なので 7bit に収まる)
+        prop_assert_eq!(sent[1] & 0x80, 0x80);
+        prop_assert_eq!(sent[1] & 0x7F, data.len() as u8);
+    }
 }
 
 // ==== Close のテスト ====
