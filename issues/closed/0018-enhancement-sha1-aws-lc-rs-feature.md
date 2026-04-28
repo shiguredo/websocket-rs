@@ -1,6 +1,7 @@
 # 0018: sha1 のバックエンドを feature で aws-lc-rs に切り替えられるようにする
 
 Created: 2026-04-28
+Completed: 2026-04-28
 Model: Claude Opus 4.7
 
 ## 種別
@@ -69,3 +70,14 @@ Base64::encode_string(hash.as_ref())
 
 - `calculate_accept_from_key` の既存テストが両 feature で通ることを確認
 - CI で `--features aws_lc_rs` を含むビルドマトリクスを追加
+
+## 解決方法
+
+- `Cargo.toml` に `aws-lc-rs` を `optional = true` で追加し、`aws_lc_rs` feature を新設した
+  - `default = []` で従来挙動を維持し、feature 有効時のみ `dep:aws-lc-rs` を有効化する
+- `src/websocket_handshake.rs` の SHA-1 計算を内部関数 `sha1_digest` に切り出し、`#[cfg(feature = "aws_lc_rs")]` で実装を分岐
+  - 無効時: `sha1` クレート (RustCrypto) を使う従来実装
+  - 有効時: `aws_lc_rs::digest::digest(&SHA1_FOR_LEGACY_USE_ONLY, ...)` を使う実装
+  - `Sha1` の `use` も `#[cfg(not(feature = "aws_lc_rs"))]` でガードし、未使用 import 警告を回避
+- `.github/workflows/ci.yml` に `cargo build --features aws_lc_rs` / `cargo test --features aws_lc_rs --lib` / `cargo clippy --features aws_lc_rs -- -D warnings` を追加し、CI で feature 有効ビルドを検証する
+- `CHANGES.md` の `## develop` に `[ADD]` エントリを追記

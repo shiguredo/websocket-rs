@@ -860,6 +860,7 @@ checksum = "50203212be42844ef00003e05fe57f0b19a80b33d9d35745c48efc01e5d2fb63"
 name = "shiguredo_websocket"
 version = "2026.1.0"
 dependencies = [
+ "aws-lc-rs",
  "base64ct",
  "noflate",
  "sha1 0.11.0",
