@@ -15,6 +15,7 @@ members = [
   "examples/websocket_client",
   "examples/websocket_reverse_proxy",
   "examples/websocket_server",
+  "examples/wscat",
   "pbt",
 ]
 exclude = ["fuzz"]

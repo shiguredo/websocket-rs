@@ -1,0 +1,42 @@
+[package]
+name = "wscat"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# WebSocket クライアント・サーバー実装本体
+shiguredo_websocket = { path = "../.." }
+# HTTP/1.1 レスポンスのパース (CONNECT プロキシレスポンスとリダイレクトの 3xx)
+shiguredo_http11 = "2026.1"
+# 暗号バックエンド (TLS バックエンドおよびハッシュ計算で利用)
+aws-lc-rs = "1.16"
+# 非同期ランタイム
+tokio = { version = "1.52", features = [
+    "io-std",
+    "io-util",
+    "macros",
+    "net",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
+# TLS 実装
+rustls = { version = "0.23", default-features = false, features = [
+    "std",
+    "tls12",
+    "aws-lc-rs",
+] }
+# tokio 上で動く非同期 TLS ストリーム
+tokio-rustls = "0.26"
+# プラットフォーム標準のルート証明書ストア
+rustls-platform-verifier = "0.6"
+# CLI 引数パース
+noargs = "0.4"
+# Authorization: Basic ヘッダ用の base64 エンコード
+base64ct = { version = "1.8", features = ["std"] }
+# 構造化ログ
+tracing = "0.1"
+# ログのフィルタリング
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

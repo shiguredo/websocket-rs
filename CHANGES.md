@@ -18,6 +18,9 @@
 - [ADD] `WebSocketClientConnection` と `WebSocketServerConnection` に `send_pong` API を追加する
   - RFC 6455 §5.5.3 で許可される unsolicited Pong フレームを送信できるようにする
   - @voluntas
+- [ADD] Node.js 製 wscat と互換のサンプル CLI を `examples/wscat` に追加する
+  - クライアント (`-c`)、単一接続のサーバー (`-l`)、対話モード、`--execute`、スラッシュコマンド、HTTP CONNECT プロキシ、3xx リダイレクト追従、TLS (`--ca` / `--cert` / `--key` / `--no-check`) に対応する
+  - @voluntas
 - [CHANGE] base64 クレートを base64ct 1.8 に切り替えるようにする
   - @voluntas
 - [CHANGE] flate2 依存を noflate に置き換えてゼロ依存化する
