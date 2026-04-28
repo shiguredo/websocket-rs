@@ -2,7 +2,7 @@
 //!
 //! WebSocket メッセージの DEFLATE 圧縮/解凍を提供する。
 
-use noflate::{Decoder, Encoder};
+use noflate::deflate::{Decoder, Encoder};
 
 use crate::error::Error;
 use crate::websocket_extension::PerMessageDeflateConfig;
