@@ -454,7 +454,7 @@ impl WebSocketServerConnection {
 
                     // RFC 7692 Section 7.2.1: 合意した server_max_window_bits で
                     // 圧縮する必要がある。現在の実装では window_bits=15 固定
-                    // (flate2 の制約) のため、server_max_window_bits < 15 は
+                    // (noflate の制約) のため、server_max_window_bits < 15 は
                     // サポートしない
                     if let Some(smwb) = config.server_max_window_bits
                         && smwb < 15
@@ -1120,7 +1120,7 @@ impl WebSocketServerConnection {
                         Ok(client_request) => {
                             // RFC 7692 Section 7.1.2.1: server_max_window_bits が offer された場合、
                             // サーバーは同値以下を応答に含めることで受け入れる。
-                            // flate2 は window_bits=15 固定のため、15 未満の offer はサポートできない。
+                            // noflate は window_bits=15 固定のため、15 未満の offer はサポートできない。
                             if client_request
                                 .server_max_window_bits
                                 .is_some_and(|v| v < 15)
