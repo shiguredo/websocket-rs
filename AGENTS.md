@@ -149,12 +149,21 @@ cargo llvm-cov report
 
 - 性能より堅牢性を優先すること
 - 依存は最小限にすること
-- draft 由来の機能を実装する場合は、根拠資料名、節番号、将来変更される可能性があることをコードコメントで明記すること
 - PBT(Property-Based Testing) や Fuzzing でテストを行うこと
+- 資料を由来の機能を実装する場合は、根拠資料名、節番号、将来変更される可能性があることをコードコメントで明記すること
+
+### ライブラリ
+
+- バージョン番号はマイナーバージョンまで指定すること
+  - 例: `nojson = "0.3.10"` ではなく `nojson = "0.3"` とする
+- 依存ライブラリには用途をコメントで明記すること
 - PBT は proptest を使うこと
 - Fuzzing は cargo-fuzz を使うこと
-- HTTP/1.1 は shiguredo_http11 を使うこと
 - TLS は rustls を使う事
 - 非同期処理は tokio を使うこと
-- ログはできるだけださないが、使う場合は log を使うこと
 - 暗号ライブラリは aws-lc-rs を使うこと
+- JSON は nojson を使うこと
+- 引数のパースは noargs を使うこと
+- base64 は base64ct を使うこと
+- ログは tracing を使うこと
+  - ログのフィルタリングは tracing-subscriber を使うこと
