@@ -858,7 +858,7 @@ checksum = "88665fdb5b844e03e845c5e3d06ec321a0e204513b7f6600661e2a779d47bc01"
 
 [[package]]
 name = "shiguredo_websocket"
-version = "2026.1.0"
+version = "2026.2.0-canary.0"
 dependencies = [
  "aws-lc-rs",
  "base64ct",
