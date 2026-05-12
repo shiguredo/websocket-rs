@@ -13,6 +13,8 @@
 
 - [UPDATE] sha1 を 0.11 に上げる
   - @voluntas
+- [UPDATE] shiguredo_http11 を 2026.3 に上げる
+  - @voluntas
 - [ADD] `aws_lc_rs` feature を追加し Sec-WebSocket-Accept の SHA-1 計算を aws-lc-rs に切り替え可能にする
   - @voluntas
 - [CHANGE] base64 クレートを base64ct 1.8 に切り替えるようにする
