@@ -45,3 +45,24 @@ path = "fuzz_targets/fuzz_deflate_decompress.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_handshake_request"
+path = "fuzz_targets/fuzz_handshake_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_server_connection"
+path = "fuzz_targets/fuzz_server_connection.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_client_connection"
+path = "fuzz_targets/fuzz_client_connection.rs"
+test = false
+doc = false
+bench = false
