@@ -5,17 +5,22 @@ edition = "2024"
 publish = false
 
 [dependencies]
+# CLI 引数のパースに使用する
 noargs = "0.4"
+# wss:// での TLS 通信に使用する
 rustls = { version = "0.23", default-features = false, features = [
   "aws-lc-rs",
   "std",
   "tls12",
 ] }
+# WebSocket サーバー本体
 shiguredo_websocket = { path = "../.." }
+# 非同期 I/O ランタイムに使用する
 tokio = { version = "1.52", features = [
   "io-util",
   "macros",
   "net",
   "rt-multi-thread",
 ] }
+# tokio と rustls の統合に使用する
 tokio-rustls = "0.26"

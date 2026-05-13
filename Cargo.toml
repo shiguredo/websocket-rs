@@ -22,6 +22,9 @@ exclude = ["fuzz"]
 [dependencies]
 # Sec-WebSocket-Accept の SHA-1 計算に使用する
 aws-lc-rs = "1.16"
+# Sec-WebSocket-Key および Sec-WebSocket-Accept の base64 エンコード/デコードに使用する
 base64ct = { version = "1.8", features = ["std"] }
+# permessage-deflate 拡張 (RFC 7692) の DEFLATE 圧縮/展開に使用する
 noflate = "0.1"
+# WebSocket ハンドシェイクの HTTP リクエスト/レスポンス処理に使用する
 shiguredo_http11 = "2026.4"

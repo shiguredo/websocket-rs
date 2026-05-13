@@ -5,16 +5,23 @@ edition = "2024"
 publish = false
 
 [dependencies]
+# masking key と nonce 用の暗号論的乱数生成に使用する
 aws-lc-rs = "1.16"
+# CLI 引数のパースに使用する
 noargs = "0.4"
+# wss:// での TLS 通信に使用する
 rustls = { version = "0.23", default-features = false, features = [
   "aws-lc-rs",
   "std",
   "tls12",
 ] }
+# プラットフォームのルート証明書ストアによる TLS サーバー証明書検証に使用する
 rustls-platform-verifier = "0.7"
+# WebSocket ハンドシェイクの HTTP リクエスト/レスポンス処理に使用する
 shiguredo_http11 = "2026.4"
+# WebSocket クライアント/サーバー本体
 shiguredo_websocket = { path = "../.." }
+# 非同期 I/O ランタイムに使用する
 tokio = { version = "1.52", features = [
   "io-util",
   "macros",
@@ -22,4 +29,5 @@ tokio = { version = "1.52", features = [
   "rt-multi-thread",
   "sync",
 ] }
+# tokio と rustls の統合に使用する
 tokio-rustls = "0.26"

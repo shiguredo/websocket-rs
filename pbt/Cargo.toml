@@ -5,7 +5,11 @@ edition = "2024"
 publish = false
 
 [dev-dependencies]
+# テスト対象本体
 shiguredo_websocket = { path = "../" }
+# プロパティベーステストフレームワーク
 proptest = "1"
+# Sec-WebSocket-Key などの base64 エンコード/デコードに使用する
 base64ct = { version = "1.8", features = ["std"] }
+# Sec-WebSocket-Accept の SHA-1 計算に使用する
 aws-lc-rs = "1.16"
