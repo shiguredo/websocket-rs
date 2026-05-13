@@ -852,9 +852,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_http11"
-version = "2026.3.0"
+version = "2026.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88665fdb5b844e03e845c5e3d06ec321a0e204513b7f6600661e2a779d47bc01"
+checksum = "cd3c0c4338520d94d8bb9a89d64b862f743fe5c5eded2300d4effaad64b0217b"
 
 [[package]]
 name = "shiguredo_websocket"

@@ -127,30 +127,35 @@ impl HandshakeRequest {
 
         let key = Base64::encode_string(nonce.as_slice());
 
-        let mut request = Request::new("GET", &self.path)
-            .header("Host", &self.host)
-            .header("Upgrade", "websocket")
-            .header("Connection", "Upgrade")
-            .header("Sec-WebSocket-Key", &key)
-            .header("Sec-WebSocket-Version", "13");
+        let encoded = (|| {
+            let mut request = Request::new("GET", &self.path)?
+                .header("Host", &self.host)?
+                .header("Upgrade", "websocket")?
+                .header("Connection", "Upgrade")?
+                .header("Sec-WebSocket-Key", &key)?
+                .header("Sec-WebSocket-Version", "13")?;
 
-        if let Some(origin) = &self.origin {
-            request = request.header("Origin", origin);
-        }
+            if let Some(origin) = &self.origin {
+                request = request.header("Origin", origin)?;
+            }
 
-        if !self.protocols.is_empty() {
-            request = request.header("Sec-WebSocket-Protocol", &self.protocols.join(", "));
-        }
+            if !self.protocols.is_empty() {
+                request = request.header("Sec-WebSocket-Protocol", self.protocols.join(", "))?;
+            }
 
-        if !self.extensions.is_empty() {
-            request = request.header("Sec-WebSocket-Extensions", &self.extensions.join(", "));
-        }
+            if !self.extensions.is_empty() {
+                request = request.header("Sec-WebSocket-Extensions", self.extensions.join(", "))?;
+            }
 
-        for (name, value) in &self.additional_headers {
-            request = request.header(name, value);
-        }
+            for (name, value) in &self.additional_headers {
+                request = request.header(name, value)?;
+            }
 
-        Ok(request.encode())
+            request.encode()
+        })()
+        .map_err(|e| Error::invalid_input(e.to_string()))?;
+
+        Ok(encoded)
     }
 }
 
@@ -260,17 +265,17 @@ impl HandshakeRequestValidator {
     }
 
     fn validate_request(&self, request: &Request) -> Result<Option<ServerHandshakeRequest>, Error> {
-        if request.method != "GET" {
+        if request.method() != "GET" {
             return Err(Error::handshake_rejected(format!(
                 "unexpected method: {}",
-                request.method
+                request.method()
             )));
         }
 
-        if request.version != "HTTP/1.1" {
+        if request.version() != "HTTP/1.1" {
             return Err(Error::handshake_rejected(format!(
                 "unexpected HTTP version: {}",
-                request.version
+                request.version()
             )));
         }
 
@@ -279,12 +284,12 @@ impl HandshakeRequestValidator {
         // HTTP デコーダーが origin-form / absolute-form の構文検証と
         // GET メソッドへの authority-form / asterisk-form 拒否を担保しているが、
         // absolute-form のスキームが http/https 以外 (ws/wss 等) の場合は WebSocket 層で拒否する。
-        if !request.uri.starts_with('/') {
-            let lower = request.uri.to_ascii_lowercase();
+        if !request.uri().starts_with('/') {
+            let lower = request.uri().to_ascii_lowercase();
             if !lower.starts_with("http://") && !lower.starts_with("https://") {
                 return Err(Error::handshake_rejected(format!(
                     "invalid Request-URI: must be origin-form or absolute http/https URI: {}",
-                    request.uri
+                    request.uri()
                 )));
             }
         }
@@ -433,7 +438,7 @@ impl HandshakeRequestValidator {
         let origin = request.get_header("Origin").map(String::from);
 
         Ok(Some(ServerHandshakeRequest {
-            path: request.uri.clone(),
+            path: request.uri().to_string(),
             host,
             origin,
             protocols,
@@ -517,11 +522,11 @@ impl HandshakeValidator {
         response: &ResponseHead,
     ) -> Result<Option<HandshakeResponse>, Error> {
         // RFC 6455 Section 4.1: 101 以外の HTTP レスポンスは HTTP procedures に従って処理する
-        if response.status_code != 101 {
+        if response.status_code() != 101 {
             return Err(Error::http_response(crate::error::HttpResponseInfo {
-                status_code: response.status_code,
-                reason_phrase: response.reason_phrase.clone(),
-                headers: response.headers.clone(),
+                status_code: response.status_code(),
+                reason_phrase: response.reason_phrase().to_string(),
+                headers: response.headers().to_vec(),
             }));
         }
 
