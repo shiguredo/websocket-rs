@@ -5,21 +5,21 @@ edition = "2024"
 publish = false
 
 [dependencies]
-shiguredo_websocket = { path = "../.." }
-shiguredo_http11 = "2026.4"
-aws-lc-rs = "1.15.4"
-tokio = { version = "1", features = [
-    "io-util",
-    "macros",
-    "net",
-    "rt-multi-thread",
-    "time",
-] }
+aws-lc-rs = "1.16"
+noargs = "0.4"
 rustls = { version = "0.23", default-features = false, features = [
-    "std",
-    "tls12",
-    "aws-lc-rs",
+  "aws-lc-rs",
+  "std",
+  "tls12",
+] }
+rustls-platform-verifier = "0.7"
+shiguredo_http11 = "2026.4"
+shiguredo_websocket = { path = "../.." }
+tokio = { version = "1.52", features = [
+  "io-util",
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "time",
 ] }
 tokio-rustls = "0.26"
-rustls-platform-verifier = "0.6"
-noargs = "0.4"

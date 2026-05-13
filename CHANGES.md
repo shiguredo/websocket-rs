@@ -30,6 +30,11 @@
 
 ### misc
 
+- [UPDATE] examples の aws-lc-rs を 1.16 に上げる
+  - 併せて固定指定 1.15.4 をマイナーまでの指定 1.16 に揃える
+  - @voluntas
+- [UPDATE] examples の rustls-platform-verifier を 0.7 に上げる
+  - @voluntas
 
 ## 2026.1.0
 
