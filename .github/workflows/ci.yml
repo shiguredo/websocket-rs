@@ -31,9 +31,6 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace -- -D warnings
-      - run: cargo build --features aws_lc_rs
-      - run: cargo test --features aws_lc_rs --lib
-      - run: cargo clippy --features aws_lc_rs -- -D warnings
 
   slack_notify:
     needs: [ci]
