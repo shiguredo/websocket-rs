@@ -5,7 +5,6 @@
 
 use base64ct::{Base64, Encoding};
 use proptest::prelude::*;
-use sha1::{Digest, Sha1};
 use shiguredo_websocket::{
     CloseCode, Frame, FrameDecoder, HandshakeRequest, HandshakeRequestValidator,
     HandshakeValidator, Opcode, ServerHandshakeResponse,
@@ -91,10 +90,11 @@ fn calculate_accept(nonce: &[u8; 16]) -> String {
     const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     let key = Base64::encode_string(nonce.as_slice());
     let combined = format!("{}{}", key, WEBSOCKET_GUID);
-    let mut hasher = Sha1::new();
-    hasher.update(combined.as_bytes());
-    let hash = hasher.finalize();
-    Base64::encode_string(hash.as_slice())
+    let hash = aws_lc_rs::digest::digest(
+        &aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY,
+        combined.as_bytes(),
+    );
+    Base64::encode_string(hash.as_ref())
 }
 
 /// 有効な WebSocket キーを生成

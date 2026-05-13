@@ -426,17 +426,17 @@ proptest! {
 
 /// 正しい Sec-WebSocket-Accept 値を計算
 fn calculate_expected_accept(nonce: &[u8; 16]) -> String {
-    use sha1::{Digest, Sha1};
     const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
     let key = Base64::encode_string(nonce.as_slice());
     let combined = format!("{}{}", key, WEBSOCKET_GUID);
 
-    let mut hasher = Sha1::new();
-    hasher.update(combined.as_bytes());
-    let hash = hasher.finalize();
+    let hash = aws_lc_rs::digest::digest(
+        &aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY,
+        combined.as_bytes(),
+    );
 
-    Base64::encode_string(hash.as_slice())
+    Base64::encode_string(hash.as_ref())
 }
 
 proptest! {

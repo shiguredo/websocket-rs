@@ -20,13 +20,8 @@ members = [
 exclude = ["fuzz"]
 
 [dependencies]
-aws-lc-rs = { version = "1.16", optional = true }
+# Sec-WebSocket-Accept の SHA-1 計算に使用する
+aws-lc-rs = "1.16"
 base64ct = { version = "1.8", features = ["std"] }
 noflate = "0.1"
-sha1 = "0.11"
 shiguredo_http11 = "2026.4"
-
-[features]
-default = []
-# Sec-WebSocket-Accept の SHA-1 計算に aws-lc-rs を使う
-aws_lc_rs = ["dep:aws-lc-rs"]

@@ -2,8 +2,6 @@ use std::collections::HashSet;
 
 use crate::error::Error;
 use base64ct::{Base64, Encoding};
-#[cfg(not(feature = "aws_lc_rs"))]
-use sha1::{Digest, Sha1};
 use shiguredo_http11::{HttpHead, Request, RequestDecoder, ResponseDecoder, ResponseHead};
 
 /// WebSocket ハンドシェイクで使用する固定 GUID (RFC 6455 Section 1.3)
@@ -658,18 +656,9 @@ pub fn calculate_accept_from_key(key: &str) -> String {
 }
 
 // RFC 6455 Section 4 の Sec-WebSocket-Accept 計算用 SHA-1 ダイジェスト
-// aws_lc_rs feature を有効化すると aws-lc-rs を使い、無効時は sha1 クレート (RustCrypto) を使う
-#[cfg(not(feature = "aws_lc_rs"))]
+// SHA1_FOR_LEGACY_USE_ONLY という命名だが、RFC 6455 でアルゴリズムが固定されているハンドシェイク用途であり
+// 他に選択肢はないためそのまま使う
 fn sha1_digest(data: &[u8]) -> [u8; 20] {
-    let mut hasher = Sha1::new();
-    hasher.update(data);
-    hasher.finalize().into()
-}
-
-#[cfg(feature = "aws_lc_rs")]
-fn sha1_digest(data: &[u8]) -> [u8; 20] {
-    // SHA1_FOR_LEGACY_USE_ONLY という命名だが、RFC 6455 でアルゴリズムが固定されているハンドシェイク用途であり
-    // 他に選択肢はないためそのまま使う
     let hash = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY, data);
     let mut out = [0u8; 20];
     out.copy_from_slice(hash.as_ref());
