@@ -1,7 +1,7 @@
 # 0022: サーバーレスポンスで複数行の Sec-WebSocket-Extensions を誤って拒否する
 
-Created: 2026-05-14
-Model: deepseek-v4-flash
+- Created: 2026-05-14
+- Model: deepseek-v4-flash
 
 ## 優先度
 
@@ -51,7 +51,7 @@ RFC 6455 内部で以下の記述が存在する:
 
 RFC 6455 Section 4.2.2 Step 6 (refs/rfc6455.txt:198-202):
 
-> 6.  Optionally, the |Server| MAY indicate one or more protocol extensions
+> 1. Optionally, the |Server| MAY indicate one or more protocol extensions
 >     that the server is using and that the client MUST use when talking to
 >     the server.  If multiple extensions are to be used, they can all be
 >     listed in a single |Sec-WebSocket-Extensions| header field or split
@@ -77,6 +77,7 @@ let extensions: Vec<String> = values
 ```
 
 なおリクエスト側のコメントも合わせて修正する:
+
 - line 407: `// RFC 6455 Section 9.1: 複数の Sec-WebSocket-Extensions ヘッダー行は許容される` →
   `// RFC 9110 Section 5.2: 同名ヘッダーが複数行の場合はリスト値として統合する`
   （Section 9.1 は ABNF 定義であり複数行許容の根拠ではない。実装は RFC 9110 のフィールド統合に依拠している）

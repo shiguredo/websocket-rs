@@ -1,7 +1,7 @@
 # 0020: close_internal の reason 切り詰めが UTF-8 境界を無視してパニックする可能性がある
 
-Created: 2026-05-14
-Model: deepseek-v4-flash
+- Created: 2026-05-14
+- Model: deepseek-v4-flash
 
 ## 優先度
 
@@ -127,6 +127,7 @@ let truncated_reason = if reason.len() > 123 {
 ```
 
 この手法の特性:
+
 - ゼロアロケーション（戻り値は `&str`、元の文字列の prefix を返す）
 - 最悪でも 3 回の backward scan で停止（UTF-8 の最大エンコード長が 4 バイトのため）
 - `is_char_boundary(0)` は任意の valid `&str` に対して `true` を返すため、ループは必ず停止する（`end` が負になることはない）
