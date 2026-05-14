@@ -1,23 +1,18 @@
-# 0019: クライアント/サーバー間のフレーム処理ロジックの重複を解消する
+# 0019: クライアント / サーバー間のフレーム処理ロジックの重複を解消する
 
 - Priority: High
 - Created: 2026-05-14
 - Completed: -
 - Model: DeepSeek V4 Flash
 - Branch: feature/add-extract-shared-connection-state
-
-ブランチ prefix について: `connection_shared` / `connection_types` という新規モジュールの
-**追加**として位置付けるため `feature/add-` を採用する。CLAUDE.md には `refactor`
-カテゴリの prefix が定義されていないが、本 issue はリファクタリングそのものを目的としつつ
-新規モジュールを増やす作業として `add-` の範疇に入る。ファイル名側の category として
-`refactor` を新規採用する（CLAUDE.md は category 文字列を限定していない）。
+- Depends: 0020（`close_internal` の UTF-8 境界修正および戻り値型統一の完了後）
 
 ## 目的
 
 `WebSocketClientConnection` と `WebSocketServerConnection` の間でフレーム処理ロジックが
 コピーペーストで重複しており、RFC 違反などのバグ修正時に両方の修正を強制される。
 共通の状態 + 振る舞いを `SharedConnectionState` 構造体に切り出し、
-マスキング有無などクライアント/サーバーで挙動が分かれる部分だけを `FramePolicy` トレイト
+マスキング有無などクライアント / サーバーで挙動が分かれる部分だけを `FramePolicy` トレイト
 経由で抽象化することで、片方だけ修正してもう片方を忘れるリスクを構造的に排除する。
 
 ## 優先度根拠
@@ -37,9 +32,7 @@ High。以下の根拠から判断する。
 ### 重複箇所一覧
 
 以下のメソッド/構造体/定数が client/server で実質同一の実装を持つ。
-行番号は 0020 適用前の `develop` を基準にしているため、0020 適用後は
-`close_internal` 周辺で数行ずれる可能性がある。実装時は最新の `develop` を基準に
-再確認すること。
+行番号は 0020 適用前の commit（`develop` HEAD~1）を基準。実装時は最新の `develop` を基準に再確認すること。
 
 | メソッド/構造体                    | client 行 | server 行 | policy 引数 |
 | ---------------------------------- | --------- | --------- | ----------- |
@@ -65,8 +58,7 @@ High。以下の根拠から判断する。
 | `DEFAULT_MAX_MESSAGE_SIZE`         | 134       | 28        | -           |
 | `DEFAULT_MAX_DECOMPRESSED_SIZE`    | 137       | 31        | -           |
 
-`decompress_if_needed` は内部で `self.close_internal(...)` を呼ぶ
-（client L1002-1005, server L968-971）ため policy が必要。
+
 
 ### Connection 側に残留するメソッド
 
@@ -98,7 +90,7 @@ High。以下の根拠から判断する。
 
 `nonce` はハンドシェイク完了後は参照されないが、`connect()` 内で `request.build(self.nonce)?`
 と `HandshakeValidator::new(self.nonce)` に同じ値を 2 回渡す経路があるため Connection 側に
-残す（ローカル変数化への整理は本 issue のスコープ外とする）。
+残す。
 `negotiated_protocol` / `negotiated_extensions` はハンドシェイク完了時にのみ書き込まれ、
 以降は `protocol()` / `extensions()` 経由の read-only 公開のため Shared 化しない。
 
@@ -110,8 +102,7 @@ High。以下の根拠から判断する。
 
 `send_frame` 削除後、呼び出し側 (`close`, `send_ping`, `send_data_frame`, `handle_ping`,
 `handle_close`, `close_internal`) は `policy.encode_and_send(&frame, &mut self.shared);`
-に置換される（戻り値 `()` のため `?` 不要）。
-`Frame::ping(...)?` や `Frame::close(...)?` といったコンストラクタ側の `?` は **残る**。
+に置換される。`encode_and_send` の戻り値は `()` のため `?` 不要。
 
 ### 未使用の `now: Timestamp` パラメータ
 
@@ -180,25 +171,35 @@ client は `ClientFramePolicy<R: RandomSource>` 経由で `R` の単相化を po
 2. `cargo clippy --workspace --all-targets -- -D warnings` が警告なしで通る
 3. `cargo test --workspace` が全件パスする
 4. `cargo doc --workspace --no-deps` がエラーなしで通る
-5. リファクタリング後の `cargo +nightly rustdoc --lib -- --output-format json` の
-   `paths` がリファクタリング前と差分なしであることを確認する
+5. `cargo doc --workspace --no-deps` の出力で `shiguredo_websocket::ConnectionState` 等の
+   公開シンボルパスがリファクタリング前と同一であることを確認する
 6. 新規単体テスト（「テスト戦略」参照）が追加され全件パスする
-7. `src/websocket_client_connection.rs` から `FragmentBuffer` 定義および
-   `ConnectionState` / `TimerId` / `ConnectionEvent` / `ConnectionOutput` 定義が
-   削除されている
-8. `src/websocket_server_connection.rs` から `FragmentBuffer` 定義が削除されている
-9. `src/websocket_frame.rs:107` の `encode_unmasked` から `#[allow(dead_code)]` が
-   除去されている
-10. `CHANGES.md` の `## develop` > `### misc` に変更履歴エントリが追加されている
+7. `src/websocket_client_connection.rs` から `FragmentBuffer` 定義、`ConnectionState` /
+   `TimerId` / `ConnectionEvent` / `ConnectionOutput` 定義、`DEFAULT_MAX_FRAME_SIZE` /
+   `DEFAULT_MAX_MESSAGE_SIZE` / `DEFAULT_MAX_DECOMPRESSED_SIZE` 定数が削除されている
+8. `src/websocket_server_connection.rs` から `FragmentBuffer` 定義、
+   `ConnectionState` / `TimerId` / `ConnectionEvent` / `ConnectionOutput` の
+   `use crate::{...}` によるインポート、`DEFAULT_MAX_FRAME_SIZE` /
+   `DEFAULT_MAX_MESSAGE_SIZE` / `DEFAULT_MAX_DECOMPRESSED_SIZE` 定数が削除されている
+9. `src/websocket_frame.rs` の `encode_unmasked` から `#[allow(dead_code)]` が
+   除去されている（本リファクタリング前でも `server::send_frame` から呼ばれており
+   事実上 dead code ではないが、本 issue を完了条件とする）
+10. `CHANGES.md` の `## develop` > `### misc` に変更履歴エントリが追加され、
+    `@実装者名` プレースホルダが実装者の GitHub ハンドルに置換されている
 
 ## 解決方法
 
 ### Step 1: 共通型を独立モジュールに移動する
 
-`src/connection_types.rs` を新規作成し、`ConnectionState`, `TimerId`,
-`ConnectionEvent`, `ConnectionOutput` の 4 型の定義を
-`src/websocket_client_connection.rs` から移動する。`RandomSource` トレイトは client 固有
-なので `websocket_client_connection.rs` に残す。
+`src/websocket_connection_types.rs` を新規作成し、`ConnectionState`, `TimerId`,
+`ConnectionEvent`, `ConnectionOutput`, `RandomSource` の 5 型の定義を
+`src/websocket_client_connection.rs` から移動する。
+
+`RandomSource` は client 固有のトレイトだが、`ClientFramePolicy` が
+`websocket_connection_shared.rs` に定義され `RandomSource` を型パラメータ境界に使うため、
+循環参照を避ける目的で `websocket_connection_types.rs` に移動する。
+各ファイルへの型定義の配置後、削除元ファイルに `use crate::websocket_connection_types::{...};`
+を追加してから元定義を削除する（削除と追加を同時に行わないと中間状態でコンパイルエラーになる）。
 
 `src/lib.rs` の置換: 既存の
 
@@ -212,31 +213,31 @@ pub use websocket_client_connection::{
 を以下に差し替える。
 
 ```rust
-mod connection_shared; // 既存 mod 群と並べて追加
-mod connection_types;
+mod websocket_connection_shared; // 既存 mod 群と並べて追加
+mod websocket_connection_types;
 
-pub use connection_types::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};
+pub use websocket_connection_types::{ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource, TimerId};
 pub use websocket_client_connection::{
-    ClientConnectionOptions, RandomSource, WebSocketClientConnection,
+    ClientConnectionOptions, WebSocketClientConnection,
 };
 ```
 
 server 側 (`src/websocket_server_connection.rs:18`) の
 `use crate::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};` は
 `lib.rs` の `pub use` 経由でそのまま動くので変更は任意。スタイル統一として
-`use crate::connection_types::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};`
+`use crate::websocket_connection_types::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};`
 に書き換える。
 
 ### Step 2: `SharedConnectionState` と `FragmentBuffer` を定義する
 
-`src/connection_shared.rs` を新規作成する。
+`src/websocket_connection_shared.rs` を新規作成する。
 
 必要な `use`:
 
 ```rust
 use std::collections::VecDeque;
 
-use crate::connection_types::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};
+use crate::websocket_connection_types::{ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource, TimerId};
 use crate::deflate::PerMessageDeflate;
 use crate::error::Error;
 use crate::websocket_close::{CloseCode, truncate_reason};
@@ -245,8 +246,8 @@ use crate::websocket_opcode::Opcode;
 ```
 
 定数（両 Connection の `pub const` だが `lib.rs` から `pub use` されておらず外部 API
-ではない。本 issue で `connection_shared.rs` に一元化し、各 Connection モジュール側で
-`pub use crate::connection_shared::DEFAULT_MAX_*;` を追加してモジュールパスを保つ）:
+ではない。本 issue で `websocket_connection_shared.rs` に一元化し、各 Connection モジュール側で
+`pub use crate::websocket_connection_shared::DEFAULT_MAX_*;` を追加してモジュールパスを保つ）:
 
 ```rust
 pub const DEFAULT_MAX_FRAME_SIZE: usize = 64 * 1024 * 1024;
@@ -254,10 +255,7 @@ pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 pub const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 16 * 1024 * 1024;
 ```
 
-`FragmentBuffer` は `pub(crate)` で定義し、メソッドもすべて `pub(crate) fn` にする
-（`SharedConnectionState` 外のモジュールから直接触らないが、`SharedConnectionState`
-は同じファイル内なのでデフォルト private でも動く。スタイル一貫性のため
-`pub(crate)` で統一する）:
+`FragmentBuffer` は `pub(crate)` で定義し、メソッドもすべて `pub(crate) fn` にする:
 
 ```rust
 #[derive(Debug, Default)]
@@ -349,7 +347,7 @@ impl SharedConnectionState {
 
 ### Step 3: `FramePolicy` トレイトとポリシー構造体を定義する
 
-`src/connection_shared.rs` に追加する:
+`src/websocket_connection_shared.rs` に追加する:
 
 ```rust
 pub(crate) trait FramePolicy {
@@ -380,7 +378,7 @@ impl<R: RandomSource> ClientFramePolicy<R> {
 impl<R: RandomSource> FramePolicy for ClientFramePolicy<R> {
     fn verify_frame_masking(&self, masked: bool) -> Result<(), Error> {
         // RFC 6455 Section 5.1: サーバーからのフレームはマスクしてはならない
-        // RFC 6455 Section 7.4.1: 違反時は 1002 (protocol error) を使用してよい
+        // RFC 6455 Section 5.1, Section 7.4.1: 違反時は 1002 (protocol error) を使用してよい
         if masked {
             return Err(Error::protocol_violation("masked server frame"));
         }
@@ -401,7 +399,7 @@ pub(crate) struct ServerFramePolicy;
 impl FramePolicy for ServerFramePolicy {
     fn verify_frame_masking(&self, masked: bool) -> Result<(), Error> {
         // RFC 6455 Section 5.1: クライアントからのフレームはマスクしなければならない
-        // RFC 6455 Section 7.4.1: 違反時は 1002 (protocol error) を使用してよい
+        // RFC 6455 Section 5.1, Section 7.4.1: 違反時は 1002 (protocol error) を使用してよい
         if !masked {
             return Err(Error::protocol_violation("unmasked client frame"));
         }
@@ -458,25 +456,56 @@ fn handle_close(&mut self, frame: Frame, policy: &mut impl FramePolicy) -> Resul
 fn handle_ping(&mut self, frame: Frame, policy: &mut impl FramePolicy) -> Result<(), Error>
 fn handle_pong(&mut self, frame: Frame) -> Result<(), Error>
 fn handle_timer(&mut self, timer_id: TimerId, policy: &mut impl FramePolicy) -> Result<(), Error>
+fn send_ping_internal(&mut self, data: &[u8], policy: &mut impl FramePolicy) -> Result<(), Error>
 fn poll_event(&mut self) -> Option<ConnectionEvent>
 fn poll_output(&mut self) -> Option<ConnectionOutput>
 ```
 
+`send_data_frame` の最終形。`compress_if_enabled` は `self` 参照のみで完結するため policy 不要。
+
+```rust
+fn send_data_frame(
+    &mut self,
+    opcode: Opcode,
+    payload: Vec<u8>,
+    policy: &mut impl FramePolicy,
+) -> Result<(), Error> {
+    let (payload, compressed) = self.compress_if_enabled(payload)?;
+    let mut frame = Frame::new(opcode, payload);
+    frame.rsv1 = compressed;
+    policy.encode_and_send(&frame, self);
+    Ok(())
+}
+```
+
+### Step 4-0: `handle_decoded_frame` の最終形
+
+`verify_frame_masking` は `&self` で純粋な検証のみを行い、Close フレーム送信は行わない。
+RFC 6455 Section 5.1 の要求に従い、検証失敗時には `handle_decoded_frame` 側で明示的に
+`close_internal` を呼ぶ。
+
+```rust
+fn handle_decoded_frame(
+    &mut self,
+    decoded: DecodedFrame,
+    policy: &mut impl FramePolicy,
+) -> Result<(), Error> {
+    if let Err(e) = policy.verify_frame_masking(decoded.masked) {
+        self.close_internal(CloseCode::PROTOCOL_ERROR, &e.to_string(), policy);
+        return Err(e);
+    }
+    self.handle_frame(decoded.frame, policy)
+}
+```
+
+`Error::to_string()` はエラーメッセージを返すため、`close_internal` の reason と
+`verify_frame_masking` のエラーメッセージが一致する。
+
 ### Step 4-1: `close_internal` の最終形
 
-0020 で `is_char_boundary` 切り詰めが `truncate_reason(reason, max_bytes)` 関数として
-`src/websocket_close.rs` に切り出される前提（0020 のテスト戦略セクション）。
-**ただし 0020 の「変更対象ファイルと影響範囲」には `close_internal` 本体を
-`truncate_reason` 呼び出しに書き換える指示がない**。
-本 issue 実装時には以下の手順で対応する:
-
-1. 0020 完了時点で `close_internal` が `is_char_boundary` のインライン展開のままなら、
-   本 issue の Step 4-1 着手前に `src/websocket_close.rs` の `truncate_reason` を
-   呼び出す形に書き換える（client/server の `close_internal` 両方）
-2. 0020 完了時点で既に書き換え済みなら、そのまま `SharedConnectionState::close_internal`
-   に移動する
-
-いずれの場合も最終形は以下:
+`close_internal` が `truncate_reason` を呼び出す形になっていることを確認し、
+なっていなければ client/server 両方の `close_internal` を書き換える。
+書き換え後の最終形は以下:
 
 ```rust
 fn close_internal(
@@ -490,10 +519,8 @@ fn close_internal(
     }
 
     if !self.close_sent {
-        // truncate_reason で reason は 123 バイト以下に切り詰め済みのため、
-        // 現在の Frame::close では Err は発生しないが、Frame::close の将来的な
-        // エラー条件追加 (例: 予約 close code チェック) への堅牢性のため
-        // unwrap_or_else フォールバックを維持する。
+        // truncate_reason 後は reason が常に 123 バイト以下だが、
+        // Frame::close の将来的なエラー条件追加に備えて unwrap_or_else を維持する。
         let truncated = truncate_reason(reason, 123);
         let frame = Frame::close(Some(code.as_u16()), truncated)
             .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").unwrap());
@@ -510,27 +537,35 @@ fn close_internal(
 }
 ```
 
-### Step 4-2: `handle_timer::TimerId::Ping` のインライン展開
+### Step 4-2: `send_ping_internal` の抽出
 
-`send_ping` は Connection 側に残るため `SharedConnectionState::handle_timer` から
-直接呼べない。Ping 送信ロジックをインライン展開する。**`PongTimeout` タイマーの
-セットも必ず含める**（既存の `send_ping` (client L513-516, server L634-637) と同じ動作を
-保つ必要がある）。外側で `state == Connected` を確認済みのため、旧 `send_ping` 内の
-`check_connected` 検証は省略しても等価。
+Ping 送信ロジックは `handle_timer::Ping` 分岐と Connection 側 `send_ping`（public API）の
+2 箇所で重複する。`SharedConnectionState` に内部メソッドとして抽出し、両方から委譲する。
+
+```rust
+/// Ping フレームを送信し、awaiting_pong フラグと PongTimeout タイマーを設定する
+fn send_ping_internal(
+    &mut self,
+    data: &[u8],
+    policy: &mut impl FramePolicy,
+) -> Result<(), Error> {
+    let frame = Frame::ping(data.to_vec())?;
+    policy.encode_and_send(&frame, self);
+    self.awaiting_pong = true;
+    self.output_queue.push_back(ConnectionOutput::SetTimer {
+        id: TimerId::PongTimeout,
+        duration_millis: self.pong_timeout_millis,
+    });
+    Ok(())
+}
+```
+
+`handle_timer::Ping` 分岐は以下に置き換わる:
 
 ```rust
 TimerId::Ping => {
     if self.state == ConnectionState::Connected && !self.awaiting_pong {
-        // RFC 6455 Section 5.5: 全コントロールフレームは 125 バイト以下。
-        // 空ペイロード (0 バイト) は常に許容され Frame::ping は Err を返さないため
-        // unwrap で安全。
-        let frame = Frame::ping(Vec::new()).unwrap();
-        policy.encode_and_send(&frame, self);
-        self.awaiting_pong = true;
-        self.output_queue.push_back(ConnectionOutput::SetTimer {
-            id: TimerId::PongTimeout,
-            duration_millis: self.pong_timeout_millis,
-        });
+        self.send_ping_internal(&[], policy)?;
     }
     if self.state == ConnectionState::Connected && self.ping_interval_millis > 0 {
         self.output_queue.push_back(ConnectionOutput::SetTimer {
@@ -541,10 +576,26 @@ TimerId::Ping => {
 }
 ```
 
-`TimerId::PongTimeout` 分岐の `self.close(...)?;` は Step 4 の置換規則 (4 番目) に従い
-`self.close_internal(..., policy);` に置換する。`awaiting_pong` フラグは PongTimeout
-発火後もリセットしないが、`close_internal` が `state` を `Closing` に遷移させるため、
-次の `Ping` タイマー発火時には `state == Connected` 条件で弾かれ Ping は送られない。
+空ペイロードは `Frame::ping` が常に成功するため `send_ping_internal` の `?` は実質的に
+`Ok(())` を伝搬するのみ。外側で `state == Connected` を確認済みのため `send_ping` 内の
+`check_connected` 検証相当は自明に通過する。
+
+`TimerId::PongTimeout` 分岐の最終形:
+
+```rust
+TimerId::PongTimeout => {
+    if self.awaiting_pong {
+        self.event_queue
+            .push_back(ConnectionEvent::Error("pong timeout".to_string()));
+        self.close_internal(CloseCode::POLICY_VIOLATION, "pong timeout", policy);
+    }
+}
+```
+
+`close_internal` が `()` を返すため `handle_timer` の戻り値は PongTimeout 発火時に必ず `Ok(())`
+となる。`awaiting_pong` フラグは PongTimeout 発火後もリセットしないが、
+`close_internal` が `state` を `Closing` に遷移させるため、次の `Ping` タイマー発火時には
+`state == Connected` 条件で弾かれ Ping は送られない。
 
 ### Step 5: 各 Connection 構造体への組み込み
 
@@ -618,6 +669,107 @@ Connection 側に残る各メソッドに対して、機械的に以下の置換
   公開メソッド `state` / `protocol` / `extensions` / `poll_event` / `poll_output` /
   `handle_timer`
 
+#### client/server `feed_recv_buf` の書き換え例
+
+client `feed_recv_buf` の `process_frames` 呼び出しは `now` 引数が削除される。
+`failed` フラグや `handshake_validator` を含むその他のロジックは残留:
+
+```rust
+// client feed_recv_buf 書き換え後
+pub fn feed_recv_buf(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
+    if self.shared.failed {
+        return Err(Error::invalid_state("connection has failed"));
+    }
+    let result = match self.shared.state {
+        ConnectionState::Connecting => self.process_handshake(buf, now),
+        ConnectionState::Connected | ConnectionState::Closing => {
+            self.shared.process_frames(buf, &mut self.policy)
+        }
+        ConnectionState::Disconnected | ConnectionState::Closed => {
+            return Err(Error::invalid_state("connection is closed"));
+        }
+    };
+    if result.is_err() {
+        self.shared.failed = true;
+    }
+    result
+}
+```
+
+サーバー側は `now` 引数がない。`pending_frame_data` / `handshake_validator` は Connection 側に残留:
+
+```rust
+// server feed_recv_buf 書き換え後
+pub fn feed_recv_buf(&mut self, buf: &[u8]) -> Result<(), Error> {
+    if self.shared.failed {
+        return Err(Error::invalid_state("connection has failed"));
+    }
+    let result = match self.shared.state {
+        ConnectionState::Disconnected | ConnectionState::Connecting => {
+            self.process_handshake(buf)
+        }
+        ConnectionState::Connected | ConnectionState::Closing => {
+            self.shared.process_frames(buf, &mut self.policy)
+        }
+        ConnectionState::Closed => {
+            return Err(Error::invalid_state("connection is closed"));
+        }
+    };
+    if result.is_err() {
+        self.shared.failed = true;
+    }
+    result
+}
+```
+
+#### client `send_ping` と `close` の書き換え例
+
+`send_ping` と `close` は Connection 側に残留するが、`options.pong_timeout_millis` /
+`options.close_timeout_millis` は Shared 側の同名フィールドに置き換える
+（値は `SharedConnectionState::new()` でコピー済みのため同一）:
+
+```rust
+// client send_ping 書き換え後
+pub fn send_ping(&mut self, data: &[u8]) -> Result<(), Error> {
+    self.shared.check_connected()?;
+    self.shared.send_ping_internal(data, &mut self.policy)
+}
+
+// client close 書き換え後（状態チェック部は残留フィールド参照のまま）
+pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
+    if !matches!(
+        self.shared.state,
+        ConnectionState::Connected | ConnectionState::Closing
+    ) {
+        return Err(Error::invalid_state("connection is not established"));
+    }
+    if !code.is_sendable() {
+        let code_val = code.as_u16();
+        return Err(Error::invalid_input(format!(
+            "close code {} is not sendable",
+            code_val
+        )));
+    }
+    if !self.shared.close_sent {
+        let frame = Frame::close(Some(code.as_u16()), reason)?;
+        self.policy.encode_and_send(&frame, &mut self.shared);
+        self.shared.close_sent = true;
+        self.shared.output_queue.push_back(ConnectionOutput::SetTimer {
+            id: TimerId::CloseTimeout,
+            duration_millis: self.shared.close_timeout_millis,
+        });
+        self.shared.set_state(ConnectionState::Closing);
+    }
+    Ok(())
+}
+```
+
+#### 実装上の注意: Step 4 〜 Step 6 はアトミックに行う
+
+Step 4（Shared メソッド）、Step 5（構造体フィールド組み込み）、Step 6（Connection 側
+メソッドの書き換え）は、いずれか 1 つだけ完了してもコンパイルが通らない。
+3 ステップを atomic な 1 変更として扱い、すべて完了してから `cargo check` で検証すること。
+
 #### server `accept_handshake` の `process_frames` 呼び出しの書き換え例
 
 3 種類のフィールド (Shared / 残留 / policy) を跨ぐため、置換規則の機械適用結果が
@@ -660,18 +812,12 @@ if !self.pending_frame_data.is_empty() {
 以下 2 点は意図的な内部挙動変更。テスト戦略で固定する。
 
 1. **server `emit_message` の Close 呼び出し先**:
-   server (現状 L994) で `self.close(CloseCode::INVALID_PAYLOAD, "invalid UTF-8")?;`
-   と書かれていた箇所が `self.close_internal(...)` 経由に変わる。`close` が行っていた
-   `is_sendable()` 検証は 1007 (INVALID_PAYLOAD) に対して常に通るため、外部から
-   観測される Close フレーム送信動作 (RFC 6455 Section 8.1 の Fail the WebSocket
-   Connection) は維持される。
+   `self.close(...)` が `self.close_internal(...)` に変わる。検証条件が異なるが
+   `emit_message` は `Connected` / `Closing` でのみ到達するため実害なし。
+   Close フレーム送信動作は維持される。
 2. **`handle_timer` の PongTimeout 戻り値**:
-   `self.close(POLICY_VIOLATION, "pong timeout")?;` を `self.close_internal(...);` に
-   置き換える。`close_internal` が値を返さないため `handle_timer` の戻り値は
-   PongTimeout 発火時に必ず `Ok(())` となる（旧実装は理論上 `Err` を返す経路が
-   存在したが、`Connected` / `Closing` 状態でしか発火しないため実用上は発生しない）。
-   エラー検出は `ConnectionEvent::Error("pong timeout")` のイベントキュー経由に
-   一本化される。
+   `close_internal` が値を返さないため戻り値は常に `Ok(())` となる。
+   エラー検出は `ConnectionEvent::Error("pong timeout")` のイベントキュー経由に一本化される。
 
 ## テスト戦略
 
@@ -684,7 +830,11 @@ PBT は公開 API のみを使用しているため、`lib.rs` の `pub use` が
 状態遷移の自由度が低く（`emit_message` は `Connected` / `Closing` 状態でしか
 到達しない）プロパティ化が薄くなるため、**単体テストとして固定する**。
 
-`tests/test_connection_shared.rs` を新規作成し以下を追加する:
+`tests/test_websocket_connection_shared.rs` を新規作成し以下を追加する。
+`SharedConnectionState` は `pub(crate)` のため、テストは `WebSocketClientConnection` /
+`WebSocketServerConnection` の公開 API 経由でのみアクセス可能。
+テストのセットアップでは必ずハンドシェイクを完了させてから `feed_recv_buf` に
+データを流すこと。
 
 1. server で `String::from_utf8` 不正なテキスト 1 フレームを `feed_recv_buf` に流すと、
    送信キュー (`poll_output`) に Close フレーム (close code 1007) が積まれ、
@@ -704,12 +854,10 @@ cargo doc --workspace --no-deps
 
 ## CHANGES.md
 
-`## develop` > `### misc` に以下を追記する。担当者の `@実装者名` プレースホルダは
+既存の `### misc` セクションに以下を追記する。担当者の `@実装者名` プレースホルダは
 コミット前に実装者の GitHub ハンドルに差し替えること。
 
 ```text
-### misc
-
-- [UPDATE] クライアント/サーバー間のフレーム処理ロジックを SharedConnectionState に共通化する
+- [UPDATE] クライアント / サーバー間のフレーム処理ロジックを SharedConnectionState に共通化する
   - @実装者名
 ```

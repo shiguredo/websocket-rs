@@ -1,11 +1,10 @@
 # 0020: close_internal の reason 切り詰めが UTF-8 境界を無視してパニックする可能性がある
 
+- Priority: High
 - Created: 2026-05-14
-- Model: deepseek-v4-flash
-
-## 優先度
-
-P1
+- Completed: -
+- Model: DeepSeek V4 Flash
+- Branch: feature/fix-close-utf8-boundary
 
 ## 概要
 
@@ -13,12 +12,8 @@ P1
 `&reason[..123]` を使用している。Rust の `&str` スライシングは
 バイトインデックスが UTF-8 文字境界でない場合にパニックする。
 
-現在の全呼び出し元は短い ASCII 文字列 (`"frame decode error"`、`"masked server frame"` 等) のため
-発現しないが、将来の変更でマルチバイト文字を含む reason が渡された場合に
-回復不能なパニックが発生する。
-
-全呼び出し元を確認した結果、現時点で 123 バイトを超える可能性がある reason は
-存在しない（最長は `format!("invalid close code: {}", u16)` の約 26 バイト）。
+現在の全呼び出し元は短い ASCII 文字列のため発現しないが、将来の変更で
+マルチバイト文字を含む reason が渡された場合に回復不能なパニックが発生する。
 本修正は将来の安全性のための予防的修正である。
 
 ## 依存する issue
@@ -30,9 +25,10 @@ P1
 2. **その後 issue 0019 を実装する**: 共通トレイトへの抽出（0020 修正済みのコードが対象）
 
 本 issue で戻り値型も `()` に統一することで、0019 での `close_internal` 呼び出しの `?` → `;` 変更を不要にする。
-なお `close_internal` 内部の `self.send_frame(frame)?;` は本 issue で修正する（0019 とは無関係に必要）。
-ただし `let _ = self.send_frame(frame);` としないと `Result` 型自体の `#[must_use]` により
-コンパイラ警告が発生するため注意。
+なお `close_internal` 内部の `self.send_frame(frame)?;` は本 issue で修正する。
+`let _ = self.send_frame(frame);` としないと `Result` 型自体の `#[must_use]` により
+コンパイラ警告が発生するため注意。この `let _ =` は 0019 で `send_frame` が削除され
+`policy.encode_and_send()` に置き換えられるまでの一時的な修正である。
 
 ## 該当コード
 
@@ -55,9 +51,6 @@ let truncated_reason = if reason.len() > 123 {
     reason
 };
 ```
-
-上記 2 箇所以外に `&str[..N]` のバイトインデックススライシングは存在しない。
-`Frame::close()` は reason 長超過を `Err` で弾く設計のため、truncation 処理を持たない。
 
 ### `close_internal` の全呼び出し元
 
@@ -112,67 +105,9 @@ RFC 6455 Section 7.1.6 (line 2368-2375):
 
 ## 修正方針
 
-`reason.is_char_boundary()` を用いて UTF-8 セーフな切り詰めを行う:
-
-```rust
-let truncated_reason = if reason.len() > 123 {
-    let mut end = 123;
-    while !reason.is_char_boundary(end) {
-        end -= 1;
-    }
-    &reason[..end]
-} else {
-    reason
-};
-```
-
-この手法の特性:
-
-- ゼロアロケーション（戻り値は `&str`、元の文字列の prefix を返す）
-- 最悪でも 3 回の backward scan で停止（UTF-8 の最大エンコード長が 4 バイトのため）
-- `is_char_boundary(0)` は任意の valid `&str` に対して `true` を返すため、ループは必ず停止する（`end` が負になることはない）
-- 失う最大バイト数は 3 バイト（制限 123 に対して許容範囲）
-- ただしこのループの停止性は `reason: &str` の前提に依存する（`&[u8]` を受け取るよう変更された場合、ループが停止しなくなる可能性がある）
-
-client/server 両方の `close_internal` を修正する。
-また、本 issue ではクライアント側の `close_internal` の戻り値型を
-`Result<(), Error>` から `()` に変更し、全呼び出し元の `?` → `;` 変更も
-併せて行う（issue 0019 との競合回避のため）。
-
-## 変更対象ファイルと影響範囲
-
-### `src/websocket_client_connection.rs:634-661`
-
-- truncation 修正（`&reason[..123]` → `is_char_boundary` 後退スキャン）
-- 戻り値型 `Result<(), Error>` → `()` への変更に伴う内部の修正:
-  - line 636: `return Ok(());` → `return;`
-  - line 648: `self.send_frame(frame)?;` → `let _ = self.send_frame(frame);`
-    （`Result<T, E>` 型自体に `#[must_use]` が付与されているため `let _ =` が必要）
-  - line 660: 末尾の `Ok(())` を削除（関数本体の最後の式が空になる）
-- 全呼び出し元 `self.close_internal(...)?;` を `self.close_internal(...);` に変更
-  （`close_internal` が `()` を返すため `?` はコンパイルエラーになる。grep `close_internal` で検出可能）
-
-### `src/websocket_server_connection.rs:684-709`
-
-- truncation 修正（`&reason[..123]` → `is_char_boundary` 後退スキャン）
-- `close_internal` は元々戻り値 `()` なのでシグネチャ変更不要
-
-### 補足: `close_internal` 内部のフォールバック維持
-
-truncation 修正後も `Frame::close` の `unwrap_or_else` フォールバックは維持する。
-truncation によって reason 長が 123 以下になることは保証されるが、
-`Frame::close` の将来的なエラー条件追加（例: 予約済み close code のチェック）に
-対して堅牢性を保つため。AGENTS.md の「性能より堅牢性を優先する」方針に従う。
-
-```rust
-let frame = Frame::close(Some(code.as_u16()), truncated_reason)
-    .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").unwrap());
-```
-
-## テスト戦略
-
-AGENTS.md の「PBT で実現できるものは PBT で書く」方針に従い、truncation 処理を
-テスト可能にするため、truncation 関数を `src/websocket_close.rs` に切り出す:
+UTF-8 セーフな reason 切り詰め関数 `truncate_reason` を `src/websocket_close.rs` に
+追加し、client/server 両方の `close_internal` から呼び出す。
+PBT でのテスト容易性のため、インライン展開ではなく関数として切り出す。
 
 ```rust
 /// reason が max_bytes を超える場合、UTF-8 文字境界で切り詰める
@@ -189,9 +124,64 @@ pub(crate) fn truncate_reason(reason: &str, max_bytes: usize) -> &str {
 }
 ```
 
-`is_char_boundary(0)` は常に `true` のため、`reason: &str` かつ `max_bytes > 0` であればループは必ず停止する。型シグネチャによって `&str` 制約をコンパイル時に保証する。
+`is_char_boundary(0)` は常に `true` のため、`reason: &str` かつ `max_bytes > 0` であれば
+ループは必ず停止する。型シグネチャによって `&str` 制約をコンパイル時に保証する。
 
-以下のプロパティを `pbt/tests/prop_close.rs` に追加する:
+client/server 両方の `close_internal` で `&reason[..123]` を
+`truncate_reason(reason, 123)` に置換する。
+
+また、本 issue ではクライアント側の `close_internal` の戻り値型を
+`Result<(), Error>` から `()` に変更し、全呼び出し元の `?` → `;` 変更も
+併せて行う（issue 0019 との競合回避のため）。
+
+## 変更対象ファイルと影響範囲
+
+### `src/websocket_close.rs` — `truncate_reason` を追加
+
+修正方針のコードをそのまま追加する。
+
+### `src/websocket_client_connection.rs:634-661`
+
+- truncation 修正（`&reason[..123]` → `truncate_reason(reason, 123)`）
+- 戻り値型 `Result<(), Error>` → `()` への変更に伴う内部の修正:
+  - line 636: `return Ok(());` → `return;`
+  - line 648: `self.send_frame(frame)?;` → `let _ = self.send_frame(frame);`
+    （`Result<T, E>` 型自体に `#[must_use]` が付与されているため `let _ =` が必要。
+    `send_frame` は常に `Ok(())` を返すためエラーは発生しない。
+    この修正は 0019 で `send_frame` が `policy.encode_and_send()` に置き換えられるまでの一時的なもの）
+  - line 660: 末尾の `Ok(())` を削除（関数本体の最後の式が空になる）
+- 全呼び出し元 `self.close_internal(...)?;` を `self.close_internal(...);` に変更
+  （`close_internal` が `()` を返すため `?` はコンパイルエラーになる。grep `close_internal` で検出可能）
+
+### `src/websocket_server_connection.rs:684-709`
+
+- truncation 修正（`&reason[..123]` → `truncate_reason(reason, 123)`）
+- `close_internal` は元々戻り値 `()` なのでシグネチャ変更不要。
+  server の `send_frame` は `()` を返すため `let _ =` も不要
+
+### `pbt/tests/prop_websocket_close.rs` — PBT を追加
+
+テスト戦略に従い新規作成する。
+
+### 補足: `close_internal` 内部のフォールバック維持
+
+truncation 修正後も `Frame::close` の `unwrap_or_else` フォールバックは維持する。
+truncation によって reason 長が 123 以下になることは保証されるが、
+`Frame::close` の将来的なエラー条件追加（例: 予約済み close code のチェック）に
+対して堅牢性を保つため。AGENTS.md の「性能より堅牢性を優先する」方針に従う。
+
+```rust
+let frame = Frame::close(Some(code.as_u16()), truncated_reason)
+    .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").unwrap());
+```
+
+## テスト戦略
+
+truncation 処理を `src/websocket_close.rs` の `truncate_reason` 関数として切り出す
+（修正方針に記載のコードをそのまま使用）。
+
+AGENTS.md の「PBT で実現できるものは PBT で書く」方針に従い、
+以下のプロパティを `pbt/tests/prop_websocket_close.rs` に追加する:
 
 1. truncation 結果のバイト長が 123 以下である（reason 長が 123 超の場合のみ実行）
 2. truncation 結果が元の文字列の prefix である（文字が欠落しても破損しない）
@@ -200,12 +190,21 @@ pub(crate) fn truncate_reason(reason: &str, max_bytes: usize) -> &str {
 AGENTS.md の方針に従い「任意入力でパニックしないこと」の PBT は書かない
 （fuzzing の役割。cargo-fuzz ターゲットに期待する）。
 
+## 完了条件
+
+1. `src/websocket_close.rs` に `truncate_reason` 関数が追加されている
+2. client/server 双方の `close_internal` で `&reason[..123]` が `truncate_reason(reason, 123)` に置換されている
+3. client 側 `close_internal` の戻り値型が `()` に変更され、全 16 箇所の呼び出し元で `?` が削除されている
+4. `pbt/tests/prop_websocket_close.rs` に PBT 3 件が追加され全件パスする
+5. `cargo check --workspace` がエラーなしで通る
+6. `cargo clippy --workspace --all-targets -- -D warnings` が警告なしで通る
+7. `cargo test --workspace` が全件パスする
+8. `CHANGES.md` の `## develop` に変更履歴エントリが追加され、`@実装者名` が実装者の GitHub ハンドルに置換されている
+
 ## CHANGES.md 登録内容
 
-- [FIX] close_internal の reason 切り詰めが UTF-8 境界を無視する問題を修正する
+- [UPDATE] close_internal の戻り値型を `()` に統一する
   - @実装者名
 
-### misc
-
-- [UPDATE] close_internal の戻り値型を `()` に統一する
+- [FIX] close_internal の reason 切り詰めが UTF-8 境界を無視する問題を修正する
   - @実装者名
