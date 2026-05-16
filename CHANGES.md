@@ -11,7 +11,7 @@
 
 ## develop
 
-- [UPDATE] shiguredo_http11 を 2026.4 に上げる
+- [UPDATE] shiguredo_http11 を 2026.5 に上げる
   - @voluntas
 - [CHANGE] base64 クレートを base64ct 1.8 に切り替えるようにする
   - @voluntas
