@@ -1,7 +1,8 @@
 [package]
 name = "websocket_server"
 version = "0.0.0"
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
 publish = false
 
 [dependencies]
@@ -14,7 +15,7 @@ rustls = { version = "0.23", default-features = false, features = [
   "tls12",
 ] }
 # WebSocket サーバー本体
-shiguredo_websocket = { path = "../.." }
+shiguredo_websocket.workspace = true
 # 非同期 I/O ランタイムに使用する
 tokio = { version = "1.52", features = [
   "io-util",
