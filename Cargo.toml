@@ -32,7 +32,7 @@ aws-lc-rs = "1.16"
 # Sec-WebSocket-Key および Sec-WebSocket-Accept の base64 エンコード/デコードに使用する
 base64ct = { version = "1.8", features = ["std"] }
 # WebSocket ハンドシェイクの HTTP リクエスト/レスポンス処理に使用する
-shiguredo_http11 = "2026.5.0-canary.0"
+shiguredo_http11 = "2026.5.0-canary.1"
 
 [dependencies]
 # Sec-WebSocket-Accept の SHA-1 計算に使用する
