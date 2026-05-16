@@ -743,7 +743,7 @@ checksum = "25f0932af5976404ec64ad6c3e902c373001bc2ce4cb20b481529fabc610fdf0"
 
 [[package]]
 name = "shiguredo_websocket"
-version = "2026.2.0-canary.1"
+version = "2026.2.0-canary.2"
 dependencies = [
  "aws-lc-rs",
  "base64ct",
