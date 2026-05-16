@@ -24,14 +24,15 @@ edition = "2024"
 rust-version = "1.88"
 
 [workspace.dependencies]
+# WebSocket クライアント/サーバー本体
+shiguredo_websocket = { path = "." }
+
 # 暗号ライブラリ (SHA-1 計算や masking key/nonce 用乱数生成に使用する)
 aws-lc-rs = "1.16"
 # Sec-WebSocket-Key および Sec-WebSocket-Accept の base64 エンコード/デコードに使用する
 base64ct = { version = "1.8", features = ["std"] }
 # WebSocket ハンドシェイクの HTTP リクエスト/レスポンス処理に使用する
 shiguredo_http11 = "2026.5.0-canary.0"
-# WebSocket クライアント/サーバー本体
-shiguredo_websocket = { path = "." }
 
 [dependencies]
 # Sec-WebSocket-Accept の SHA-1 計算に使用する
