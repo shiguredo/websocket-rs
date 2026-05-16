@@ -17,8 +17,6 @@
 
 **リリース日**: 2026-05-16
 
-- [UPDATE] shiguredo_http11 を 2026.5 に上げる
-  - @voluntas
 - [CHANGE] base64 クレートを base64ct 1.8 に切り替えるようにする
   - @voluntas
 - [CHANGE] flate2 依存を noflate に置き換えてゼロ依存化する
@@ -31,6 +29,8 @@
   - @voluntas
 - [CHANGE] `Decompressor::reset` を削除する
   - 内部処理に統合する
+  - @voluntas
+- [UPDATE] shiguredo_http11 を 2026.5 に上げる
   - @voluntas
 
 ### misc
