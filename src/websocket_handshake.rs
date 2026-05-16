@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 
 use crate::error::Error;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
-use sha1::{Digest, Sha1};
+use base64ct::{Base64, Encoding};
 use shiguredo_http11::{HttpHead, Request, RequestDecoder, ResponseDecoder, ResponseHead};
 
 /// WebSocket ハンドシェイクで使用する固定 GUID (RFC 6455 Section 1.3)
@@ -125,32 +123,37 @@ impl HandshakeRequest {
             }
         }
 
-        let key = STANDARD.encode(nonce);
+        let key = Base64::encode_string(nonce.as_slice());
 
-        let mut request = Request::new("GET", &self.path)
-            .header("Host", &self.host)
-            .header("Upgrade", "websocket")
-            .header("Connection", "Upgrade")
-            .header("Sec-WebSocket-Key", &key)
-            .header("Sec-WebSocket-Version", "13");
+        let encoded = (|| {
+            let mut request = Request::new("GET", &self.path)?
+                .header("Host", &self.host)?
+                .header("Upgrade", "websocket")?
+                .header("Connection", "Upgrade")?
+                .header("Sec-WebSocket-Key", &key)?
+                .header("Sec-WebSocket-Version", "13")?;
 
-        if let Some(origin) = &self.origin {
-            request = request.header("Origin", origin);
-        }
+            if let Some(origin) = &self.origin {
+                request = request.header("Origin", origin)?;
+            }
 
-        if !self.protocols.is_empty() {
-            request = request.header("Sec-WebSocket-Protocol", &self.protocols.join(", "));
-        }
+            if !self.protocols.is_empty() {
+                request = request.header("Sec-WebSocket-Protocol", self.protocols.join(", "))?;
+            }
 
-        if !self.extensions.is_empty() {
-            request = request.header("Sec-WebSocket-Extensions", &self.extensions.join(", "));
-        }
+            if !self.extensions.is_empty() {
+                request = request.header("Sec-WebSocket-Extensions", self.extensions.join(", "))?;
+            }
 
-        for (name, value) in &self.additional_headers {
-            request = request.header(name, value);
-        }
+            for (name, value) in &self.additional_headers {
+                request = request.header(name, value)?;
+            }
 
-        Ok(request.encode())
+            request.encode()
+        })()
+        .map_err(|e| Error::invalid_input(e.to_string()))?;
+
+        Ok(encoded)
     }
 }
 
@@ -260,17 +263,17 @@ impl HandshakeRequestValidator {
     }
 
     fn validate_request(&self, request: &Request) -> Result<Option<ServerHandshakeRequest>, Error> {
-        if request.method != "GET" {
+        if request.method() != "GET" {
             return Err(Error::handshake_rejected(format!(
                 "unexpected method: {}",
-                request.method
+                request.method()
             )));
         }
 
-        if request.version != "HTTP/1.1" {
+        if request.version() != "HTTP/1.1" {
             return Err(Error::handshake_rejected(format!(
                 "unexpected HTTP version: {}",
-                request.version
+                request.version()
             )));
         }
 
@@ -279,12 +282,12 @@ impl HandshakeRequestValidator {
         // HTTP デコーダーが origin-form / absolute-form の構文検証と
         // GET メソッドへの authority-form / asterisk-form 拒否を担保しているが、
         // absolute-form のスキームが http/https 以外 (ws/wss 等) の場合は WebSocket 層で拒否する。
-        if !request.uri.starts_with('/') {
-            let lower = request.uri.to_ascii_lowercase();
+        if !request.uri().starts_with('/') {
+            let lower = request.uri().to_ascii_lowercase();
             if !lower.starts_with("http://") && !lower.starts_with("https://") {
                 return Err(Error::handshake_rejected(format!(
                     "invalid Request-URI: must be origin-form or absolute http/https URI: {}",
-                    request.uri
+                    request.uri()
                 )));
             }
         }
@@ -433,7 +436,7 @@ impl HandshakeRequestValidator {
         let origin = request.get_header("Origin").map(String::from);
 
         Ok(Some(ServerHandshakeRequest {
-            path: request.uri.clone(),
+            path: request.uri().to_string(),
             host,
             origin,
             protocols,
@@ -517,11 +520,11 @@ impl HandshakeValidator {
         response: &ResponseHead,
     ) -> Result<Option<HandshakeResponse>, Error> {
         // RFC 6455 Section 4.1: 101 以外の HTTP レスポンスは HTTP procedures に従って処理する
-        if response.status_code != 101 {
+        if response.status_code() != 101 {
             return Err(Error::http_response(crate::error::HttpResponseInfo {
-                status_code: response.status_code,
-                reason_phrase: response.reason_phrase.clone(),
-                headers: response.headers.clone(),
+                status_code: response.status_code(),
+                reason_phrase: response.reason_phrase().to_string(),
+                headers: response.headers().to_vec(),
             }));
         }
 
@@ -642,18 +645,24 @@ impl HandshakeValidator {
 
 /// Sec-WebSocket-Accept の値を計算する
 pub fn calculate_accept(nonce: &[u8; 16]) -> String {
-    let key = STANDARD.encode(nonce);
+    let key = Base64::encode_string(nonce.as_slice());
     calculate_accept_from_key(&key)
 }
 
 pub fn calculate_accept_from_key(key: &str) -> String {
     let combined = format!("{}{}", key, WEBSOCKET_GUID);
+    let hash = sha1_digest(combined.as_bytes());
+    Base64::encode_string(hash.as_ref())
+}
 
-    let mut hasher = Sha1::new();
-    hasher.update(combined.as_bytes());
-    let hash = hasher.finalize();
-
-    STANDARD.encode(hash)
+// RFC 6455 Section 4 の Sec-WebSocket-Accept 計算用 SHA-1 ダイジェスト
+// SHA1_FOR_LEGACY_USE_ONLY という命名だが、RFC 6455 でアルゴリズムが固定されているハンドシェイク用途であり
+// 他に選択肢はないためそのまま使う
+fn sha1_digest(data: &[u8]) -> [u8; 20] {
+    let hash = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY, data);
+    let mut out = [0u8; 20];
+    out.copy_from_slice(hash.as_ref());
+    out
 }
 
 /// RFC 7230 の token ABNF に準拠するかチェックする
@@ -781,8 +790,7 @@ fn validate_extension_entry(ext: &str) -> Result<(), Error> {
 }
 
 fn validate_key(key: &str) -> Result<(), Error> {
-    let decoded = STANDARD
-        .decode(key)
+    let decoded = Base64::decode_vec(key)
         .map_err(|_| Error::handshake_rejected("invalid Sec-WebSocket-Key"))?;
     if decoded.len() != 16 {
         return Err(Error::handshake_rejected("invalid Sec-WebSocket-Key"));

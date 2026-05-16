@@ -406,21 +406,30 @@ impl WebSocketServerConnection {
 
         let accept = calculate_accept_from_key(&request.key);
         let mut response_builder = Response::new(101, "Switching Protocols")
+            .map_err(|e| Error::invalid_input(e.to_string()))?
             .header("Upgrade", "websocket")
+            .map_err(|e| Error::invalid_input(e.to_string()))?
             .header("Connection", "Upgrade")
-            .header("Sec-WebSocket-Accept", &accept);
+            .map_err(|e| Error::invalid_input(e.to_string()))?
+            .header("Sec-WebSocket-Accept", &accept)
+            .map_err(|e| Error::invalid_input(e.to_string()))?;
 
         if let Some(protocol) = &response.protocol {
-            response_builder = response_builder.header("Sec-WebSocket-Protocol", protocol);
+            response_builder = response_builder
+                .header("Sec-WebSocket-Protocol", protocol)
+                .map_err(|e| Error::invalid_input(e.to_string()))?;
         }
 
         if !response.extensions.is_empty() {
             response_builder = response_builder
-                .header("Sec-WebSocket-Extensions", &response.extensions.join(", "));
+                .header("Sec-WebSocket-Extensions", response.extensions.join(", "))
+                .map_err(|e| Error::invalid_input(e.to_string()))?;
         }
 
         for (name, value) in &response.additional_headers {
-            response_builder = response_builder.header(name, value);
+            response_builder = response_builder
+                .header(name, value)
+                .map_err(|e| Error::invalid_input(e.to_string()))?;
         }
 
         // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
@@ -454,7 +463,7 @@ impl WebSocketServerConnection {
 
                     // RFC 7692 Section 7.2.1: 合意した server_max_window_bits で
                     // 圧縮する必要がある。現在の実装では window_bits=15 固定
-                    // (flate2 の制約) のため、server_max_window_bits < 15 は
+                    // (noflate の制約) のため、server_max_window_bits < 15 は
                     // サポートしない
                     if let Some(smwb) = config.server_max_window_bits
                         && smwb < 15
@@ -498,7 +507,9 @@ impl WebSocketServerConnection {
             }
         }
 
-        let encoded = response_builder.encode();
+        let encoded = response_builder
+            .encode()
+            .map_err(|e| Error::invalid_input(e.to_string()))?;
         self.output_queue
             .push_back(ConnectionOutput::SendData(encoded));
 
@@ -548,12 +559,20 @@ impl WebSocketServerConnection {
         self.pending_frame_data.clear();
         self.handshake_validator.reset();
 
-        let mut response = Response::new(status_code, reason).header("Connection", "close");
+        let mut response = Response::new(status_code, reason)
+            .map_err(|e| Error::invalid_input(e.to_string()))?
+            .header("Connection", "close")
+            .map_err(|e| Error::invalid_input(e.to_string()))?;
         for (name, value) in headers {
-            response = response.header(name, value);
+            response = response
+                .header(*name, *value)
+                .map_err(|e| Error::invalid_input(e.to_string()))?;
         }
+        let encoded = response
+            .encode()
+            .map_err(|e| Error::invalid_input(e.to_string()))?;
         self.output_queue
-            .push_back(ConnectionOutput::SendData(response.encode()));
+            .push_back(ConnectionOutput::SendData(encoded));
 
         self.set_state(ConnectionState::Closed);
         self.output_queue
@@ -1120,7 +1139,7 @@ impl WebSocketServerConnection {
                         Ok(client_request) => {
                             // RFC 7692 Section 7.1.2.1: server_max_window_bits が offer された場合、
                             // サーバーは同値以下を応答に含めることで受け入れる。
-                            // flate2 は window_bits=15 固定のため、15 未満の offer はサポートできない。
+                            // noflate は window_bits=15 固定のため、15 未満の offer はサポートできない。
                             if client_request
                                 .server_max_window_bits
                                 .is_some_and(|v| v < 15)

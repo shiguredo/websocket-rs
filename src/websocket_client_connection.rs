@@ -798,7 +798,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                                 }
 
                                 // RFC 7692 Section 7.2.1: 合意した window bits で圧縮する必要がある
-                                // 現在の実装では window_bits=15 固定 (flate2 の制約) のため、
+                                // 現在の実装では window_bits=15 固定 (noflate の制約) のため、
                                 // client_max_window_bits < 15 はサポートしない
                                 if let Some(cmwb) = config.client_max_window_bits
                                     && cmwb < 15

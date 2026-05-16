@@ -6,8 +6,7 @@
 //! - 不正な入力に対する耐性
 //! - タイマー処理の整合性
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
+use base64ct::{Base64, Encoding};
 use proptest::prelude::*;
 use shiguredo_websocket::{
     CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, ErrorKind, Frame,
@@ -20,7 +19,7 @@ fn create_valid_handshake_request(
     protocol: Option<&str>,
     extensions: Option<&str>,
 ) -> Vec<u8> {
-    let encoded_key = STANDARD.encode(key);
+    let encoded_key = Base64::encode_string(key.as_slice());
     let mut request = format!(
         "GET /websocket HTTP/1.1\r\n\
          Host: example.com\r\n\
@@ -1114,7 +1113,7 @@ proptest! {
 
 /// バージョン不一致のハンドシェイクリクエストを生成
 fn create_wrong_version_handshake_request(key: &[u8; 16], version: u8) -> Vec<u8> {
-    let encoded_key = STANDARD.encode(key);
+    let encoded_key = Base64::encode_string(key.as_slice());
     format!(
         "GET /websocket HTTP/1.1\r\n\
          Host: example.com\r\n\

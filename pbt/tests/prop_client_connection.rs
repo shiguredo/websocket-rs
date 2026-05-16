@@ -6,10 +6,8 @@
 //! - フレーム処理の堅牢性
 //! - タイマー処理の整合性
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
+use base64ct::{Base64, Encoding};
 use proptest::prelude::*;
-use sha1::{Digest, Sha1};
 use shiguredo_websocket::{
     ClientConnectionOptions, CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, Frame,
     Opcode, PerMessageDeflateConfig, RandomSource, Timestamp, WebSocketClientConnection,
@@ -17,12 +15,13 @@ use shiguredo_websocket::{
 
 /// nonce から Sec-WebSocket-Accept を計算する
 fn compute_accept(nonce: &[u8; 16]) -> String {
-    let key = STANDARD.encode(nonce);
-    let mut hasher = Sha1::new();
-    hasher.update(key.as_bytes());
-    hasher.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-    let hash = hasher.finalize();
-    STANDARD.encode(hash)
+    let key = Base64::encode_string(nonce.as_slice());
+    let combined = format!("{}258EAFA5-E914-47DA-95CA-C5AB0DC85B11", key);
+    let hash = aws_lc_rs::digest::digest(
+        &aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY,
+        combined.as_bytes(),
+    );
+    Base64::encode_string(hash.as_ref())
 }
 
 /// 有効なハンドシェイクレスポンスを生成
@@ -270,7 +269,7 @@ proptest! {
             .find(|l| l.starts_with("Sec-WebSocket-Key:"))
             .unwrap();
         let key = key_line.split(": ").nth(1).unwrap().trim();
-        let nonce_vec = STANDARD.decode(key).unwrap();
+        let nonce_vec = Base64::decode_vec(key).unwrap();
         let mut nonce = [0u8; 16];
         nonce.copy_from_slice(&nonce_vec);
 

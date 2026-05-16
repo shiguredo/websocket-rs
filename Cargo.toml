@@ -1,27 +1,45 @@
 [package]
 name = "shiguredo_websocket"
-version = "2026.1.0"
-edition = "2024"
-rust-version = "1.88"
-authors = ["Shiguredo Inc."]
-license = "Apache-2.0"
+version = "2026.2.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "WebSocket Library"
+readme = "README.md"
 homepage = "https://github.com/shiguredo/websocket-rs"
 repository = "https://github.com/shiguredo/websocket-rs"
-readme = "README.md"
-include = ["/src/**", "/LICENSE", "/README.md"]
-
-[dependencies]
-base64 = "0.22"
-sha1 = "0.10"
-flate2 = "1.1"
-shiguredo_http11 = "2026.1.1"
+license = "Apache-2.0"
+include = ["/LICENSE", "/README.md", "/src/**"]
 
 [workspace]
 members = [
-    "examples/websocket_client",
-    "examples/websocket_server",
-    "examples/websocket_reverse_proxy",
-    "pbt",
+  "examples/websocket_client",
+  "examples/websocket_reverse_proxy",
+  "examples/websocket_server",
+  "pbt",
 ]
 exclude = ["fuzz"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+
+[workspace.dependencies]
+# WebSocket クライアント/サーバー本体
+shiguredo_websocket = { path = "." }
+
+# 暗号ライブラリ (SHA-1 計算や masking key/nonce 用乱数生成に使用する)
+aws-lc-rs = "1.16"
+# Sec-WebSocket-Key および Sec-WebSocket-Accept の base64 エンコード/デコードに使用する
+base64ct = { version = "1.8", features = ["std"] }
+# WebSocket ハンドシェイクの HTTP リクエスト/レスポンス処理に使用する
+shiguredo_http11 = "2026.5.0"
+
+[dependencies]
+# Sec-WebSocket-Accept の SHA-1 計算に使用する
+aws-lc-rs.workspace = true
+# Sec-WebSocket-Key および Sec-WebSocket-Accept の base64 エンコード/デコードに使用する
+base64ct.workspace = true
+# permessage-deflate 拡張 (RFC 7692) の DEFLATE 圧縮/展開に使用する
+noflate = "0.1"
+# WebSocket ハンドシェイクの HTTP リクエスト/レスポンス処理に使用する
+shiguredo_http11.workspace = true

@@ -62,25 +62,6 @@ proptest! {
         prop_assert_eq!(decompressed, data);
     }
 
-    /// 圧縮レベルのテスト（no_context_takeover でテスト）
-    #[test]
-    fn prop_compression_levels_preserve_data(
-        data in prop::collection::vec(any::<u8>(), 1..1000),
-        level in 0u32..=9
-    ) {
-        let config = PerMessageDeflateConfig::new()
-            .client_no_context_takeover()
-            .server_no_context_takeover();
-        let mut client = PerMessageDeflate::new_client(config.clone());
-        let mut server = PerMessageDeflate::new_server(config);
-        client.set_compression_level(level);
-
-        let compressed = client.compress(&data).unwrap();
-        let decompressed = server.decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE).unwrap();
-
-        prop_assert_eq!(decompressed, data);
-    }
-
     /// 複数回の圧縮・解凍（クライアント/サーバーペア）
     #[test]
     fn prop_multiple_compress_decompress(
