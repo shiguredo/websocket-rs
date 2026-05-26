@@ -11,6 +11,10 @@
 
 ## develop
 
+## 2026.3.0
+
+**リリース日**: 2026-05-26
+
 - [UPDATE] shiguredo_http11 を 2026.6.1 に上げる
   - @voluntas
 
