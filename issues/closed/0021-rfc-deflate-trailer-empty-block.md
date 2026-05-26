@@ -1,6 +1,7 @@
 # 0021: 圧縮時に空 DEFLATE ブロックの確認/追加を行っていない
 
 - Created: 2026-05-14
+- Completed: 2026-05-26
 - Model: deepseek-v4-flash
 
 ## 優先度
@@ -107,3 +108,18 @@ PBT でカバーできないエラーパスをテストする:
 
 - [FIX] RFC 7692 Section 7.2.1 に従い、空 DEFLATE ブロックを必要に応じて追加してから末尾 4 オクテットを除去する
   - @実装者名
+
+## 解決方法
+
+対応不要としてクローズ。
+
+noflate の `sync_flush()` は DEFLATE 仕様上、常に空 stored ブロック
+(BFINAL=0, BTYPE=00, LEN=0, NLEN=0xFFFF) を末尾に出力する。
+これは sync flush の定義そのものであり、実装依存ではない。
+noflate のソースコード (`encode.rs` の `sync_flush` → `emit_stored_chunk(&[], false)`)
+およびテスト (`sync_flush_marker_is_empty_stored_block`) で確認済み。
+
+したがって、RFC 7692 Section 7.2.1 Step 1 の「空 DEFLATE ブロックで終わっていなければ
+追加する」条件は `sync_flush()` 使用時に常に満たされており、明示的なチェック/追加コードは
+不要。提案された修正は到達不可能なコードパスを追加するだけであり、CLAUDE.md の
+「到達不可能なコード → デッドコードとして削除する」方針に反する。
