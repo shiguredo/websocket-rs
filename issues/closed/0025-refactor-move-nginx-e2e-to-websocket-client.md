@@ -2,6 +2,7 @@
 
 - Priority: High
 - Created: 2026-05-26
+- Completed: 2026-05-26
 - Model: Opus 4.7
 - Branch: feature/refactor-nginx-e2e-location
 
@@ -81,3 +82,22 @@ testcontainers = { version = "0.27", default-features = false, features = ["aws-
 - CI の macOS 除外が正しく動作する
 
 ## 解決方法
+
+設計方針どおりに移動を実施した。
+
+### 移動内容
+
+- echo サーバー: `websocket_e2e_nginx/src/lib.rs` → `websocket_client/tests/helpers/echo_server.rs`
+- nginx ヘルパー: `websocket_e2e_nginx/tests/helpers/mod.rs` → `websocket_client/tests/helpers/nginx.rs`
+- テスト本体: `websocket_e2e_nginx/tests/nginx_websocket.rs` → `websocket_client/tests/nginx_websocket.rs`
+- helpers/mod.rs を新規作成し echo_server と nginx をサブモジュールとして整理
+
+### 削除
+
+- `examples/websocket_e2e_nginx/` ディレクトリを完全に削除
+- `Cargo.toml` の workspace members から `websocket_e2e_nginx` を削除
+
+### その他の変更
+
+- `websocket_client/Cargo.toml` に testcontainers を dev-dependency として追加
+- CI の macOS 除外対象を `websocket_e2e_nginx` から `websocket_client` に変更

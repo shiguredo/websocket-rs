@@ -18,6 +18,8 @@
 
 - [ADD] nginx + testcontainers を使った WebSocket e2e テストを追加する
   - @voluntas
+- [UPDATE] nginx e2e テストを websocket_client/tests/ に移動する
+  - @voluntas
 
 ## 2026.2.0
 
