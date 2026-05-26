@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-05-26
+- Completed: 2026-05-26
 - Polished: 2026-05-26
 - Model: Opus 4.7
 - Branch: feature/add-nginx-e2e-test
@@ -166,3 +167,25 @@ testcontainers = { version = "0.27", default-features = false, features = ["aws-
 - CI の macOS ステップで `websocket_e2e_nginx` を除外する修正が入っている
 
 ## 解決方法
+
+設計方針どおりに `examples/websocket_e2e_nginx/` を新規 workspace メンバーとして追加した。
+
+### 追加したファイル
+
+- `examples/websocket_e2e_nginx/Cargo.toml`: クレート定義
+- `examples/websocket_e2e_nginx/src/lib.rs`: Sans I/O パターンの echo サーバー (`spawn_echo_server`)
+- `examples/websocket_e2e_nginx/tests/helpers/mod.rs`: testcontainers ベースの nginx WebSocket プロキシヘルパー
+- `examples/websocket_e2e_nginx/tests/nginx_websocket.rs`: 5 つの e2e テスト
+
+### 変更したファイル
+
+- `Cargo.toml`: workspace members に `examples/websocket_e2e_nginx` を追加
+- `.github/workflows/ci.yml`: macOS ランナーで Docker を必要とする e2e テストクレートを除外
+
+### テストケース
+
+- テキストメッセージのエコー (nginx 経由)
+- バイナリメッセージのエコー (nginx 経由)
+- 大きなメッセージのエコー (nginx 経由、128 KiB)
+- Ping/Pong の往復 (nginx 経由)
+- Close ハンドシェイク (nginx 経由)

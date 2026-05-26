@@ -13,6 +13,7 @@ include = ["/LICENSE", "/README.md", "/src/**"]
 [workspace]
 members = [
   "examples/websocket_client",
+  "examples/websocket_e2e_nginx",
   "examples/websocket_reverse_proxy",
   "examples/websocket_server",
   "pbt",
