@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use crate::Timestamp;
 use crate::deflate::PerMessageDeflate;
 use crate::error::Error;
-use crate::websocket_close::CloseCode;
+use crate::websocket_close::{CloseCode, truncate_reason};
 use crate::websocket_extension::{Extension, PerMessageDeflateConfig};
 use crate::websocket_frame::{Frame, FrameDecoder};
 use crate::websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};
@@ -630,22 +630,22 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
     /// 内部エラー処理用のクローズ
     ///
-    /// 理由が長すぎる場合は切り詰める
-    fn close_internal(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
+    /// 理由が長すぎる場合は UTF-8 文字境界で切り詰める
+    fn close_internal(&mut self, code: CloseCode, reason: &str) {
         if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
-            return Ok(());
+            return;
         }
 
         if !self.close_sent {
-            // 理由が長すぎる場合は切り詰める
-            let truncated_reason = if reason.len() > 123 {
-                &reason[..123]
-            } else {
-                reason
-            };
-            let frame = Frame::close(Some(code.as_u16()), truncated_reason)
-                .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").unwrap());
-            self.send_frame(frame)?;
+            // RFC 6455 Section 5.5 / 5.5.1: コントロールフレームのペイロードは 125 バイト以下、
+            // Close フレームは先頭 2 バイトが status code のため reason は 123 バイト以下
+            let truncated = truncate_reason(reason, 123);
+            let frame = Frame::close(Some(code.as_u16()), truncated).unwrap_or_else(|_| {
+                Frame::close(Some(code.as_u16()), "")
+                    .expect("empty reason close frame must always succeed")
+            });
+            // エラー処理パスでの Close フレーム送信はベストエフォート
+            let _ = self.send_frame(frame);
             self.close_sent = true;
 
             // クローズタイムアウト設定
@@ -656,8 +656,6 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
             self.set_state(ConnectionState::Closing);
         }
-
-        Ok(())
     }
 
     fn process_handshake(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
@@ -856,7 +854,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 Err(e) => {
                     // RFC 6455 Section 7.1.7: 接続確立後のプロトコル違反では
                     // Close フレームを送信してから接続を終了する
-                    self.close_internal(CloseCode::PROTOCOL_ERROR, "frame decode error")?;
+                    self.close_internal(CloseCode::PROTOCOL_ERROR, "frame decode error");
                     return Err(e);
                 }
             }
@@ -872,7 +870,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     ) -> Result<(), Error> {
         // RFC 6455 Section 5.1: サーバーからのフレームはマスクしてはならない
         if decoded.masked {
-            self.close_internal(CloseCode::PROTOCOL_ERROR, "masked server frame")?;
+            self.close_internal(CloseCode::PROTOCOL_ERROR, "masked server frame");
             return Err(Error::protocol_violation("masked server frame"));
         }
         self.handle_frame(decoded.frame, now)
@@ -881,12 +879,12 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     fn handle_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
         // フレームサイズチェック（コントロールフレームは RFC 6455 で 125 バイト以下が保証済み）
         if !frame.opcode.is_control() && frame.payload.len() > self.options.max_frame_size {
-            self.close_internal(CloseCode::MESSAGE_TOO_BIG, "frame payload too large")?;
+            self.close_internal(CloseCode::MESSAGE_TOO_BIG, "frame payload too large");
             return Err(Error::protocol_violation("frame payload too large"));
         }
         // RSV ビットチェック（permessage-deflate 以外は禁止）
         if frame.rsv2 || frame.rsv3 {
-            self.close_internal(CloseCode::PROTOCOL_ERROR, "reserved bits set")?;
+            self.close_internal(CloseCode::PROTOCOL_ERROR, "reserved bits set");
             return Err(Error::protocol_violation("reserved bits set"));
         }
         // RFC 7692 Section 6: RSV1 検証
@@ -895,7 +893,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 self.close_internal(
                     CloseCode::PROTOCOL_ERROR,
                     "rsv1 set without permessage-deflate",
-                )?;
+                );
                 return Err(Error::protocol_violation(
                     "rsv1 set without permessage-deflate",
                 ));
@@ -905,7 +903,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 self.close_internal(
                     CloseCode::PROTOCOL_ERROR,
                     "rsv1 must not be set on control frames",
-                )?;
+                );
                 return Err(Error::protocol_violation(
                     "rsv1 must not be set on control frames",
                 ));
@@ -915,7 +913,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 self.close_internal(
                     CloseCode::PROTOCOL_ERROR,
                     "rsv1 must not be set on continuation frames",
-                )?;
+                );
                 return Err(Error::protocol_violation(
                     "rsv1 must not be set on continuation frames",
                 ));
@@ -939,7 +937,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             self.close_internal(
                 CloseCode::PROTOCOL_ERROR,
                 "new message started before previous completed",
-            )?;
+            );
             return Err(Error::protocol_violation(
                 "new message started before previous completed",
             ));
@@ -952,7 +950,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         } else {
             // フラグメント開始 (RSV1 は最初のフレームにのみ設定される)
             if frame.payload.len() > self.options.max_message_size {
-                self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large")?;
+                self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large");
                 return Err(Error::protocol_violation("message too large"));
             }
             self.fragment_buffer
@@ -966,7 +964,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             self.close_internal(
                 CloseCode::PROTOCOL_ERROR,
                 "continuation frame without initial frame",
-            )?;
+            );
             return Err(Error::protocol_violation(
                 "continuation frame without initial frame",
             ));
@@ -976,7 +974,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
         // フラグメント累積サイズチェック
         if self.fragment_buffer.len() > self.options.max_message_size {
-            self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large")?;
+            self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large");
             return Err(Error::protocol_violation("message too large"));
         }
 
@@ -1002,7 +1000,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 self.close_internal(
                     CloseCode::PROTOCOL_ERROR,
                     "received compressed frame without permessage-deflate",
-                )?;
+                );
                 Err(Error::protocol_violation(
                     "received compressed frame without permessage-deflate",
                 ))
@@ -1030,7 +1028,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                         "invalid UTF-8 in text message: {}",
                         e
                     )));
-                    self.close_internal(CloseCode::INVALID_PAYLOAD, "invalid UTF-8")?;
+                    self.close_internal(CloseCode::INVALID_PAYLOAD, "invalid UTF-8");
                     return Err(Error::protocol_violation("invalid UTF-8 in text message"));
                 }
             },
@@ -1051,7 +1049,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             self.close_internal(
                 CloseCode::PROTOCOL_ERROR,
                 "close frame payload length must be 0 or >= 2",
-            )?;
+            );
             return Err(Error::protocol_violation(
                 "close frame payload length must be 0 or >= 2",
             ));
@@ -1066,7 +1064,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                 self.close_internal(
                     CloseCode::PROTOCOL_ERROR,
                     &format!("invalid close code: {}", code_val),
-                )?;
+                );
                 return Err(Error::protocol_violation(format!(
                     "invalid close code: {}",
                     code_val
@@ -1080,7 +1078,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                     self.close_internal(
                         CloseCode::PROTOCOL_ERROR,
                         "close frame reason is not valid UTF-8",
-                    )?;
+                    );
                     return Err(Error::protocol_violation(
                         "close frame reason is not valid UTF-8",
                     ));

@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 
 use crate::deflate::PerMessageDeflate;
 use crate::error::{Error, ErrorKind};
-use crate::websocket_close::CloseCode;
+use crate::websocket_close::{CloseCode, truncate_reason};
 use crate::websocket_extension::{Extension, PerMessageDeflateConfig};
 use crate::websocket_frame::{DecodedFrame, Frame, FrameDecoder};
 use crate::websocket_handshake::{
@@ -684,21 +684,20 @@ impl WebSocketServerConnection {
     /// 内部エラー処理用のクローズ
     ///
     /// プロトコル違反などで自動的にクローズする際に使用。
-    /// 理由が長すぎる場合は切り詰める。
+    /// 理由が長すぎる場合は UTF-8 文字境界で切り詰める。
     fn close_internal(&mut self, code: CloseCode, reason: &str) {
         if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
             return;
         }
 
         if !self.close_sent {
-            // 理由が長すぎる場合は切り詰める
-            let truncated_reason = if reason.len() > 123 {
-                &reason[..123]
-            } else {
-                reason
-            };
-            let frame = Frame::close(Some(code.as_u16()), truncated_reason)
-                .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").unwrap());
+            // RFC 6455 Section 5.5 / 5.5.1: コントロールフレームのペイロードは 125 バイト以下、
+            // Close フレームは先頭 2 バイトが status code のため reason は 123 バイト以下
+            let truncated = truncate_reason(reason, 123);
+            let frame = Frame::close(Some(code.as_u16()), truncated).unwrap_or_else(|_| {
+                Frame::close(Some(code.as_u16()), "")
+                    .expect("empty reason close frame must always succeed")
+            });
             self.send_frame(frame);
             self.close_sent = true;
 
