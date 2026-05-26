@@ -104,7 +104,6 @@ impl Frame {
     }
 
     /// フレームをエンコードする（マスキングなし、サーバー用）
-    #[allow(dead_code)]
     pub fn encode_unmasked(&self) -> Vec<u8> {
         self.encode_internal(false, [0; 4])
     }

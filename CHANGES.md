@@ -16,6 +16,11 @@
 - [FIX] close_internal の reason 切り詰めが UTF-8 境界を無視する問題を修正する
   - @voluntas
 
+### misc
+
+- [UPDATE] クライアント / サーバー間のフレーム処理ロジックを SharedConnectionState に共通化する
+  - @voluntas
+
 ## 2026.3.0
 
 **リリース日**: 2026-05-26

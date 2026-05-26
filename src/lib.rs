@@ -75,6 +75,8 @@ mod error;
 mod time;
 mod websocket_client_connection;
 mod websocket_close;
+mod websocket_connection_shared;
+mod websocket_connection_types;
 mod websocket_extension;
 mod websocket_frame;
 mod websocket_handshake;
@@ -85,11 +87,11 @@ pub use buf::{ByteSliceExt, VecExt};
 pub use deflate::{Compressor, Decompressor, PerMessageDeflate};
 pub use error::{Error, ErrorKind, HttpResponseInfo};
 pub use time::Timestamp;
-pub use websocket_client_connection::{
-    ClientConnectionOptions, ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource,
-    TimerId, WebSocketClientConnection,
-};
+pub use websocket_client_connection::{ClientConnectionOptions, WebSocketClientConnection};
 pub use websocket_close::{CloseCode, truncate_reason};
+pub use websocket_connection_types::{
+    ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource, TimerId,
+};
 pub use websocket_extension::{Extension, ExtensionParam, PerMessageDeflateConfig};
 pub use websocket_frame::{Frame, FrameDecoder};
 pub use websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};
