@@ -142,13 +142,13 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "shiguredo_http11"
-version = "2026.4.0"
+version = "2026.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd3c0c4338520d94d8bb9a89d64b862f743fe5c5eded2300d4effaad64b0217b"
+checksum = "521929c2893005420ccee04aada685000c967cbcae36cd46117b40bf5495e5ab"
 
 [[package]]
 name = "shiguredo_websocket"
-version = "2026.2.0-canary.0"
+version = "2026.2.0"
 dependencies = [
  "aws-lc-rs",
  "base64ct",
