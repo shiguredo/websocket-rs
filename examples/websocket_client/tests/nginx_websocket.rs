@@ -14,7 +14,6 @@ use shiguredo_websocket::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use websocket_e2e_nginx::spawn_echo_server;
 
 struct SecureRandom;
 
@@ -191,8 +190,8 @@ async fn flush_output(stream: &mut TcpStream, ws: &mut WebSocketClientConnection
 #[tokio::test]
 async fn テキストメッセージのエコー() {
     helpers::ensure_docker();
-    let echo_port = spawn_echo_server().await;
-    let nginx = helpers::spawn_nginx_ws_proxy(echo_port).await;
+    let echo_port = helpers::echo_server::spawn().await;
+    let nginx = helpers::nginx::spawn_ws_proxy(echo_port).await;
     let (mut stream, mut ws) = connect_via_nginx(nginx.port).await;
 
     let received = send_and_recv_text(&mut stream, &mut ws, "Hello, WebSocket!").await;
@@ -202,8 +201,8 @@ async fn テキストメッセージのエコー() {
 #[tokio::test]
 async fn バイナリメッセージのエコー() {
     helpers::ensure_docker();
-    let echo_port = spawn_echo_server().await;
-    let nginx = helpers::spawn_nginx_ws_proxy(echo_port).await;
+    let echo_port = helpers::echo_server::spawn().await;
+    let nginx = helpers::nginx::spawn_ws_proxy(echo_port).await;
     let (mut stream, mut ws) = connect_via_nginx(nginx.port).await;
 
     let data = vec![0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD];
@@ -214,8 +213,8 @@ async fn バイナリメッセージのエコー() {
 #[tokio::test]
 async fn 大きなメッセージのエコー() {
     helpers::ensure_docker();
-    let echo_port = spawn_echo_server().await;
-    let nginx = helpers::spawn_nginx_ws_proxy(echo_port).await;
+    let echo_port = helpers::echo_server::spawn().await;
+    let nginx = helpers::nginx::spawn_ws_proxy(echo_port).await;
     let (mut stream, mut ws) = connect_via_nginx(nginx.port).await;
 
     // 128 KiB: 16bit 拡張ペイロード長の上限 (65535 バイト) を超え、
@@ -228,8 +227,8 @@ async fn 大きなメッセージのエコー() {
 #[tokio::test]
 async fn ping_pong_の往復() {
     helpers::ensure_docker();
-    let echo_port = spawn_echo_server().await;
-    let nginx = helpers::spawn_nginx_ws_proxy(echo_port).await;
+    let echo_port = helpers::echo_server::spawn().await;
+    let nginx = helpers::nginx::spawn_ws_proxy(echo_port).await;
     let (mut stream, mut ws) = connect_via_nginx(nginx.port).await;
 
     let ping_data = b"ping-test";
@@ -278,8 +277,8 @@ async fn ping_pong_の往復() {
 #[tokio::test]
 async fn close_ハンドシェイク() {
     helpers::ensure_docker();
-    let echo_port = spawn_echo_server().await;
-    let nginx = helpers::spawn_nginx_ws_proxy(echo_port).await;
+    let echo_port = helpers::echo_server::spawn().await;
+    let nginx = helpers::nginx::spawn_ws_proxy(echo_port).await;
     let (mut stream, mut ws) = connect_via_nginx(nginx.port).await;
 
     ws.close(CloseCode::NORMAL, "")

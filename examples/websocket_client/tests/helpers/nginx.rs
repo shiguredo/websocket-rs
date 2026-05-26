@@ -1,39 +1,13 @@
-//! testcontainers ベース e2e テストの共通ヘルパー
-//!
-//! - Docker daemon が起動していなければ `ensure_docker()` で即 panic
-//! - `nginx:1.27-alpine` を WebSocket プロキシとして起動する
-//! - コンテナは `ContainerAsync` の Drop で自動停止する
-
-use std::process::Stdio;
+//! testcontainers ベースの nginx WebSocket プロキシヘルパー
 
 use testcontainers::core::{Host, IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 
-/// 起動完了とみなす nginx のログメッセージ
 const NGINX_READY_LOG: &str = "start worker processes";
-
-/// nginx コンテナイメージ
 const NGINX_IMAGE_NAME: &str = "nginx";
 const NGINX_IMAGE_TAG: &str = "1.27-alpine";
-
-/// nginx コンテナがリッスンする内部ポート
 const NGINX_INTERNAL_PORT: u16 = 80;
-
-/// Docker daemon が応答するか確認する。無ければ panic で fail-fast する。
-pub fn ensure_docker() {
-    let status = std::process::Command::new("docker")
-        .arg("version")
-        .arg("--format")
-        .arg("{{.Server.Version}}")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    match status {
-        Ok(s) if s.success() => {}
-        _ => panic!("these integration tests require a running Docker daemon"),
-    }
-}
 
 /// 起動済み nginx コンテナへのハンドル
 pub struct NginxHandle {
@@ -42,7 +16,7 @@ pub struct NginxHandle {
 }
 
 /// echo サーバーへの WebSocket プロキシとして nginx を起動する
-pub async fn spawn_nginx_ws_proxy(echo_server_port: u16) -> NginxHandle {
+pub async fn spawn_ws_proxy(echo_server_port: u16) -> NginxHandle {
     let conf = format!(
         r#"server {{
     listen 80;

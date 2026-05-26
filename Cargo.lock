@@ -2555,18 +2555,9 @@ dependencies = [
  "rustls-platform-verifier",
  "shiguredo_http11",
  "shiguredo_websocket",
- "tokio",
- "tokio-rustls",
-]
-
-[[package]]
-name = "websocket_e2e_nginx"
-version = "0.0.0"
-dependencies = [
- "aws-lc-rs",
- "shiguredo_websocket",
  "testcontainers",
  "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]
