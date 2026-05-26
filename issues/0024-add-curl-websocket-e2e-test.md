@@ -40,28 +40,12 @@ nginx を経由しない。curl テストの目的は「外部クライアント
 
 ### プロジェクト構成
 
-`examples/websocket_e2e_curl/` を新規 workspace メンバーとして追加する。
-
-ルート `Cargo.toml` の変更:
-
-```toml
-[workspace]
-members = [
-  "examples/websocket_client",
-  "examples/websocket_e2e_curl",  # 追加
-  "examples/websocket_e2e_nginx",
-  "examples/websocket_reverse_proxy",
-  "examples/websocket_server",
-  "pbt",
-]
-```
+`examples/websocket_server/tests/` に e2e テストを追加する。curl は外部クライアントとしてサーバーに接続するものであり、`websocket_server` のテストとして配置するのが自然。
 
 新規作成ファイル:
 
-- `examples/websocket_e2e_curl/Cargo.toml`
-- `examples/websocket_e2e_curl/src/lib.rs` (echo サーバーとヘルパー関数)
-- `examples/websocket_e2e_curl/tests/helpers/mod.rs` (Docker / curl ヘルパー)
-- `examples/websocket_e2e_curl/tests/curl_websocket.rs` (テスト本体)
+- `examples/websocket_server/tests/helpers/mod.rs` (echo サーバーと Docker / curl ヘルパー)
+- `examples/websocket_server/tests/curl_websocket.rs` (テスト本体)
 
 ### echo サーバー
 
@@ -130,24 +114,7 @@ let mut child = std::process::Command::new("docker")
 
 ### 依存関係
 
-`examples/websocket_e2e_curl/Cargo.toml`:
-
-```toml
-[package]
-name = "websocket_e2e_curl"
-version = "0.0.0"
-edition.workspace = true
-rust-version.workspace = true
-publish = false
-
-[dependencies]
-# WebSocket サーバー本体 (echo サーバー用)
-shiguredo_websocket.workspace = true
-# 非同期ランタイム (echo サーバーの TCP 処理に使用する)
-tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
-```
-
-`aws-lc-rs` は不要（echo サーバーは `WebSocketServerConnection` のみを使い、`RandomSource` は不要）。
+`examples/websocket_server/Cargo.toml` の既存依存に加え、追加の依存は不要。websocket_server は既に `shiguredo_websocket` と `tokio` に依存しており、echo サーバーの実装に必要な機能は揃っている。curl は `std::process::Command` で Docker 経由で実行するため外部クレートの追加も不要。
 
 ### issue 0023 との関係
 
@@ -158,12 +125,12 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "net", "io-
 
 ### CI への影響
 
-`cargo test --workspace` に含まれるため、Docker が必要になる。macOS ランナーには Docker がないため、0023 と同様に除外が必要:
+`cargo test --workspace` に含まれるため、Docker が必要になる。macOS ランナーには Docker がないため除外が必要。issue 0025 の refactor で websocket_client が macOS 除外対象になっている前提:
 
 ```yaml
 - run: cargo test --workspace
   if: runner.os != 'macOS'
-- run: cargo test --workspace --exclude websocket_e2e_nginx --exclude websocket_e2e_curl
+- run: cargo test --workspace --exclude websocket_client --exclude websocket_server
   if: runner.os == 'macOS'
 ```
 
@@ -177,10 +144,10 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "net", "io-
 
 ## 完了条件
 
-- `examples/websocket_e2e_curl/` が workspace メンバーとして追加されている
-- Docker が利用可能な環境で `cargo test -p websocket_e2e_curl` が全て通る
+- `examples/websocket_server/tests/curl_websocket.rs` にテストが存在する
+- Docker が利用可能な環境で `cargo test -p websocket_server` が全て通る
 - Docker が利用不可の場合は即座に失敗する (`#[ignore]` は使わない)
 - ハンドシェイク検証とテキストエコーのテストが存在する
-- CI の macOS ステップで `websocket_e2e_curl` を除外する修正が入っている
+- CI の macOS ステップで `websocket_server` を除外する修正が入っている
 
 ## 解決方法
