@@ -26,15 +26,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "fuzz_http_response"
-path = "fuzz_targets/fuzz_http_response.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "fuzz_extension_parse_strict"
-path = "fuzz_targets/fuzz_extension_parse_strict.rs"
+name = "fuzz_extension_parse"
+path = "fuzz_targets/fuzz_extension_parse.rs"
 test = false
 doc = false
 bench = false
