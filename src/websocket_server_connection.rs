@@ -16,7 +16,7 @@ use crate::websocket_handshake::{
 };
 use crate::websocket_opcode::Opcode;
 use crate::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};
-use shiguredo_http11::Response;
+use shiguredo_http11::{HeaderName, Response};
 
 /// ハンドシェイク受理待ち中の最大バッファサイズ（1MB）
 const MAX_PENDING_FRAME_DATA: usize = 1024 * 1024;
@@ -427,8 +427,10 @@ impl WebSocketServerConnection {
         }
 
         for (name, value) in &response.additional_headers {
+            let header_name =
+                HeaderName::new(name).map_err(|e| Error::invalid_input(e.to_string()))?;
             response_builder = response_builder
-                .header(name, value)
+                .header(header_name, value)
                 .map_err(|e| Error::invalid_input(e.to_string()))?;
         }
 
@@ -564,8 +566,10 @@ impl WebSocketServerConnection {
             .header("Connection", "close")
             .map_err(|e| Error::invalid_input(e.to_string()))?;
         for (name, value) in headers {
+            let header_name =
+                HeaderName::new(*name).map_err(|e| Error::invalid_input(e.to_string()))?;
             response = response
-                .header(*name, *value)
+                .header(header_name, *value)
                 .map_err(|e| Error::invalid_input(e.to_string()))?;
         }
         let encoded = response

@@ -11,6 +11,9 @@
 
 ## develop
 
+- [UPDATE] shiguredo_http11 を 2026.6.1 に上げる
+  - @voluntas
+
 ### misc
 
 ## 2026.2.0
@@ -30,7 +33,7 @@
 - [CHANGE] `Decompressor::reset` を削除する
   - 内部処理に統合する
   - @voluntas
-- [UPDATE] shiguredo_http11 を 2026.5 に上げる
+- [UPDATE] shiguredo_http11 を 2026.5.0 に上げる
   - @voluntas
 
 ### misc

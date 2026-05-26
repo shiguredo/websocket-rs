@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use crate::error::Error;
 use base64ct::{Base64, Encoding};
-use shiguredo_http11::{HttpHead, Request, RequestDecoder, ResponseDecoder, ResponseHead};
+use shiguredo_http11::{
+    HeaderName, HttpHead, Request, RequestDecoder, ResponseDecoder, ResponseHead,
+};
 
 /// WebSocket ハンドシェイクで使用する固定 GUID (RFC 6455 Section 1.3)
 const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -146,7 +148,7 @@ impl HandshakeRequest {
             }
 
             for (name, value) in &self.additional_headers {
-                request = request.header(name, value)?;
+                request = request.header(HeaderName::new(name)?, value)?;
             }
 
             request.encode()
@@ -524,7 +526,11 @@ impl HandshakeValidator {
             return Err(Error::http_response(crate::error::HttpResponseInfo {
                 status_code: response.status_code(),
                 reason_phrase: response.reason_phrase().to_string(),
-                headers: response.headers().to_vec(),
+                headers: response
+                    .headers()
+                    .iter()
+                    .map(|(name, value)| (name.as_str().to_string(), value.clone()))
+                    .collect(),
             }));
         }
 
