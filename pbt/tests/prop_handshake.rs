@@ -1235,7 +1235,7 @@ proptest! {
 }
 
 // =============================================================================
-// RFC 6455 Section 11.3.2: HTTP レスポンス重複ヘッダーテスト
+// RFC 6455 Section 4.2.2 項目 6: HTTP レスポンス複数行 Sec-WebSocket-Extensions 統合テスト
 // =============================================================================
 
 proptest! {
@@ -1429,7 +1429,7 @@ proptest! {
 proptest! {
     /// HandshakeRequest::build で予約済みヘッダーを追加するとエラーになる
     ///
-    /// RFC 6455 Section 4.1: 予約済みヘッダーは MUST NOT appear more than once
+    /// RFC 6455 Section 4.1: クライアントハンドシェイクの各ヘッダーは MUST contain 1 回のみ
     #[test]
     fn prop_build_rejects_reserved_header(
         reserved in prop::sample::select(vec![

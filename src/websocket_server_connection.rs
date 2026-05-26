@@ -291,7 +291,7 @@ impl WebSocketServerConnection {
             }
         }
 
-        // RFC 7692 Section 7 / 8.4: サーバーは offer から 1 つの permessage-deflate を選んで返す。
+        // RFC 7692 Section 7 / 7.1.3: サーバーは offer から 1 つの permessage-deflate を選んで返す。
         // 複数の permessage-deflate 要素を含むレスポンスは不正。
         {
             let pmce_count: usize = response

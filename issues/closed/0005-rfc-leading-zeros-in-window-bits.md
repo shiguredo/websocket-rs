@@ -10,7 +10,7 @@ RFC 7692 Section 7.1.2.1, 7.1.2.2:
 
 現実装は `value.parse::<u8>()` のみで `"08"` や `"015"` を受理してしまう。
 
-RFC 7692 Section 7.2 より、不正値を含む offer はサーバーが MUST decline し、
+RFC 7692 Section 7 より、不正値を含む offer はサーバーが MUST decline し、
 不正値を含む response はクライアントが MUST Fail the WebSocket Connection。
 
 ## 再現手順

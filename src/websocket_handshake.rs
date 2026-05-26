@@ -335,7 +335,7 @@ impl HandshakeRequestValidator {
             }
         }
 
-        // RFC 6455 Section 4.2.1: Sec-WebSocket-Version は単一値ヘッダー
+        // RFC 6455 Section 4.2.1 / Section 11.3.5: Sec-WebSocket-Version は単一値ヘッダー
         {
             let version_values = request.get_headers("Sec-WebSocket-Version");
             if version_values.len() > 1 {
@@ -352,7 +352,7 @@ impl HandshakeRequestValidator {
             None => return Err(Error::handshake_rejected("missing Sec-WebSocket-Version")),
         }
 
-        // RFC 6455 Section 4.2.1: Sec-WebSocket-Key は単一値ヘッダー
+        // RFC 6455 Section 4.1 / Section 11.3.1: Sec-WebSocket-Key は単一値ヘッダー
         {
             let key_values = request.get_headers("Sec-WebSocket-Key");
             if key_values.len() > 1 {
@@ -367,7 +367,7 @@ impl HandshakeRequestValidator {
             .to_string();
         validate_key(&key)?;
 
-        // RFC 6455 Section 4.2.1 step 10:
+        // RFC 6455 Section 4.1 item 10:
         // Sec-WebSocket-Protocol の各要素は token (1*tchar) でなければならない (MUST)
         // すべての要素が一意でなければならない (MUST)
         // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合はリスト値として統合する
@@ -411,7 +411,7 @@ impl HandshakeRequestValidator {
         let extensions = {
             let values = request.get_headers("Sec-WebSocket-Extensions");
             // TODO: issues/closed/0003-rfc-quoted-string-split-in-extensions.md
-            // RFC 7230 Section 7 の #rule に準拠した quoted-string 対応パーサーへの置き換え
+            // RFC 9110 Section 5.6.1 の #rule に準拠した quoted-string 対応パーサーへの置き換え
             // 現在は ',' で単純分割しており、extension-param 値が quoted-string の場合に誤分割する。
             // permessage-deflate (RFC 7692) のパラメータはすべて token のため実害はないが、
             // 将来の拡張実装時には stateful パーサーへの置き換えが必要。
@@ -572,7 +572,7 @@ impl HandshakeValidator {
             }
         }
 
-        // RFC 6455 Section 4.2.2: Sec-WebSocket-Accept は単一値ヘッダー
+        // RFC 6455 Section 4.2.2 / Section 11.3.3: Sec-WebSocket-Accept は単一値ヘッダー
         {
             let accept_values = response.get_headers("Sec-WebSocket-Accept");
             if accept_values.len() > 1 {
@@ -597,7 +597,7 @@ impl HandshakeValidator {
             }
         }
 
-        // RFC 6455 Section 4.2.2: Sec-WebSocket-Protocol は単一値ヘッダー
+        // RFC 6455 Section 4.2.2 / Section 11.3.4: Sec-WebSocket-Protocol は単一値ヘッダー
         {
             let protocol_values = response.get_headers("Sec-WebSocket-Protocol");
             if protocol_values.len() > 1 {
@@ -614,7 +614,7 @@ impl HandshakeValidator {
         // RFC 6455 Section 4.2.2 項目 6: 複数行の Sec-WebSocket-Extensions を許容し統合する
         let extension_values = response.get_headers("Sec-WebSocket-Extensions");
         // TODO: issues/closed/0003-rfc-quoted-string-split-in-extensions.md
-        // RFC 7230 Section 7 の #rule に準拠した quoted-string 対応パーサーへの置き換え
+        // RFC 9110 Section 5.6.1 の #rule に準拠した quoted-string 対応パーサーへの置き換え
         // 現在は ',' で単純分割しており、extension-param 値が quoted-string の場合に誤分割する。
         // permessage-deflate (RFC 7692) のパラメータはすべて token のため実害はないが、
         // 将来の拡張実装時には stateful パーサーへの置き換えが必要。
@@ -665,7 +665,7 @@ fn sha1_digest(data: &[u8]) -> [u8; 20] {
     out
 }
 
-/// RFC 7230 の token ABNF に準拠するかチェックする
+/// RFC 9110 Section 5.6.2 の token ABNF に準拠するかチェックする
 ///
 /// token = 1*tchar
 /// tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /

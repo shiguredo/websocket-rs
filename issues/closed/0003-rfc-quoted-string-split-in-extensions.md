@@ -31,7 +31,7 @@ extension-param = token [ "=" ( token / ( DQUOTE *QDTEXT DQUOTE ) ) ]
 
 `extension-param` の値として `quoted-string` が許容されており、
 その中に `,` や `;` を含む可能性がある。
-`1#extension` は RFC 7230 の `#rule` (list rule) であり、
+`1#extension` は RFC 9110 Section 5.6.1 の `#rule` (list rule) であり、
 quoted-string を考慮した stateful な解析が必要。
 
 ## 現在の挙動
@@ -52,15 +52,15 @@ quoted-string は使用しない。実害は限定的。
 
 ## 保留理由
 
-RFC 7230 `#rule` に準拠した stateful パーサーの実装が必要で、コストが高い。
+RFC 9110 Section 5.6.1 の `#rule` に準拠した stateful パーサーの実装が必要で、コストが高い。
 permessage-deflate 以外の拡張をサポートする時点で対応する。
 
 ## 修正方針
 
-`,` 単純分割を廃止し、RFC 7230 Section 7 の list-rule に準拠した
+`,` 単純分割を廃止し、RFC 9110 Section 5.6.1 の list-rule に準拠した
 quoted-string を考慮した extension-list パーサーを実装する。
 
-参考: RFC 7230 Section 7 "ABNF List Extension: #rule"
+参考: RFC 9110 Section 5.6.1 "Lists (#rule ABNF Extension)"
 
 ## 対応内容 (2026-02-26)
 

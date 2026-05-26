@@ -10,7 +10,7 @@ use shiguredo_websocket::PerMessageDeflateConfig;
 
 proptest! {
     // =========================================================================
-    // RFC 7692 Section 7.1: Extension Negotiation
+    // RFC 7692 Section 7.1: Extension Parameters
     // =========================================================================
 
     /// window_bits は 8-15 の範囲

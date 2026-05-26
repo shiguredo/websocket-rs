@@ -1023,7 +1023,7 @@ proptest! {
 proptest! {
     /// accept_handshake で予約済みヘッダーを additional_headers に渡すとエラーになる
     ///
-    /// RFC 6455 Section 4.2.2: 予約済みヘッダーは MUST NOT appear more than once
+    /// RFC 6455 Section 4.2.2: サーバーハンドシェイクの各ヘッダーは 1 回のみ指定可能
     #[test]
     fn prop_accept_handshake_rejects_reserved_header(
         key in prop::array::uniform16(any::<u8>()),

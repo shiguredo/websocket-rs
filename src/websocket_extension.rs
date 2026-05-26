@@ -260,7 +260,7 @@ impl Extension {
         parts
     }
 
-    /// RFC 7230 の token ABNF に準拠するかチェック
+    /// RFC 9110 Section 5.6.2 の token ABNF に準拠するかチェック
     ///
     /// token = 1*tchar
     /// tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
@@ -277,10 +277,10 @@ impl Extension {
 
     /// パラメータ値をパースする (quoted-string 対応)
     ///
-    /// RFC 6455 Section 9.1:
+    /// RFC 9110 Section 5.6.4 の quoted-string / quoted-pair に準拠する
     /// - quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
     /// - quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
-    /// - 復号後の値は token ABNF に準拠する必要がある (MUST)
+    /// - RFC 6455 Section 9.1: 復号後の値は token ABNF に準拠する必要がある (MUST)
     ///
     /// 不正な値 (token 制約に違反) の場合は None を返す
     fn parse_param_value(value: &str) -> Option<String> {

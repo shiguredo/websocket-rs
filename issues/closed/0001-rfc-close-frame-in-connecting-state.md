@@ -20,7 +20,7 @@ Close フレームは opening handshake 完了後の established connection 上�
 
 ## RFC 根拠
 
-RFC 6455 Section 7.1.2:
+RFC 6455 Section 1.4:
 
 > Either peer can send a control frame with data containing a specified
 > control sequence to begin the closing handshake.

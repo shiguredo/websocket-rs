@@ -13,17 +13,17 @@ P2
 
 ## RFC 根拠
 
-RFC 7692 Section 7 (refs/rfc7692.txt:347):
+RFC 7692 Section 5:
 
 > To accept the use of an offered PMCE, a server MUST include the extension name of the PMCE in the "Sec-WebSocket-Extensions" header field
 
-RFC 7692 Section 8.4 (refs/rfc7692.txt:1015):
+RFC 7692 Section 7.1.3:
 
 > The server can accept "permessage-deflate" by picking any supported one from the listed offers.
 
 サーバーは offer の中から 1 つを選んで返す設計であり、複数の permessage-deflate 要素を含むレスポンスは不正。
 
-RFC 7692 Section 7.1.2 (refs/rfc7692.txt:722):
+RFC 7692 Section 7:
 
 > A client MUST _Fail the WebSocket Connection_ if the peer server accepted an extension negotiation offer for this extension with an extension negotiation response meeting any of the following conditions
 
