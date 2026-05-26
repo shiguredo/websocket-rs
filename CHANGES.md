@@ -11,6 +11,11 @@
 
 ## develop
 
+- [UPDATE] close_internal の戻り値型を `()` に統一する
+  - @voluntas
+- [FIX] close_internal の reason 切り詰めが UTF-8 境界を無視する問題を修正する
+  - @voluntas
+
 ## 2026.3.0
 
 **リリース日**: 2026-05-26

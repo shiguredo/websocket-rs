@@ -1,3 +1,17 @@
+/// reason が max_bytes を超える場合、UTF-8 文字境界で切り詰める
+#[doc(hidden)]
+pub fn truncate_reason(reason: &str, max_bytes: usize) -> &str {
+    if reason.len() > max_bytes {
+        let mut end = max_bytes;
+        while !reason.is_char_boundary(end) {
+            end -= 1;
+        }
+        &reason[..end]
+    } else {
+        reason
+    }
+}
+
 /// WebSocket クローズコード (RFC 6455 Section 7.4.1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CloseCode(pub u16);

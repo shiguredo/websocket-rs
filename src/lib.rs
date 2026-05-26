@@ -89,7 +89,7 @@ pub use websocket_client_connection::{
     ClientConnectionOptions, ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource,
     TimerId, WebSocketClientConnection,
 };
-pub use websocket_close::CloseCode;
+pub use websocket_close::{CloseCode, truncate_reason};
 pub use websocket_extension::{Extension, ExtensionParam, PerMessageDeflateConfig};
 pub use websocket_frame::{Frame, FrameDecoder};
 pub use websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};

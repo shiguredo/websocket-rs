@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use shiguredo_websocket::CloseCode;
+use shiguredo_websocket::{CloseCode, truncate_reason};
 
 proptest! {
     #[test]
@@ -164,5 +164,47 @@ proptest! {
         let close_code = CloseCode::new(code);
         let display = format!("{}", close_code);
         prop_assert!(display.contains("Unknown"));
+    }
+}
+
+// ==== truncate_reason の PBT ====
+
+proptest! {
+    /// truncation 結果のバイト長が max_bytes 以下である
+    #[test]
+    fn prop_truncate_reason_length(
+        reason in "\\PC{0,300}",
+        max_bytes in 0usize..=200
+    ) {
+        let result = truncate_reason(&reason, max_bytes);
+        prop_assert!(
+            result.len() <= max_bytes,
+            "結果 {} バイトが max_bytes {} を超えている",
+            result.len(), max_bytes
+        );
+    }
+
+    /// truncation 結果が元の文字列の prefix である
+    #[test]
+    fn prop_truncate_reason_is_prefix(
+        reason in "\\PC{0,300}",
+        max_bytes in 0usize..=200
+    ) {
+        let result = truncate_reason(&reason, max_bytes);
+        prop_assert!(
+            reason.starts_with(result),
+            "結果 {:?} が元の文字列 {:?} の prefix ではない",
+            result, reason
+        );
+    }
+
+    /// reason.len() <= max_bytes の場合は reason がそのまま返る
+    #[test]
+    fn prop_truncate_reason_identity_when_short(
+        reason in "\\PC{0,200}"
+    ) {
+        let max_bytes = reason.len() + 10;
+        let result = truncate_reason(&reason, max_bytes);
+        prop_assert_eq!(result, reason.as_str());
     }
 }
