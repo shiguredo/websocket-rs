@@ -16,6 +16,9 @@
 
 ### misc
 
+- [ADD] nginx + testcontainers を使った WebSocket e2e テストを追加する
+  - @voluntas
+
 ## 2026.2.0
 
 **リリース日**: 2026-05-16

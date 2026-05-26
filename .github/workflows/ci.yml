@@ -30,7 +30,12 @@ jobs:
           os: ${{ matrix.os }}
           toolchain: stable
       - run: cargo fmt --all --check
+      # macOS ランナーには Docker がプリインストールされていないため
+      # Docker を必要とする e2e テストクレートを除外する
       - run: cargo test --workspace
+        if: runner.os != 'macOS'
+      - run: cargo test --workspace --exclude websocket_e2e_nginx
+        if: runner.os == 'macOS'
       - run: cargo clippy --workspace -- -D warnings
 
   slack_notify:
