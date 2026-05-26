@@ -611,14 +611,8 @@ impl HandshakeValidator {
             .get_header("Sec-WebSocket-Protocol")
             .map(String::from);
 
-        // 拡張の取得
-        // RFC 6455 Section 11.3.2: HTTP レスポンスでは Sec-WebSocket-Extensions は 1 回のみ許容
+        // RFC 6455 Section 4.2.2 項目 6: 複数行の Sec-WebSocket-Extensions を許容し統合する
         let extension_values = response.get_headers("Sec-WebSocket-Extensions");
-        if extension_values.len() > 1 {
-            return Err(Error::handshake_rejected(
-                "duplicate Sec-WebSocket-Extensions header in HTTP response",
-            ));
-        }
         // TODO: issues/closed/0003-rfc-quoted-string-split-in-extensions.md
         // RFC 7230 Section 7 の #rule に準拠した quoted-string 対応パーサーへの置き換え
         // 現在は ',' で単純分割しており、extension-param 値が quoted-string の場合に誤分割する。

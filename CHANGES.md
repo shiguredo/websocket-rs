@@ -15,6 +15,8 @@
   - @voluntas
 - [FIX] close_internal の reason 切り詰めが UTF-8 境界を無視する問題を修正する
   - @voluntas
+- [FIX] サーバーレスポンスで複数行の Sec-WebSocket-Extensions を誤って拒否する問題を修正する
+  - @voluntas
 
 ### misc
 
