@@ -150,4 +150,14 @@ let mut child = std::process::Command::new("docker")
 - ハンドシェイク検証とテキストエコーのテストが存在する
 - CI の macOS ステップで `websocket_server` を除外する修正が入っている
 
+## pending 理由
+
+curl CLI の WebSocket モードでは stdin からのデータを WebSocket フレームとして送信する機能が **未実装** (curl 8.20.0 時点)。curl の計画では stdin/stdout 経由の WebSocket データ転送をサポートする予定だが、まだ開発が開始されていない。
+
+- ハンドシェイク (101 Switching Protocols) までは動作する
+- stdin → WebSocket テキストフレーム送信が未実装のため、テキストエコーテストが実現できない
+- libcurl C API (`curl_ws_send`/`curl_ws_recv`) では可能だが、CLI ツールでは不可
+
+curl CLI の WebSocket stdin/stdout 対応が実装されたタイミングで再開する。
+
 ## 解決方法
