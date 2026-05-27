@@ -26,7 +26,7 @@ RFC 6455 Section 9.1 ABNF:
 ```
 extension-list  = 1#extension
 extension       = extension-token *( ";" extension-param )
-extension-param = token [ "=" ( token / ( DQUOTE *QDTEXT DQUOTE ) ) ]
+extension-param = token [ "=" ( token / quoted-string ) ]
 ```
 
 `extension-param` の値として `quoted-string` が許容されており、

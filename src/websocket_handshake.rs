@@ -91,7 +91,11 @@ impl HandshakeRequest {
         }
 
         // RFC 6455 Section 4.1: 予約済みヘッダーとの重複チェック
-        // これらのヘッダーは MUST appear かつ MUST NOT appear more than once
+        // ライブラリが自動的に設定するヘッダーを additional_headers で重複指定させないための実装上の制約。
+        // RFC 6455 Section 11.3 では Sec-WebSocket-Protocol (11.3.4) と
+        // Sec-WebSocket-Extensions (11.3.2) はリクエストで複数回許容される
+        // (> The |Sec-WebSocket-Protocol| header field MAY appear multiple times in an HTTP request)
+        // ため、重複禁止は RFC の要件ではなく実装の都合である。
         const RESERVED: &[&str] = &[
             "host",
             "upgrade",
@@ -715,7 +719,7 @@ fn validate_extension_entry(ext: &str) -> Result<(), Error> {
                     )));
                 }
                 if value.starts_with('"') {
-                    // RFC 6455 Section 9.1:
+                    // RFC 6455 Section 9.1 (ABNF は RFC 2616 由来、qdtext は RFC 9110 Section 5.6.4 準拠ただし obs-text 除外):
                     // quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
                     // qdtext = HTAB / SP / %x21 / %x23-5B / %x5D-7E
                     // quoted-pair = "\" CHAR

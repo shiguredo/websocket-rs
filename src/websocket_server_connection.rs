@@ -292,7 +292,7 @@ impl WebSocketServerConnection {
         }
 
         // RFC 7692 Section 7 / 7.1.3: サーバーは offer から 1 つの permessage-deflate を選んで返す。
-        // 複数の permessage-deflate 要素を含むレスポンスは不正。
+        // 複数の permessage-deflate 要素を含むレスポンスは不正とみなす。
         {
             let pmce_count: usize = response
                 .extensions
@@ -308,7 +308,14 @@ impl WebSocketServerConnection {
         }
 
         // RFC 6455 Section 4.2.2: 予約済みヘッダーとの重複チェック
-        // これらのヘッダーは MUST appear かつ MUST NOT appear more than once
+        // ライブラリが自動的に設定するヘッダーを additional_headers で重複指定させないための実装上の制約。
+        // HTTP response に対しては以下のヘッダーが重複禁止:
+        // > the |Sec-WebSocket-Extensions| header field MUST NOT appear more than once in an HTTP response
+        //   (Section 11.3.2)
+        // > The |Sec-WebSocket-Accept| header MUST NOT appear more than once in an HTTP response.
+        //   (Section 11.3.3)
+        // > the |Sec-WebSocket-Protocol| header field MUST NOT appear more than once in an HTTP response
+        //   (Section 11.3.4)
         const RESERVED: &[&str] = &[
             "upgrade",
             "connection",

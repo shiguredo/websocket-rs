@@ -42,9 +42,9 @@ proptest! {
 // =============================================================================
 
 proptest! {
-    /// Section 4.1.7: Sec-WebSocket-Key は 16 バイトの base64 エンコード
+    /// Section 4.1 item 7: Sec-WebSocket-Key は 16 バイトの base64 エンコード
     #[test]
-    fn prop_section_4_1_7_websocket_key_format(nonce in any::<[u8; 16]>()) {
+    fn prop_section_4_1_item_7_websocket_key_format(nonce in any::<[u8; 16]>()) {
         let request = HandshakeRequest::new("/", "example.com");
         let encoded = request.build(nonce).unwrap();
         let s = String::from_utf8(encoded).unwrap();
@@ -60,9 +60,9 @@ proptest! {
         prop_assert_eq!(decoded.len(), 16);
     }
 
-    /// Section 4.1.10: Sec-WebSocket-Protocol はオプション
+    /// Section 4.1 item 10: Sec-WebSocket-Protocol はオプション
     #[test]
-    fn prop_section_4_1_10_websocket_protocol_optional(
+    fn prop_section_4_1_item_10_websocket_protocol_optional(
         protocol in "[a-z]{3,15}",
         nonce in any::<[u8; 16]>()
     ) {

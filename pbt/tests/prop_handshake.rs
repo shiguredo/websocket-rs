@@ -1429,7 +1429,7 @@ proptest! {
 proptest! {
     /// HandshakeRequest::build で予約済みヘッダーを追加するとエラーになる
     ///
-    /// RFC 6455 Section 4.1: クライアントハンドシェイクの各ヘッダーは MUST contain 1 回のみ
+    /// RFC 6455 Section 4.1: クライアントハンドシェイクの予約済みヘッダーは重複してはならない
     #[test]
     fn prop_build_rejects_reserved_header(
         reserved in prop::sample::select(vec![

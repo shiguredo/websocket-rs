@@ -77,7 +77,7 @@ proptest! {
         prop_assert!(close_code.is_sendable());
     }
 
-    /// 2000-2999 は予約済み（RFC 6455 および将来の拡張用）で送信禁止
+    /// 2000-2999 は予約済み（RFC 6455 Section 7.4.2: RFC 6455 および将来の拡張用）のため送信しない
     #[test]
     fn prop_reserved_range_2000_2999(code in 2000u16..3000) {
         let close_code = CloseCode::new(code);
