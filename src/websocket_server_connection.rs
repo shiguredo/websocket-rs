@@ -258,10 +258,7 @@ impl WebSocketServerConnection {
             // RFC 6455 Section 9.1: ABNF 不適合の拡張文字列は接続を失敗させなければならない (MUST)
             // parse_strict を使い、部分的に不正な拡張を見逃さないようにする
             let parsed = Extension::parse_strict(extension).map_err(|e| {
-                Error::handshake_rejected(format!(
-                    "invalid extension response '{}': {}",
-                    extension, e
-                ))
+                Error::handshake_rejected(format!("invalid extension response '{extension}': {e}"))
             })?;
             if parsed.is_empty() {
                 return Err(Error::handshake_rejected(format!(
