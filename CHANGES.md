@@ -11,6 +11,12 @@
 
 ## develop
 
+### misc
+
+## 2026.3.0
+
+**リリース日**: 2026-05-28
+
 - [CHANGE] deprecated な PerMessageDeflateConfig::from_extension を削除する
   - @voluntas
 - [CHANGE] 内部向けシンボル `ByteSliceExt` / `VecExt` / `Compressor` / `Decompressor` / `truncate_reason` を通常の pub use から除外し #[doc(hidden)] で再エクスポートに変更する
@@ -23,6 +29,8 @@
   - @voluntas
 - [ADD] ExtensionParseError に Display / Error を実装し、ExtensionParseContext と合わせて lib.rs から公開する
   - @voluntas
+- [UPDATE] shiguredo_http11 を 2026.6.1 に上げる
+  - @voluntas
 - [UPDATE] close_internal の戻り値型を `()` に統一する
   - @voluntas
 - [FIX] close_internal の reason 切り詰めが UTF-8 境界を無視する問題を修正する
@@ -32,71 +40,7 @@
 
 ### misc
 
-- [UPDATE] クライアント / サーバー間のフレーム処理ロジックを SharedConnectionState に共通化する
-  - @voluntas
-- [UPDATE] 不要な `#[allow(dead_code)]` を削除し、未使用の `unsupported` のみ `#[expect(dead_code)]` に変更する
-  - @voluntas
-- [UPDATE] shiguredo_http11 のバージョン指定をマイナーまでに修正する
-  - @voluntas
-- [UPDATE] crate-level doc 内の `.unwrap()` を `.expect()` に修正する
-  - @voluntas
-- [UPDATE] is_valid_token の重複実装を src/token.rs に共通化する
-  - @voluntas
-- [UPDATE] close メソッドの検証ロジックを SharedConnectionState に共通化する
-  - @voluntas
-- [UPDATE] send_text 等の重複ロジックを SharedConnectionState に集約する
-  - @voluntas
-- [UPDATE] websocket_handshake.rs の解決済み issue 参照の TODO コメントを設計メモコメントに整理する
-  - @voluntas
-- [UPDATE] パニックのみ検証する PBT を削除し fuzzing に役割を寄せる
-  - @voluntas
-- [UPDATE] prop_error.rs の ERROR_KINDS に全 ErrorKind バリアントを含める
-  - @voluntas
-- [UPDATE] ハンドシェイク後処理・Compressor・PMCE パースの fuzz ターゲットを拡充する
-  - @voluntas
-- [UPDATE] RFC 引用コメントの節番号を一次資料に合わせて修正する
-  - @voluntas
-- [UPDATE] SharedConnectionState のフィールドをカプセル化する
-  - @voluntas
-- [UPDATE] ConnectionState の許可遷移を set_state で検証する
-  - @voluntas
-- [UPDATE] websocket_connection_shared.rs を fragment_buffer / frame_policy に分割する
-  - @voluntas
-- [UPDATE] websocket_handshake.rs をリクエスト / レスポンスモジュールに分割する
-  - @voluntas
-- [UPDATE] accept_handshake を責務ごとの private メソッドに分割する
-  - @voluntas
-- [UPDATE] complete_handshake から deflate ネゴシエーション検証を抽出する
-  - @voluntas
-- [UPDATE] Extension::parse と parse_strict の共通パースロジックを抽出する
-  - @voluntas
-- [UPDATE] validate_extension_entry を Extension::parse_strict に統一する
-  - @voluntas
-- [UPDATE] Close フレーム 1 バイトペイロードの接続層エラーを PBT で検証する
-  - @voluntas
-- [UPDATE] MAX_PENDING_FRAME_DATA の境界値を PBT で検証する
-  - @voluntas
-- [UPDATE] 64 ビットペイロード長 MSB=1 フレームの拒否を PBT で検証する
-  - @voluntas
-- [UPDATE] RSV ビット違反の検出を prop_violations で検証する
-  - @voluntas
-- [UPDATE] 送信禁止 Close コード受信時の返送動作を PBT で検証する
-  - @voluntas
-- [UPDATE] 大量フラグメントによる max_message_size 到達を PBT で検証する
-  - @voluntas
-
-## 2026.3.0
-
-**リリース日**: 2026-05-26
-
-- [UPDATE] shiguredo_http11 を 2026.6.1 に上げる
-  - @voluntas
-
-### misc
-
 - [ADD] nginx + testcontainers を使った WebSocket e2e テストを追加する
-  - @voluntas
-- [UPDATE] nginx e2e テストを websocket_client/tests/ に移動する
   - @voluntas
 
 ## 2026.2.0
