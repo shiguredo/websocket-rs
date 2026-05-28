@@ -1,3 +1,19 @@
+/// reason が max_bytes を超える場合、UTF-8 文字境界で切り詰める
+///
+/// 内部向け API。`lib.rs` で `#[doc(hidden)] pub use` 経由で PBT に公開する。
+/// 通常の `pub use` で公開しないこと。
+pub fn truncate_reason(reason: &str, max_bytes: usize) -> &str {
+    if reason.len() > max_bytes {
+        let mut end = max_bytes;
+        while !reason.is_char_boundary(end) {
+            end -= 1;
+        }
+        &reason[..end]
+    } else {
+        reason
+    }
+}
+
 /// WebSocket クローズコード (RFC 6455 Section 7.4.1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CloseCode(pub u16);

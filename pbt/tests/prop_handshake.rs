@@ -1235,15 +1235,15 @@ proptest! {
 }
 
 // =============================================================================
-// RFC 6455 Section 11.3.2: HTTP レスポンス重複ヘッダーテスト
+// RFC 6455 Section 4.2.2 項目 6: HTTP レスポンス複数行 Sec-WebSocket-Extensions 統合テスト
 // =============================================================================
 
 proptest! {
-    /// HandshakeValidator: レスポンスで Sec-WebSocket-Extensions が複数行ある場合は拒否される
+    /// HandshakeValidator: レスポンスで Sec-WebSocket-Extensions が複数行ある場合は受理される
     ///
-    /// RFC 6455 Section 11.3.2: MUST NOT appear more than once in an HTTP response.
+    /// RFC 6455 Section 4.2.2 項目 6: 複数行の Sec-WebSocket-Extensions を許容し統合する
     #[test]
-    fn prop_response_duplicate_extension_headers_rejected(
+    fn prop_response_multiple_extension_headers_accepted(
         nonce in any::<[u8; 16]>(),
         ext1 in "[a-z][a-z0-9-]{2,10}",
         ext2 in "[a-z][a-z0-9-]{2,10}",
@@ -1264,7 +1264,12 @@ proptest! {
         validator.feed(response.as_bytes());
         let result = validator.validate();
 
-        prop_assert!(result.is_err());
+        prop_assert!(result.is_ok(), "複数行の Sec-WebSocket-Extensions は受理されるべき");
+        let resp = result.unwrap().unwrap();
+        prop_assert!(
+            resp.extensions.contains(&ext1) || resp.extensions.contains(&ext2),
+            "マージ後の extensions に拡張が含まれていない"
+        );
     }
 
     /// HandshakeValidator: レスポンスで Sec-WebSocket-Extensions が 1 行のみの場合は受理される
@@ -1289,6 +1294,85 @@ proptest! {
         let result = validator.validate();
 
         prop_assert!(result.is_ok());
+    }
+
+    /// HandshakeValidator: 1 行目が空、2 行目が有効な場合はマージ後 1 要素
+    #[test]
+    fn prop_response_first_empty_second_valid_extension(
+        nonce in any::<[u8; 16]>(),
+        ext in "[a-z][a-z0-9-]{2,10}",
+    ) {
+        let accept = calculate_expected_accept(&nonce);
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: \r\n\
+             Sec-WebSocket-Extensions: {}\r\n\
+             \r\n",
+            accept, ext
+        );
+
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_ok(), "1 行目が空でも受理されるべき");
+        let resp = result.unwrap().unwrap();
+        prop_assert!(
+            resp.extensions.contains(&ext),
+            "マージ後の extensions に有効な拡張が含まれていない"
+        );
+    }
+
+    /// HandshakeValidator: 2 行とも空の場合は malformed エラー
+    #[test]
+    fn prop_response_both_empty_extension_headers(
+        nonce in any::<[u8; 16]>(),
+    ) {
+        let accept = calculate_expected_accept(&nonce);
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: \r\n\
+             Sec-WebSocket-Extensions: \r\n\
+             \r\n",
+            accept
+        );
+
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err(), "2 行とも空の場合は malformed エラーであるべき");
+    }
+
+    /// HandshakeValidator: 2 行とも ABNF 違反の場合はエラー
+    #[test]
+    fn prop_response_both_invalid_extension_headers(
+        nonce in any::<[u8; 16]>(),
+    ) {
+        let accept = calculate_expected_accept(&nonce);
+        // ABNF 違反: token に使用できない文字 '(' を含む拡張文字列
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\
+             Sec-WebSocket-Extensions: inv(alid\r\n\
+             Sec-WebSocket-Extensions: als(obad\r\n\
+             \r\n",
+            accept
+        );
+
+        let mut validator = HandshakeValidator::new(nonce);
+        validator.feed(response.as_bytes());
+        let result = validator.validate();
+
+        prop_assert!(result.is_err(), "ABNF 違反の拡張は拒否されるべき");
     }
 }
 
@@ -1345,7 +1429,7 @@ proptest! {
 proptest! {
     /// HandshakeRequest::build で予約済みヘッダーを追加するとエラーになる
     ///
-    /// RFC 6455 Section 4.1: 予約済みヘッダーは MUST NOT appear more than once
+    /// RFC 6455 Section 4.1: クライアントハンドシェイクの予約済みヘッダーは重複してはならない
     #[test]
     fn prop_build_rejects_reserved_header(
         reserved in prop::sample::select(vec![

@@ -190,26 +190,6 @@ proptest! {
 }
 
 // =============================================================================
-// 壊れたデータのハンドリング
-// =============================================================================
-
-proptest! {
-    /// ランダムなバイト列はエラーまたは不完全
-    #[test]
-    fn prop_random_bytes_handling(
-        data in prop::collection::vec(any::<u8>(), 1..100)
-    ) {
-        let mut decoder = FrameDecoder::new();
-        decoder.feed(&data);
-
-        // エラーか None のどちらかが返る（パニックしない）
-        let result = decoder.decode();
-        prop_assert!(result.is_ok() || result.is_err());
-    }
-
-}
-
-// =============================================================================
 // Close フレームの検証
 // =============================================================================
 
@@ -237,5 +217,43 @@ proptest! {
         // デコード自体は成功するが、アプリケーション層で検証される
         let result = decoder.decode();
         prop_assert!(result.is_ok());
+    }
+}
+
+// =============================================================================
+// RFC 6455 Section 5.2: 64 ビットペイロード長の MSB 検証
+// =============================================================================
+
+proptest! {
+    /// RFC 6455 Section 5.2: 64 ビットペイロード長フィールドの最上位ビット (MSB) は 0 でなければならない。
+    /// MSB=1 のフレームは `FrameDecoder` で `ProtocolViolation` として拒否される。
+    /// 負の長さ解釈や `usize` 変換オーバーフロー前に弾く必要がある
+    #[test]
+    fn prop_payload_length_64bit_msb_set_rejected(
+        // Text, Binary, Close, Ping, Pong のいずれか
+        opcode in prop::sample::select(vec![0x01u8, 0x02, 0x08, 0x09, 0x0A]),
+        // 最上位バイトの残り 7 ビット (proptest で全パターン生成)
+        high_low_7_bits in any::<u8>(),
+        // 後続 7 バイトの長さ表現は任意
+        rest_bytes in prop::array::uniform7(any::<u8>()),
+    ) {
+        // 最上位バイトの MSB を強制的に 1 にする
+        let high_byte_with_msb = high_low_7_bits | 0x80;
+
+        let mut frame = vec![
+            0x80 | opcode, // FIN=1 + opcode
+            0x80 | 127,    // MASK=1 + length=127 (64-bit 長形式)
+            high_byte_with_msb,
+        ];
+        frame.extend_from_slice(&rest_bytes);
+        // フレームは 10 バイトまで埋まったので、デコーダーは 8 バイト長を読みに行く
+
+        let mut decoder = FrameDecoder::new();
+        decoder.feed(&frame);
+        let result = decoder.decode();
+        prop_assert!(
+            result.is_err(),
+            "64-bit 長の MSB=1 は ProtocolViolation で拒否されるべき"
+        );
     }
 }

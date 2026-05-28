@@ -2,7 +2,7 @@
 ///
 /// ミリ秒単位の時刻を表す。WebSocket ではタイムアウト管理に使用する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Timestamp(pub u64);
+pub struct Timestamp(u64);
 
 impl Timestamp {
     /// ミリ秒からタイムスタンプを生成する

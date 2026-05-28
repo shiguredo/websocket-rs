@@ -104,7 +104,6 @@ impl Frame {
     }
 
     /// フレームをエンコードする（マスキングなし、サーバー用）
-    #[allow(dead_code)]
     pub fn encode_unmasked(&self) -> Vec<u8> {
         self.encode_internal(false, [0; 4])
     }
@@ -322,7 +321,6 @@ impl FrameDecoder {
     }
 
     /// バッファの長さを取得する
-    #[allow(dead_code)]
     pub fn buffer_len(&self) -> usize {
         self.buf.len()
     }

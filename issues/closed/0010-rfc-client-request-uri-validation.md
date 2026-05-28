@@ -7,10 +7,12 @@ RFC 6455 Section 4.1 で要求される形式検証を行っていない。
 
 ## RFC 根拠
 
-RFC 6455 Section 4.1 (line 939-942):
+RFC 6455 Section 4.1:
 
-> The "Request-URI" part of the request MUST match the /resource name/
-> defined in Section 3 (a relative URI) or be an absolute http/https URI
+> The "Request-URI" part of the request MUST match the /resource
+> name/ defined in Section 3 (a relative URI) or be an absolute
+> http/https URI that, when parsed, has a /resource name/, /host/,
+> and /port/ that match the corresponding ws/wss URI.
 
 RFC 6455 Section 3 (line 755-764):
 - パスが空の場合は `"/"`

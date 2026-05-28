@@ -3,166 +3,51 @@
 //! WebSocket クライアント接続を管理する状態機械。
 //! I/O は外部で行い、この構造体はバッファ駆動型で動作する。
 
-use std::collections::VecDeque;
-
 use crate::Timestamp;
 use crate::deflate::PerMessageDeflate;
 use crate::error::Error;
+use crate::frame_policy::ClientFramePolicy;
 use crate::websocket_close::CloseCode;
+use crate::websocket_connection_shared::{
+    DEFAULT_MAX_DECOMPRESSED_SIZE, DEFAULT_MAX_FRAME_SIZE, DEFAULT_MAX_MESSAGE_SIZE,
+    SharedConnectionState,
+};
+use crate::websocket_connection_types::{
+    ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource, TimerId,
+};
 use crate::websocket_extension::{Extension, PerMessageDeflateConfig};
-use crate::websocket_frame::{Frame, FrameDecoder};
-use crate::websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};
-use crate::websocket_opcode::Opcode;
-
-/// 乱数生成のトレイト
-///
-/// WebSocket クライアントが使用する masking key と nonce を生成するためのトレイト。
-/// ライブラリはこのトレイトのみを提供し、実装は利用者側で行う。
-///
-/// # Example
-///
-/// ```ignore
-/// // 本番環境: 暗号学的に安全な乱数を使用
-/// pub struct SecureRandom;
-///
-/// impl RandomSource for SecureRandom {
-///     fn masking_key(&mut self) -> [u8; 4] {
-///         let mut key = [0u8; 4];
-///         getrandom::fill(&mut key).expect("failed to generate masking key");
-///         key
-///     }
-///
-///     fn nonce(&mut self) -> [u8; 16] {
-///         let mut nonce = [0u8; 16];
-///         getrandom::fill(&mut nonce).expect("failed to generate nonce");
-///         nonce
-///     }
-/// }
-///
-/// // テスト環境: 固定値を使用
-/// pub struct FixedRandom {
-///     pub masking_key: [u8; 4],
-///     pub nonce: [u8; 16],
-/// }
-///
-/// impl RandomSource for FixedRandom {
-///     fn masking_key(&mut self) -> [u8; 4] { self.masking_key }
-///     fn nonce(&mut self) -> [u8; 16] { self.nonce }
-/// }
-/// ```
-pub trait RandomSource: Send {
-    /// masking key (4 bytes) を生成する
-    fn masking_key(&mut self) -> [u8; 4];
-
-    /// nonce (16 bytes) を生成する
-    fn nonce(&mut self) -> [u8; 16];
-}
-
-/// 接続状態
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ConnectionState {
-    /// 切断状態
-    #[default]
-    Disconnected,
-    /// ハンドシェイク中
-    Connecting,
-    /// 接続確立
-    Connected,
-    /// クローズハンドシェイク中
-    Closing,
-    /// 切断完了
-    Closed,
-}
-
-/// タイマー ID
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TimerId {
-    /// Ping 送信タイマー
-    Ping,
-    /// Pong タイムアウト
-    PongTimeout,
-    /// クローズタイムアウト
-    CloseTimeout,
-}
-
-/// 接続イベント
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConnectionEvent {
-    /// 接続完了
-    Connected {
-        /// ネゴシエートされたサブプロトコル
-        protocol: Option<String>,
-        /// ネゴシエートされた拡張
-        extensions: Vec<String>,
-    },
-    /// テキストメッセージ受信
-    TextMessage(String),
-    /// バイナリメッセージ受信
-    BinaryMessage(Vec<u8>),
-    /// Ping 受信
-    Ping(Vec<u8>),
-    /// Pong 受信
-    Pong(Vec<u8>),
-    /// クローズ受信
-    Close {
-        code: Option<CloseCode>,
-        reason: String,
-    },
-    /// 状態変化
-    StateChanged(ConnectionState),
-    /// エラー発生
-    Error(String),
-}
-
-/// 接続出力アクション
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConnectionOutput {
-    /// データ送信
-    SendData(Vec<u8>),
-    /// タイマー設定
-    SetTimer { id: TimerId, duration_millis: u64 },
-    /// タイマークリア
-    ClearTimer { id: TimerId },
-    /// 接続をクローズ
-    CloseConnection,
-}
-
-/// デフォルトの最大フレームサイズ（64MB）
-pub const DEFAULT_MAX_FRAME_SIZE: usize = 64 * 1024 * 1024;
-
-/// デフォルトの最大メッセージサイズ（64MB）
-pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
-
-/// デフォルトの最大解凍サイズ（16MB）
-pub const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 16 * 1024 * 1024;
+use crate::websocket_handshake_request::HandshakeRequest;
+use crate::websocket_handshake_response::{HandshakeResponse, HandshakeValidator};
 
 /// 接続オプション
+///
+/// フィールドはビルダーメソッド経由でのみ設定する。直接代入はできない
 #[derive(Debug, Clone)]
 pub struct ClientConnectionOptions {
     /// リクエストパス
-    pub path: String,
+    path: String,
     /// Host ヘッダー
-    pub host: String,
+    host: String,
     /// Origin ヘッダー（オプション）
-    pub origin: Option<String>,
+    origin: Option<String>,
     /// サブプロトコル候補
-    pub protocols: Vec<String>,
+    protocols: Vec<String>,
     /// permessage-deflate 設定（オプション）
-    pub deflate_config: Option<PerMessageDeflateConfig>,
+    deflate_config: Option<PerMessageDeflateConfig>,
     /// 追加ヘッダー
-    pub additional_headers: Vec<(String, String)>,
+    additional_headers: Vec<(String, String)>,
     /// Ping 間隔（ミリ秒、0 で無効）
-    pub ping_interval_millis: u64,
+    ping_interval_millis: u64,
     /// Pong タイムアウト（ミリ秒）
-    pub pong_timeout_millis: u64,
+    pong_timeout_millis: u64,
     /// クローズタイムアウト（ミリ秒）
-    pub close_timeout_millis: u64,
+    close_timeout_millis: u64,
     /// 最大フレームサイズ（メモリ DoS 対策）
-    pub max_frame_size: usize,
+    max_frame_size: usize,
     /// 最大メッセージサイズ（フラグメント累積サイズ制限）
-    pub max_message_size: usize,
+    max_message_size: usize,
     /// 最大解凍サイズ（Zip Bomb 対策）
-    pub max_decompressed_size: usize,
+    max_decompressed_size: usize,
 }
 
 impl Default for ClientConnectionOptions {
@@ -225,6 +110,18 @@ impl ClientConnectionOptions {
         self
     }
 
+    /// Pong タイムアウトを設定（ミリ秒）
+    pub fn pong_timeout(mut self, millis: u64) -> Self {
+        self.pong_timeout_millis = millis;
+        self
+    }
+
+    /// クローズタイムアウトを設定（ミリ秒）
+    pub fn close_timeout(mut self, millis: u64) -> Self {
+        self.close_timeout_millis = millis;
+        self
+    }
+
     /// 最大フレームサイズを設定（メモリ DoS 対策）
     pub fn max_frame_size(mut self, size: usize) -> Self {
         self.max_frame_size = size;
@@ -244,100 +141,22 @@ impl ClientConnectionOptions {
     }
 }
 
-/// フラグメント収集バッファ
-#[derive(Debug, Default)]
-struct FragmentBuffer {
-    /// 最初のフレームのオペコード
-    opcode: Option<Opcode>,
-    /// 収集中のペイロード
-    payload: Vec<u8>,
-    /// メッセージが圧縮されているか (最初のフレームの RSV1)
-    compressed: bool,
-}
-
-impl FragmentBuffer {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.opcode.is_none()
-    }
-
-    fn len(&self) -> usize {
-        self.payload.len()
-    }
-
-    fn start(&mut self, opcode: Opcode, payload: Vec<u8>, compressed: bool) {
-        self.opcode = Some(opcode);
-        self.payload = payload;
-        self.compressed = compressed;
-    }
-
-    fn append(&mut self, payload: &[u8]) {
-        self.payload.extend_from_slice(payload);
-    }
-
-    fn take(&mut self) -> (Opcode, Vec<u8>, bool) {
-        let opcode = self.opcode.take().unwrap_or(Opcode::Binary);
-        let payload = std::mem::take(&mut self.payload);
-        let compressed = self.compressed;
-        self.compressed = false;
-        (opcode, payload, compressed)
-    }
-
-    fn clear(&mut self) {
-        self.opcode = None;
-        self.payload.clear();
-        self.compressed = false;
-    }
-}
-
 /// WebSocket 接続
 pub struct WebSocketClientConnection<R: RandomSource> {
-    /// 状態
-    state: ConnectionState,
+    /// 共通接続状態
+    shared: SharedConnectionState,
+    /// クライアント側フレームポリシー
+    policy: ClientFramePolicy<R>,
     /// オプション
     options: ClientConnectionOptions,
-
     /// ハンドシェイク用 nonce
     nonce: [u8; 16],
     /// ハンドシェイクバリデーター
     handshake_validator: Option<HandshakeValidator>,
-
-    /// フレームデコーダー
-    frame_decoder: FrameDecoder,
-    /// フラグメントバッファ
-    fragment_buffer: FragmentBuffer,
-
     /// ネゴシエートされたサブプロトコル
     negotiated_protocol: Option<String>,
     /// ネゴシエートされた拡張
     negotiated_extensions: Vec<String>,
-    /// permessage-deflate コーデック
-    deflate: Option<PerMessageDeflate>,
-
-    /// クローズフレームを送信したか
-    close_sent: bool,
-    /// クローズフレームを受信したか
-    close_received: bool,
-
-    /// Pong 待ち
-    awaiting_pong: bool,
-
-    /// RFC 6455 Section 7.1.7: 接続失敗フラグ
-    ///
-    /// feed_recv_buf() が Err を返した後は true になり、
-    /// 以降の feed_recv_buf() 呼び出しを即座に Err で弾く。
-    failed: bool,
-
-    /// イベントキュー
-    event_queue: VecDeque<ConnectionEvent>,
-    /// 出力キュー
-    output_queue: VecDeque<ConnectionOutput>,
-
-    /// 乱数ソース
-    random: R,
 }
 
 impl<R: RandomSource> WebSocketClientConnection<R> {
@@ -359,29 +178,28 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     /// });
     /// ```
     pub fn new(options: ClientConnectionOptions, random: R) -> Self {
+        let shared = SharedConnectionState::new(
+            options.max_frame_size,
+            options.max_message_size,
+            options.max_decompressed_size,
+            options.ping_interval_millis,
+            options.pong_timeout_millis,
+            options.close_timeout_millis,
+        );
         Self {
-            state: ConnectionState::Disconnected,
+            shared,
+            policy: ClientFramePolicy::new(random),
             options,
             nonce: [0u8; 16], // connect() で設定
             handshake_validator: None,
-            frame_decoder: FrameDecoder::new(),
-            fragment_buffer: FragmentBuffer::new(),
             negotiated_protocol: None,
             negotiated_extensions: Vec::new(),
-            deflate: None,
-            close_sent: false,
-            close_received: false,
-            awaiting_pong: false,
-            failed: false,
-            event_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            random,
         }
     }
 
     /// 現在の状態を取得
     pub fn state(&self) -> ConnectionState {
-        self.state
+        self.shared.state()
     }
 
     /// ネゴシエートされたサブプロトコルを取得
@@ -396,12 +214,12 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
     /// 接続を開始
     pub fn connect(&mut self) -> Result<(), Error> {
-        if self.state != ConnectionState::Disconnected {
+        if self.shared.state() != ConnectionState::Disconnected {
             return Err(Error::invalid_state("already connected or connecting"));
         }
 
         // ハンドシェイク用の nonce を生成
-        self.nonce = self.random.nonce();
+        self.nonce = self.policy.nonce();
 
         // ハンドシェイクリクエストを構築
         let mut request = HandshakeRequest::new(&self.options.path, &self.options.host);
@@ -430,11 +248,12 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         self.handshake_validator = Some(HandshakeValidator::new(self.nonce));
 
         // 送信キューに追加
-        self.output_queue
-            .push_back(ConnectionOutput::SendData(encoded));
+        self.shared
+            .enqueue_output(ConnectionOutput::SendData(encoded));
 
-        // 状態遷移
-        self.set_state(ConnectionState::Connecting);
+        // 状態遷移: 直前のガードで Disconnected であることを保証済みのため
+        // 通常は Ok を返すが、保守時の前提崩れに備えて `?` で伝播する
+        self.shared.set_state(ConnectionState::Connecting)?;
 
         Ok(())
     }
@@ -444,78 +263,39 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     /// RFC 6455 Section 7.1.7: このメソッドが Err を返した後は
     /// 以降の呼び出しも即座に Err を返す。
     pub fn feed_recv_buf(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
-        if self.failed {
+        if self.shared.is_failed() {
             return Err(Error::invalid_state("connection has failed"));
         }
-        let result = match self.state {
+        let result = match self.shared.state() {
             ConnectionState::Connecting => self.process_handshake(buf, now),
-            ConnectionState::Connected | ConnectionState::Closing => self.process_frames(buf, now),
+            ConnectionState::Connected | ConnectionState::Closing => {
+                self.shared.process_frames(buf, &mut self.policy)
+            }
             ConnectionState::Disconnected | ConnectionState::Closed => {
                 return Err(Error::invalid_state("connection is closed"));
             }
         };
         if result.is_err() {
-            self.failed = true;
+            self.shared.mark_failed();
         }
         result
     }
 
     /// テキストメッセージを送信
     pub fn send_text(&mut self, text: &str) -> Result<(), Error> {
-        self.check_connected()?;
-        self.send_data_frame(Opcode::Text, text.as_bytes().to_vec())
+        self.shared.send_text(text, &mut self.policy)
     }
 
     /// バイナリメッセージを送信
     pub fn send_binary(&mut self, data: &[u8]) -> Result<(), Error> {
-        self.check_connected()?;
-        self.send_data_frame(Opcode::Binary, data.to_vec())
-    }
-
-    /// データフレームを送信（圧縮対応）
-    fn send_data_frame(&mut self, opcode: Opcode, payload: Vec<u8>) -> Result<(), Error> {
-        let (payload, compressed) = self.compress_if_enabled(payload)?;
-
-        let mut frame = Frame::new(opcode, payload);
-        frame.rsv1 = compressed;
-
-        self.send_frame(frame)
-    }
-
-    /// 圧縮が有効な場合、ペイロードを圧縮する
-    fn compress_if_enabled(&mut self, payload: Vec<u8>) -> Result<(Vec<u8>, bool), Error> {
-        if let Some(deflate) = &mut self.deflate {
-            // 小さなメッセージは圧縮しない（圧縮のオーバーヘッドが大きくなる可能性）
-            const COMPRESSION_THRESHOLD: usize = 64;
-            if deflate.should_compress(&payload, COMPRESSION_THRESHOLD) {
-                let compressed = deflate.compress(&payload)?;
-                Ok((compressed, true))
-            } else {
-                Ok((payload, false))
-            }
-        } else {
-            Ok((payload, false))
-        }
+        self.shared.send_binary(data, &mut self.policy)
     }
 
     /// Ping を送信
     ///
     /// RFC 6455 Section 5.5: data は 125 バイト以下でなければならない
     pub fn send_ping(&mut self, data: &[u8]) -> Result<(), Error> {
-        self.check_connected()?;
-
-        let frame = Frame::ping(data.to_vec())?;
-        self.send_frame(frame)?;
-
-        self.awaiting_pong = true;
-
-        // Pong タイムアウト設定
-        self.output_queue.push_back(ConnectionOutput::SetTimer {
-            id: TimerId::PongTimeout,
-            duration_millis: self.options.pong_timeout_millis,
-        });
-
-        Ok(())
+        self.shared.send_ping(data, &mut self.policy)
     }
 
     /// 接続をクローズ
@@ -523,142 +303,28 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     /// RFC 6455 Section 7.4.1: 送信禁止のクローズコード (1005, 1006, 1015) は拒否される
     /// RFC 6455 Section 5.5: reason は 123 バイト以下でなければならない
     /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
+    ///
+    /// 検証ロジックの実装はクライアント / サーバー間で共通化されている。
     pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
-        if !matches!(
-            self.state,
-            ConnectionState::Connected | ConnectionState::Closing
-        ) {
-            return Err(Error::invalid_state("connection is not established"));
-        }
-
-        // RFC 6455 Section 7.4.1: 送信禁止のクローズコードをチェック
-        if !code.is_sendable() {
-            return Err(Error::invalid_input(format!(
-                "close code {} is not sendable",
-                code.as_u16()
-            )));
-        }
-
-        if !self.close_sent {
-            let frame = Frame::close(Some(code.as_u16()), reason)?;
-            self.send_frame(frame)?;
-            self.close_sent = true;
-
-            // クローズタイムアウト設定
-            self.output_queue.push_back(ConnectionOutput::SetTimer {
-                id: TimerId::CloseTimeout,
-                duration_millis: self.options.close_timeout_millis,
-            });
-
-            self.set_state(ConnectionState::Closing);
-        }
-
-        Ok(())
+        self.shared.close(code, reason, &mut self.policy)
     }
 
     /// タイマーイベントを処理
     pub fn handle_timer(&mut self, timer_id: TimerId) -> Result<(), Error> {
-        match timer_id {
-            TimerId::Ping => {
-                if self.state == ConnectionState::Connected && !self.awaiting_pong {
-                    self.send_ping(&[])?;
-                }
-                // 次の Ping タイマー設定（Connected 状態の場合のみ）
-                if self.state == ConnectionState::Connected && self.options.ping_interval_millis > 0
-                {
-                    self.output_queue.push_back(ConnectionOutput::SetTimer {
-                        id: TimerId::Ping,
-                        duration_millis: self.options.ping_interval_millis,
-                    });
-                }
-            }
-            TimerId::PongTimeout => {
-                if self.awaiting_pong {
-                    // Pong タイムアウト - 接続を閉じる
-                    self.event_queue
-                        .push_back(ConnectionEvent::Error("pong timeout".to_string()));
-                    self.close(CloseCode::POLICY_VIOLATION, "pong timeout")?;
-                }
-            }
-            TimerId::CloseTimeout => {
-                if self.state == ConnectionState::Closing {
-                    // クローズタイムアウト - 強制切断
-                    self.set_state(ConnectionState::Closed);
-                    self.output_queue
-                        .push_back(ConnectionOutput::CloseConnection);
-                }
-            }
-        }
-        Ok(())
+        self.shared.handle_timer(timer_id, &mut self.policy)
     }
 
     /// イベントを取得
     pub fn poll_event(&mut self) -> Option<ConnectionEvent> {
-        self.event_queue.pop_front()
+        self.shared.poll_event()
     }
 
     /// 出力を取得
     pub fn poll_output(&mut self) -> Option<ConnectionOutput> {
-        self.output_queue.pop_front()
+        self.shared.poll_output()
     }
 
     // === 内部メソッド ===
-
-    fn set_state(&mut self, new_state: ConnectionState) {
-        if self.state != new_state {
-            self.state = new_state;
-            self.event_queue
-                .push_back(ConnectionEvent::StateChanged(new_state));
-        }
-    }
-
-    fn check_connected(&self) -> Result<(), Error> {
-        if self.state != ConnectionState::Connected {
-            return Err(Error::invalid_state("not connected"));
-        }
-        Ok(())
-    }
-
-    /// フレームを送信（masking_key は自動生成）
-    fn send_frame(&mut self, frame: Frame) -> Result<(), Error> {
-        let masking_key = self.random.masking_key();
-        let encoded = frame.encode(masking_key);
-        self.output_queue
-            .push_back(ConnectionOutput::SendData(encoded));
-        Ok(())
-    }
-
-    /// 内部エラー処理用のクローズ
-    ///
-    /// 理由が長すぎる場合は切り詰める
-    fn close_internal(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
-        if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
-            return Ok(());
-        }
-
-        if !self.close_sent {
-            // 理由が長すぎる場合は切り詰める
-            let truncated_reason = if reason.len() > 123 {
-                &reason[..123]
-            } else {
-                reason
-            };
-            let frame = Frame::close(Some(code.as_u16()), truncated_reason)
-                .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").unwrap());
-            self.send_frame(frame)?;
-            self.close_sent = true;
-
-            // クローズタイムアウト設定
-            self.output_queue.push_back(ConnectionOutput::SetTimer {
-                id: TimerId::CloseTimeout,
-                duration_millis: self.options.close_timeout_millis,
-            });
-
-            self.set_state(ConnectionState::Closing);
-        }
-
-        Ok(())
-    }
 
     fn process_handshake(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
         let validator = self
@@ -684,7 +350,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             // ハンドシェイク完了後、残りのデータがあれば即時処理する
             // (101 応答と最初のフレームが同一受信バッファに含まれる場合)
             if !remaining.is_empty() {
-                self.process_frames(&remaining, now)?;
+                self.shared.process_frames(&remaining, &mut self.policy)?;
             }
         }
 
@@ -717,7 +383,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         // RFC 6455 Section 9.1: ABNF に不適合なら接続を失敗させる (MUST)
         for ext_str in &response.extensions {
             let extensions = Extension::parse_strict(ext_str).map_err(|e| {
-                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {}", e))
+                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {e}"))
             })?;
             for ext in &extensions {
                 if !requested_extension_names.contains(&ext.name.as_str()) {
@@ -733,11 +399,13 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         self.negotiated_extensions = response.extensions.clone();
 
         // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
-        // RFC 7692 Section 7.1.2: クライアントがリクエストした拡張に対して
-        // サーバーが不正なレスポンスを返した場合は接続失敗
-        // RFC 6455 Section 9.1: 上の検証で ABNF 適合性は確認済み
-        // RFC 7692 line 427-429, 431-436, 1015: サーバーは offer の中から 1 つを選んで受諾する。
-        // 複数の permessage-deflate 要素は不正なレスポンスとして Fail しなければならない (MUST)。
+        // RFC 6455 Section 4.2.2 step 4 (/extensions/): サーバーは client が offer していない
+        // 拡張をレスポンスに含めてはならない (MUST NOT)。
+        // RFC 6455 Section 4.1 (client validation): レスポンスが offer に無い拡張を含む場合、
+        // クライアントは WebSocket Connection を Fail する (MUST)。
+        // ABNF 適合性は上の RFC 6455 Section 9.1 の parse_strict 検証で確認済み。
+        // 複数の permessage-deflate 要素を含むレスポンスは実装ポリシーで不正とみなす
+        // (RFC 7692 では明示禁止はないが、Section 7.1.3 の例示は単一拡張のレスポンスのみ示している)。
         let pmce_count = response
             .extensions
             .iter()
@@ -751,91 +419,27 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         }
         for ext_str in &response.extensions {
             let extensions = Extension::parse_strict(ext_str).map_err(|e| {
-                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {}", e))
+                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {e}"))
             })?;
             for ext in extensions {
                 if ext.name == "permessage-deflate" {
-                    match PerMessageDeflateConfig::from_extension_for_client_response(&ext) {
-                        Ok(config) => {
-                            if let Some(deflate_config) = &self.options.deflate_config {
-                                // RFC 7692 Section 7.1.2.2: クライアントが offer していない
-                                // client_max_window_bits をサーバーが含めた場合は拒否
-                                let client_offered_cmwb =
-                                    deflate_config.client_max_window_bits.is_some();
-                                let server_included_cmwb =
-                                    ext.get_param("client_max_window_bits").is_some();
-
-                                if server_included_cmwb && !client_offered_cmwb {
-                                    return Err(Error::handshake_rejected(
-                                        "server included client_max_window_bits without client offer",
-                                    ));
-                                }
-
-                                // RFC 7692 Section 7.1.2.1: server_max_window_bits は
-                                // クライアントの offer 以下でなければならない
-                                if let (Some(client_smwb), Some(server_smwb)) = (
-                                    deflate_config.server_max_window_bits,
-                                    config.server_max_window_bits,
-                                ) && server_smwb > client_smwb
-                                {
-                                    return Err(Error::handshake_rejected(format!(
-                                        "server_max_window_bits {} exceeds client offer {}",
-                                        server_smwb, client_smwb
-                                    )));
-                                }
-
-                                // RFC 7692 Section 7.1.2.2: client_max_window_bits は
-                                // クライアントの offer 以下でなければならない
-                                if let (Some(client_cmwb), Some(server_cmwb)) = (
-                                    deflate_config.client_max_window_bits,
-                                    config.client_max_window_bits,
-                                ) && server_cmwb > client_cmwb
-                                {
-                                    return Err(Error::handshake_rejected(format!(
-                                        "client_max_window_bits {} exceeds client offer {}",
-                                        server_cmwb, client_cmwb
-                                    )));
-                                }
-
-                                // RFC 7692 Section 7.2.1: 合意した window bits で圧縮する必要がある
-                                // 現在の実装では window_bits=15 固定 (noflate の制約) のため、
-                                // client_max_window_bits < 15 はサポートしない
-                                if let Some(cmwb) = config.client_max_window_bits
-                                    && cmwb < 15
-                                {
-                                    return Err(Error::handshake_rejected(format!(
-                                        "client_max_window_bits={} is not supported (only 15 is supported)",
-                                        cmwb
-                                    )));
-                                }
-                            }
-                            self.deflate = Some(PerMessageDeflate::new_client(config));
-                        }
-                        Err(e) => {
-                            // クライアントがリクエストした拡張なら接続失敗
-                            if self.options.deflate_config.is_some() {
-                                return Err(Error::handshake_rejected(format!(
-                                    "invalid permessage-deflate response: {:?}",
-                                    e
-                                )));
-                            }
-                            // リクエストしていない拡張は無視
-                        }
-                    }
+                    self.validate_deflate_negotiation(&ext)?;
                 }
             }
         }
 
-        self.set_state(ConnectionState::Connected);
+        // complete_handshake は feed_recv_buf の Connecting 状態経路でのみ呼ばれる。
+        // 通常は Ok を返すが、前提崩れに備えて `?` で伝播する
+        self.shared.set_state(ConnectionState::Connected)?;
 
-        self.event_queue.push_back(ConnectionEvent::Connected {
+        self.shared.emit_event(ConnectionEvent::Connected {
             protocol: self.negotiated_protocol.clone(),
             extensions: self.negotiated_extensions.clone(),
         });
 
         // Ping タイマー設定
         if self.options.ping_interval_millis > 0 {
-            self.output_queue.push_back(ConnectionOutput::SetTimer {
+            self.shared.enqueue_output(ConnectionOutput::SetTimer {
                 id: TimerId::Ping,
                 duration_millis: self.options.ping_interval_millis,
             });
@@ -844,318 +448,78 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         Ok(())
     }
 
-    fn process_frames(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
-        self.frame_decoder.feed(buf);
-
-        loop {
-            match self.frame_decoder.decode_with_info() {
-                Ok(Some(decoded)) => {
-                    self.handle_decoded_frame(decoded, now)?;
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    // RFC 6455 Section 7.1.7: 接続確立後のプロトコル違反では
-                    // Close フレームを送信してから接続を終了する
-                    self.close_internal(CloseCode::PROTOCOL_ERROR, "frame decode error")?;
-                    return Err(e);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn handle_decoded_frame(
-        &mut self,
-        decoded: crate::websocket_frame::DecodedFrame,
-        now: Timestamp,
-    ) -> Result<(), Error> {
-        // RFC 6455 Section 5.1: サーバーからのフレームはマスクしてはならない
-        if decoded.masked {
-            self.close_internal(CloseCode::PROTOCOL_ERROR, "masked server frame")?;
-            return Err(Error::protocol_violation("masked server frame"));
-        }
-        self.handle_frame(decoded.frame, now)
-    }
-
-    fn handle_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
-        // フレームサイズチェック（コントロールフレームは RFC 6455 で 125 バイト以下が保証済み）
-        if !frame.opcode.is_control() && frame.payload.len() > self.options.max_frame_size {
-            self.close_internal(CloseCode::MESSAGE_TOO_BIG, "frame payload too large")?;
-            return Err(Error::protocol_violation("frame payload too large"));
-        }
-        // RSV ビットチェック（permessage-deflate 以外は禁止）
-        if frame.rsv2 || frame.rsv3 {
-            self.close_internal(CloseCode::PROTOCOL_ERROR, "reserved bits set")?;
-            return Err(Error::protocol_violation("reserved bits set"));
-        }
-        // RFC 7692 Section 6: RSV1 検証
-        if frame.rsv1 {
-            if self.deflate.is_none() {
-                self.close_internal(
-                    CloseCode::PROTOCOL_ERROR,
-                    "rsv1 set without permessage-deflate",
-                )?;
-                return Err(Error::protocol_violation(
-                    "rsv1 set without permessage-deflate",
-                ));
-            }
-            // コントロールフレームでは RSV1=0 必須
-            if frame.opcode.is_control() {
-                self.close_internal(
-                    CloseCode::PROTOCOL_ERROR,
-                    "rsv1 must not be set on control frames",
-                )?;
-                return Err(Error::protocol_violation(
-                    "rsv1 must not be set on control frames",
-                ));
-            }
-            // 継続フレームでは RSV1=0 必須
-            if frame.opcode == Opcode::Continuation {
-                self.close_internal(
-                    CloseCode::PROTOCOL_ERROR,
-                    "rsv1 must not be set on continuation frames",
-                )?;
-                return Err(Error::protocol_violation(
-                    "rsv1 must not be set on continuation frames",
-                ));
-            }
-        }
-
-        match frame.opcode {
-            Opcode::Continuation => self.handle_continuation(frame, now)?,
-            Opcode::Text | Opcode::Binary => self.handle_data_frame(frame, now)?,
-            Opcode::Close => self.handle_close(frame, now)?,
-            Opcode::Ping => self.handle_ping(frame)?,
-            Opcode::Pong => self.handle_pong(frame)?,
-        }
-
-        Ok(())
-    }
-
-    fn handle_data_frame(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
-        // RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
-        if !self.fragment_buffer.is_empty() {
-            self.close_internal(
-                CloseCode::PROTOCOL_ERROR,
-                "new message started before previous completed",
-            )?;
-            return Err(Error::protocol_violation(
-                "new message started before previous completed",
-            ));
-        }
-
-        if frame.fin {
-            // 完全なメッセージ
-            let payload = self.decompress_if_needed(frame.payload, frame.rsv1)?;
-            self.emit_message(frame.opcode, payload, now)?;
-        } else {
-            // フラグメント開始 (RSV1 は最初のフレームにのみ設定される)
-            if frame.payload.len() > self.options.max_message_size {
-                self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large")?;
-                return Err(Error::protocol_violation("message too large"));
-            }
-            self.fragment_buffer
-                .start(frame.opcode, frame.payload, frame.rsv1);
-        }
-        Ok(())
-    }
-
-    fn handle_continuation(&mut self, frame: Frame, now: Timestamp) -> Result<(), Error> {
-        if self.fragment_buffer.is_empty() {
-            self.close_internal(
-                CloseCode::PROTOCOL_ERROR,
-                "continuation frame without initial frame",
-            )?;
-            return Err(Error::protocol_violation(
-                "continuation frame without initial frame",
-            ));
-        }
-
-        self.fragment_buffer.append(&frame.payload);
-
-        // フラグメント累積サイズチェック
-        if self.fragment_buffer.len() > self.options.max_message_size {
-            self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large")?;
-            return Err(Error::protocol_violation("message too large"));
-        }
-
-        if frame.fin {
-            let (opcode, payload, compressed) = self.fragment_buffer.take();
-            let payload = self.decompress_if_needed(payload, compressed)?;
-            self.emit_message(opcode, payload, now)?;
-        }
-
-        Ok(())
-    }
-
-    /// 必要に応じてペイロードを解凍する
-    fn decompress_if_needed(
-        &mut self,
-        payload: Vec<u8>,
-        compressed: bool,
-    ) -> Result<Vec<u8>, Error> {
-        if compressed {
-            if let Some(deflate) = &mut self.deflate {
-                deflate.decompress(&payload, self.options.max_decompressed_size)
-            } else {
-                self.close_internal(
-                    CloseCode::PROTOCOL_ERROR,
-                    "received compressed frame without permessage-deflate",
-                )?;
-                Err(Error::protocol_violation(
-                    "received compressed frame without permessage-deflate",
-                ))
-            }
-        } else {
-            Ok(payload)
-        }
-    }
-
-    fn emit_message(
-        &mut self,
-        opcode: Opcode,
-        payload: Vec<u8>,
-        _now: Timestamp,
-    ) -> Result<(), Error> {
-        match opcode {
-            Opcode::Text => match String::from_utf8(payload) {
-                Ok(text) => {
-                    self.event_queue
-                        .push_back(ConnectionEvent::TextMessage(text));
-                }
-                Err(e) => {
-                    // RFC 6455 Section 8.1: UTF-8 検証失敗時は接続を失敗させる
-                    self.event_queue.push_back(ConnectionEvent::Error(format!(
-                        "invalid UTF-8 in text message: {}",
+    /// permessage-deflate (RFC 7692) のネゴシエーション結果を検証し、
+    /// 合意成立時は `PerMessageDeflate` を共有状態に登録する
+    fn validate_deflate_negotiation(&mut self, ext: &Extension) -> Result<(), Error> {
+        let config = match PerMessageDeflateConfig::from_extension_for_client_response(ext) {
+            Ok(config) => config,
+            Err(e) => {
+                // クライアントがリクエストした拡張なら接続失敗
+                if self.options.deflate_config.is_some() {
+                    return Err(Error::handshake_rejected(format!(
+                        "invalid permessage-deflate response: {:?}",
                         e
                     )));
-                    self.close_internal(CloseCode::INVALID_PAYLOAD, "invalid UTF-8")?;
-                    return Err(Error::protocol_violation("invalid UTF-8 in text message"));
                 }
-            },
-            Opcode::Binary => {
-                self.event_queue
-                    .push_back(ConnectionEvent::BinaryMessage(payload));
+                // リクエストしていない拡張は無視
+                return Ok(());
             }
-            _ => {}
-        }
-        Ok(())
-    }
+        };
 
-    fn handle_close(&mut self, frame: Frame, _now: Timestamp) -> Result<(), Error> {
-        self.close_received = true;
+        if let Some(deflate_config) = &self.options.deflate_config {
+            // RFC 7692 Section 7.1.2.2: クライアントが offer していない
+            // client_max_window_bits をサーバーが含めた場合は拒否
+            let client_offered_cmwb = deflate_config.client_max_window_bits.is_some();
+            let server_included_cmwb = ext.get_param("client_max_window_bits").is_some();
 
-        // RFC 6455 Section 5.5.1: ペイロード長は 0 または 2 以上でなければならない
-        if frame.payload.len() == 1 {
-            self.close_internal(
-                CloseCode::PROTOCOL_ERROR,
-                "close frame payload length must be 0 or >= 2",
-            )?;
-            return Err(Error::protocol_violation(
-                "close frame payload length must be 0 or >= 2",
-            ));
-        }
+            if server_included_cmwb && !client_offered_cmwb {
+                return Err(Error::handshake_rejected(
+                    "server included client_max_window_bits without client offer",
+                ));
+            }
 
-        let (code, reason) = if frame.payload.len() >= 2 {
-            let code_val = u16::from_be_bytes([frame.payload[0], frame.payload[1]]);
-            let close_code = CloseCode::new(code_val);
-
-            // RFC 6455 Section 7.4.1: クローズコードの妥当性検証
-            if !close_code.is_valid() {
-                self.close_internal(
-                    CloseCode::PROTOCOL_ERROR,
-                    &format!("invalid close code: {}", code_val),
-                )?;
-                return Err(Error::protocol_violation(format!(
-                    "invalid close code: {}",
-                    code_val
+            // RFC 7692 Section 7.1.2.1: server_max_window_bits は
+            // クライアントの offer 以下でなければならない
+            if let (Some(client_smwb), Some(server_smwb)) = (
+                deflate_config.server_max_window_bits,
+                config.server_max_window_bits,
+            ) && server_smwb > client_smwb
+            {
+                return Err(Error::handshake_rejected(format!(
+                    "server_max_window_bits {} exceeds client offer {}",
+                    server_smwb, client_smwb
                 )));
             }
 
-            // RFC 6455 Section 5.5.1: 理由は有効な UTF-8 でなければならない
-            let reason = match String::from_utf8(frame.payload[2..].to_vec()) {
-                Ok(r) => r,
-                Err(_) => {
-                    self.close_internal(
-                        CloseCode::PROTOCOL_ERROR,
-                        "close frame reason is not valid UTF-8",
-                    )?;
-                    return Err(Error::protocol_violation(
-                        "close frame reason is not valid UTF-8",
-                    ));
-                }
-            };
+            // RFC 7692 Section 7.1.2.2: client_max_window_bits は
+            // クライアントの offer 以下でなければならない
+            if let (Some(client_cmwb), Some(server_cmwb)) = (
+                deflate_config.client_max_window_bits,
+                config.client_max_window_bits,
+            ) && server_cmwb > client_cmwb
+            {
+                return Err(Error::handshake_rejected(format!(
+                    "client_max_window_bits {} exceeds client offer {}",
+                    server_cmwb, client_cmwb
+                )));
+            }
 
-            (Some(close_code), reason)
-        } else {
-            (None, String::new())
-        };
-
-        self.event_queue
-            .push_back(ConnectionEvent::Close { code, reason });
-
-        if !self.close_sent {
-            // クローズフレームを返送
-            // 送信禁止コードの場合は 1000 (Normal Closure) を使用
-            let reply_code = code
-                .filter(|c| c.is_sendable())
-                .map(|c| c.as_u16())
-                .unwrap_or(1000);
-            let reply_frame = Frame::close(Some(reply_code), "")?;
-            self.send_frame(reply_frame)?;
-            self.close_sent = true;
+            // RFC 7692 Section 7.2.1: 合意パラメータに client_max_window_bits = w が
+            // 含まれる場合、クライアントは 2^w バイトを超える LZ77 sliding window を
+            // 使ってメッセージを圧縮してはならない (MUST NOT)。
+            // 現在の実装では window_bits = 15 固定 (noflate の制約) のため、
+            // client_max_window_bits < 15 はサポートしない
+            if let Some(cmwb) = config.client_max_window_bits
+                && cmwb < 15
+            {
+                return Err(Error::handshake_rejected(format!(
+                    "client_max_window_bits={} is not supported (only 15 is supported)",
+                    cmwb
+                )));
+            }
         }
-
-        // 両方向でクローズが完了
-        // Ping/Pong 関連の状態とタイマーをクリア
-        self.awaiting_pong = false;
-        self.output_queue.push_back(ConnectionOutput::ClearTimer {
-            id: TimerId::PongTimeout,
-        });
-        self.output_queue
-            .push_back(ConnectionOutput::ClearTimer { id: TimerId::Ping });
-        self.output_queue.push_back(ConnectionOutput::ClearTimer {
-            id: TimerId::CloseTimeout,
-        });
-        self.set_state(ConnectionState::Closed);
-        self.output_queue
-            .push_back(ConnectionOutput::CloseConnection);
-
-        // クリーンアップ
-        self.frame_decoder.clear();
-        self.fragment_buffer.clear();
-
-        Ok(())
-    }
-
-    fn handle_ping(&mut self, frame: Frame) -> Result<(), Error> {
-        // Ping イベントを発行
-        self.event_queue
-            .push_back(ConnectionEvent::Ping(frame.payload.clone()));
-
-        // RFC 6455 Section 5.5.2: Close を受信済みなら Pong を送らない
-        if !self.close_received {
-            // Pong を自動返信（受信した Ping のペイロードをそのまま返すので 125 バイト以下は保証される）
-            let pong = Frame::pong(frame.payload)?;
-            self.send_frame(pong)?;
-        }
-
-        Ok(())
-    }
-
-    fn handle_pong(&mut self, frame: Frame) -> Result<(), Error> {
-        self.awaiting_pong = false;
-
-        // Pong タイムアウトをクリア
-        self.output_queue.push_back(ConnectionOutput::ClearTimer {
-            id: TimerId::PongTimeout,
-        });
-
-        // Pong イベントを発行
-        self.event_queue
-            .push_back(ConnectionEvent::Pong(frame.payload));
-
+        self.shared
+            .enable_deflate(PerMessageDeflate::new_client(config));
         Ok(())
     }
 }

@@ -60,44 +60,6 @@ fn create_masked_close_frame(code: Option<u16>, reason: &str, mask_key: [u8; 4])
     Frame::close(code, reason).unwrap().encode(mask_key)
 }
 
-// ==== ServerConnectionOptions のテスト ====
-
-proptest! {
-    /// ServerConnectionOptions::protocol は複数回呼び出しても正しく蓄積される
-    #[test]
-    fn prop_server_options_multiple_protocols(
-        protocols in prop::collection::vec("[a-z]{1,20}", 0..10)
-    ) {
-        let mut options = ServerConnectionOptions::new();
-        for p in &protocols {
-            options = options.protocol(p);
-        }
-        prop_assert_eq!(options.protocols.len(), protocols.len());
-        for (i, p) in protocols.iter().enumerate() {
-            prop_assert_eq!(&options.protocols[i], p);
-        }
-    }
-
-    /// ServerConnectionOptions::header は複数回呼び出しても正しく蓄積される
-    #[test]
-    fn prop_server_options_multiple_headers(
-        headers in prop::collection::vec(("[a-zA-Z-]{1,20}", "[a-zA-Z0-9 ]{0,50}"), 0..10)
-    ) {
-        let mut options = ServerConnectionOptions::new();
-        for (name, value) in &headers {
-            options = options.header(name, value);
-        }
-        prop_assert_eq!(options.additional_headers.len(), headers.len());
-    }
-
-    /// ping_interval は任意の値を設定可能
-    #[test]
-    fn prop_server_options_ping_interval(interval in 0u64..=u64::MAX) {
-        let options = ServerConnectionOptions::new().ping_interval(interval);
-        prop_assert_eq!(options.ping_interval_millis, interval);
-    }
-}
-
 // ==== ハンドシェイク処理のテスト ====
 
 proptest! {
@@ -711,38 +673,6 @@ proptest! {
     }
 }
 
-// ==== 不正な入力に対する耐性テスト ====
-
-proptest! {
-    /// ランダムなバイト列は適切にエラーハンドリングされる
-    #[test]
-    fn prop_random_bytes_handling(
-        random_data in prop::collection::vec(any::<u8>(), 0..1000),
-    ) {
-        let mut conn = setup_connected_server();
-
-        // ランダムなデータを送信してもパニックしない
-        let _ = conn.feed_recv_buf(&random_data);
-
-        // 状態は一貫している（パニックせずに何らかの状態）
-        let _ = conn.state();
-    }
-
-    /// ハンドシェイク中にランダムなデータを送っても安全
-    #[test]
-    fn prop_random_bytes_during_handshake(
-        random_data in prop::collection::vec(any::<u8>(), 1..500),
-    ) {
-        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
-
-        // ランダムなデータを送信
-        let _ = conn.feed_recv_buf(&random_data);
-
-        // パニックしない
-        let _ = conn.state();
-    }
-}
-
 // ==== deflate 拡張ネゴシエーションのテスト ====
 
 use shiguredo_websocket::ServerHandshakeResponse;
@@ -1023,7 +953,7 @@ proptest! {
 proptest! {
     /// accept_handshake で予約済みヘッダーを additional_headers に渡すとエラーになる
     ///
-    /// RFC 6455 Section 4.2.2: 予約済みヘッダーは MUST NOT appear more than once
+    /// RFC 6455 Section 4.2.2: サーバーハンドシェイクの予約済みヘッダーは重複してはならない
     #[test]
     fn prop_accept_handshake_rejects_reserved_header(
         key in prop::array::uniform16(any::<u8>()),
@@ -1183,5 +1113,227 @@ proptest! {
         // failed フラグが立っているので 2 回目も即座にエラー
         let second = conn.feed_recv_buf(&[]);
         prop_assert!(second.is_err());
+    }
+}
+
+// ==== Close フレームの接続層検証 ====
+
+proptest! {
+    /// RFC 6455 Section 5.5.1: Close ペイロードは 0 または 2 以上でなければならない。
+    /// 接続済みサーバーが 1 バイト Close フレームを受信した場合、
+    /// `handle_close` 経路で `ProtocolViolation` を返し、Close フレーム (1002) を送出する
+    #[test]
+    fn prop_close_frame_single_byte_payload_at_application_layer(
+        payload_byte in any::<u8>(),
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server();
+
+        let masked_payload = payload_byte ^ mask_key[0];
+        let frame = vec![
+            0x88,       // FIN=1 + Close opcode
+            0x80 | 1,   // MASK=1 + length=1
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            masked_payload,
+        ];
+
+        let result = conn.feed_recv_buf(&frame);
+        prop_assert!(result.is_err(), "1 バイトの Close ペイロードはアプリ層でエラーになるべき");
+        let err = result.unwrap_err();
+        prop_assert_eq!(err.kind, ErrorKind::ProtocolViolation);
+
+        // サーバーは応答 Close (1002 Protocol Error) を送出する
+        let mut found_close = false;
+        while let Some(output) = conn.poll_output() {
+            if let ConnectionOutput::SendData(data) = output {
+                let mut decoder = shiguredo_websocket::FrameDecoder::new();
+                decoder.feed(&data);
+                if let Ok(Some(decoded)) = decoder.decode()
+                    && decoded.opcode == shiguredo_websocket::Opcode::Close
+                    && decoded.payload.len() >= 2
+                {
+                    let code = u16::from_be_bytes([decoded.payload[0], decoded.payload[1]]);
+                    prop_assert_eq!(code, CloseCode::PROTOCOL_ERROR.as_u16());
+                    found_close = true;
+                    break;
+                }
+            }
+        }
+        prop_assert!(found_close, "1 バイト Close 受信後に応答 Close フレームが送出されていない");
+    }
+}
+
+// ==== MAX_PENDING_FRAME_DATA の境界値テスト ====
+
+/// サーバー側 `MAX_PENDING_FRAME_DATA` (`src/websocket_server_connection.rs`) と同じ値。
+/// 実装側と同期する必要がある (両方で更新する想定)
+const MAX_PENDING_FRAME_DATA: usize = 1024 * 1024;
+
+/// ハンドシェイクリクエスト直後の `pending_frame_data` をちょうど境界まで埋めるヘルパ。
+/// `chunk_size` で分割しながら `total` バイトを feed する
+fn feed_chunks_to_pending(
+    conn: &mut WebSocketServerConnection,
+    total: usize,
+    chunk_size: usize,
+) -> Result<(), shiguredo_websocket::Error> {
+    let chunk = vec![0u8; chunk_size];
+    let mut sent = 0;
+    while sent + chunk_size <= total {
+        conn.feed_recv_buf(&chunk)?;
+        sent += chunk_size;
+    }
+    let remaining = total - sent;
+    if remaining > 0 {
+        conn.feed_recv_buf(&vec![0u8; remaining])?;
+    }
+    Ok(())
+}
+
+/// ハンドシェイクリクエストを送って Connecting 状態にし、`pending_request` を Some にする
+fn setup_pending_request_server() -> WebSocketServerConnection {
+    let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request(&key, None, None);
+    conn.feed_recv_buf(&request).expect("handshake");
+    // accept_handshake を呼ばず Connecting 状態のまま追加データを待つ
+    conn
+}
+
+/// deflate 有効のサーバ接続を Connected 状態まで進めるヘルパ。
+/// RSV1=1 が許容される (permessage-deflate が合意済み) 経路の検証に使う
+fn setup_connected_server_with_deflate() -> WebSocketServerConnection {
+    let options = ServerConnectionOptions::new().deflate(PerMessageDeflateConfig::default());
+    let mut conn = WebSocketServerConnection::new(options);
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request(&key, None, Some("permessage-deflate"));
+    conn.feed_recv_buf(&request).expect("handshake");
+    conn.accept_handshake_auto().expect("accept handshake");
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+    conn
+}
+
+// ==== RSV ビット違反の検出 ====
+
+proptest! {
+    /// RFC 6455 Section 5.2: クライアントから RSV2=1 のフレームは ProtocolViolation で拒否される
+    #[test]
+    fn prop_rsv2_rejected_at_server(
+        opcode in prop::sample::select(vec![0x01u8, 0x02, 0x08, 0x09, 0x0A]),
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server();
+        // byte 0: FIN=1 (0x80) + RSV2=1 (0x20) + opcode
+        // byte 1: MASK=1 (0x80) + length=0
+        let frame = vec![
+            0x80 | 0x20 | opcode,
+            0x80,
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        let result = conn.feed_recv_buf(&frame);
+        prop_assert!(result.is_err(), "RSV2=1 は拒否されるべき");
+        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+    }
+
+    /// RFC 6455 Section 5.2: クライアントから RSV3=1 のフレームは ProtocolViolation で拒否される
+    #[test]
+    fn prop_rsv3_rejected_at_server(
+        opcode in prop::sample::select(vec![0x01u8, 0x02, 0x08, 0x09, 0x0A]),
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server();
+        // byte 0: FIN=1 (0x80) + RSV3=1 (0x10) + opcode
+        let frame = vec![
+            0x80 | 0x10 | opcode,
+            0x80,
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        let result = conn.feed_recv_buf(&frame);
+        prop_assert!(result.is_err(), "RSV3=1 は拒否されるべき");
+        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+    }
+
+    /// RFC 7692 Section 6: permessage-deflate 合意済みでも、制御フレームに RSV1=1 を設定するのは禁止
+    #[test]
+    fn prop_rsv1_on_control_frame_rejected_with_deflate(
+        control_opcode in prop::sample::select(vec![0x08u8, 0x09, 0x0A]), // Close, Ping, Pong
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server_with_deflate();
+        // byte 0: FIN=1 (0x80) + RSV1=1 (0x40) + control opcode
+        let frame = vec![
+            0x80 | 0x40 | control_opcode,
+            0x80,
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        let result = conn.feed_recv_buf(&frame);
+        prop_assert!(result.is_err(), "制御フレーム + RSV1=1 は拒否されるべき");
+        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+    }
+
+    /// RFC 7692 Section 6: permessage-deflate 合意済みでも、Continuation フレームに RSV1=1 は禁止
+    /// (RSV1 はメッセージの最初のフレームにのみ設定される)
+    #[test]
+    fn prop_rsv1_on_continuation_frame_rejected_with_deflate(
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server_with_deflate();
+        // 先に Text フレーム (RSV1=0, FIN=0) を送って Continuation 待ち状態にする
+        let text_frame_first = vec![
+            0x01,           // FIN=0 + Text opcode
+            0x80,           // MASK=1 + length=0
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        conn.feed_recv_buf(&text_frame_first).expect("first fragment");
+
+        // Continuation + RSV1=1 を送る (違反)
+        let continuation_with_rsv1 = vec![
+            0x80 | 0x40,    // FIN=1 + RSV1=1 + Continuation opcode (0)
+            0x80,           // MASK=1 + length=0
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        let result = conn.feed_recv_buf(&continuation_with_rsv1);
+        prop_assert!(result.is_err(), "Continuation + RSV1=1 は拒否されるべき");
+        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+    }
+}
+
+proptest! {
+    /// 合計バイト数が MAX_PENDING_FRAME_DATA ちょうどなら受理される
+    /// (ハンドシェイク受理前にバッファされたフレームデータの上限境界)
+    #[test]
+    fn prop_pending_frame_data_at_exact_limit_is_accepted(
+        chunk_size in 1usize..=65_536,
+    ) {
+        let mut conn = setup_pending_request_server();
+        // ハンドシェイクリクエスト直後の pending_frame_data は 0 のはず (残余なし)
+        let result = feed_chunks_to_pending(&mut conn, MAX_PENDING_FRAME_DATA, chunk_size);
+        prop_assert!(
+            result.is_ok(),
+            "ちょうど MAX_PENDING_FRAME_DATA は受理されるべき (chunk_size={}, err={:?})",
+            chunk_size,
+            result.err()
+        );
+    }
+
+    /// 合計バイト数が MAX_PENDING_FRAME_DATA を 1 バイト超えると ProtocolViolation で拒否される
+    #[test]
+    fn prop_pending_frame_data_over_limit_by_one_is_rejected(
+        chunk_size in 1usize..=65_536,
+    ) {
+        let mut conn = setup_pending_request_server();
+        // 境界ちょうどまで詰める
+        feed_chunks_to_pending(&mut conn, MAX_PENDING_FRAME_DATA, chunk_size)
+            .expect("境界まで詰めるのは成功するはず");
+        // 1 バイト追加で超過させる
+        let result = conn.feed_recv_buf(&[0u8]);
+        prop_assert!(
+            result.is_err(),
+            "MAX_PENDING_FRAME_DATA + 1 は拒否されるべき"
+        );
+        prop_assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::ProtocolViolation
+        );
     }
 }

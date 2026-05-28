@@ -2,15 +2,31 @@
 
 - Priority: High
 - Created: 2026-05-14
-- Completed: -
+- Completed: 2026-05-26
+- Polished: 2026-05-26
 - Model: DeepSeek V4 Flash
-- Branch: feature/add-extract-shared-connection-state
-- Depends: 0020（`close_internal` の UTF-8 境界修正および戻り値型統一の完了後）
+- Branch: feature/refactor-extract-shared-connection-state
+
+## 前提条件
+
+本 issue は issue 0020 の完了を前提とする。CLAUDE.md の「番号が小さい issues から順番に対応すること」に対する例外であり、 0020 が先行する根拠は以下の通り:
+
+- `close_internal` のバグ修正 (0020) は独立したバグ修正であり、リファクタリング (0019) とは責務が異なる
+- 0020 を先に修正しないと、重複コードの両方にバグが残った状態で共通化することになり、共通化後のコードにもバグが混入する
+- 0020 の修正量は小さく (関数 1 つの追加 + 戻り値型の統一)、0019 に統合すると issue の責務が曖昧になる
+
+0020 から引き継ぐ前提条件:
+
+1. `src/websocket_close.rs` に `truncate_reason` 関数が存在する
+2. client 側 `close_internal` の戻り値型が `()` に統一済み
+3. client 側の全呼び出し元で `close_internal(...)` の `?` が削除済み
+
+本 issue のコード例・シグネチャはすべて 0020 完了後のコードベースを前提とする。
 
 ## 目的
 
 `WebSocketClientConnection` と `WebSocketServerConnection` の間でフレーム処理ロジックが
-コピーペーストで重複しており、RFC 違反などのバグ修正時に両方の修正を強制される。
+コピーペーストで重複しており、 RFC 違反などのバグ修正時に両方の修正を強制される。
 共通の状態 + 振る舞いを `SharedConnectionState` 構造体に切り出し、
 マスキング有無などクライアント / サーバーで挙動が分かれる部分だけを `FramePolicy` トレイト
 経由で抽象化することで、片方だけ修正してもう片方を忘れるリスクを構造的に排除する。
@@ -31,32 +47,32 @@ High。以下の根拠から判断する。
 
 ### 重複箇所一覧
 
-以下のメソッド/構造体/定数が client/server で実質同一の実装を持つ。
-行番号は 0020 適用前の commit（`develop` HEAD~1）を基準。実装時は最新の `develop` を基準に再確認すること。
+以下のメソッド / 構造体 / 定数が client/server で実質同一の実装を持つ。
+実装時はメソッド名で `grep` して特定すること。
 
-| メソッド/構造体                    | client 行 | server 行 | policy 引数 |
-| ---------------------------------- | --------- | --------- | ----------- |
-| `FragmentBuffer` (struct + impl)   | 247-294   | 122-169   | -           |
-| `process_frames`                   | 847-866   | 818-837   | 必要        |
-| `handle_decoded_frame`             | 868-879   | 839-845   | 必要        |
-| `handle_frame`                     | 881-934   | 847-900   | 必要        |
-| `handle_data_frame`                | 936-962   | 902-928   | 必要        |
-| `handle_continuation`              | 964-990   | 930-956   | 必要        |
-| `decompress_if_needed`             | 992-1013  | 958-979   | 必要        |
-| `emit_message`                     | 1015-1044 | 981-1005  | 必要        |
-| `handle_close`                     | 1046-1130 | 1007-1091 | 必要        |
-| `handle_ping`                      | 1132-1145 | 1093-1106 | 必要        |
-| `handle_pong`                      | 1147-1160 | 1108-1121 | 不要        |
-| `close_internal`                   | 634-661   | 684-709   | 必要        |
-| `send_data_frame`                  | 476-483   | 596-604   | 必要        |
-| `compress_if_enabled`              | 486-499   | 607-620   | 不要        |
-| `set_state`                        | 607-613   | 760-766   | 不要        |
-| `check_connected`                  | 615-620   | 768-773   | 不要        |
-| `handle_timer`                     | 560-593   | 712-746   | 必要        |
-| `poll_event` / `poll_output`       | 596-603   | 749-756   | 不要        |
-| `DEFAULT_MAX_FRAME_SIZE`           | 131       | 25        | -           |
-| `DEFAULT_MAX_MESSAGE_SIZE`         | 134       | 28        | -           |
-| `DEFAULT_MAX_DECOMPRESSED_SIZE`    | 137       | 31        | -           |
+| メソッド / 構造体                  | policy 引数 | 備考                                                         |
+| ---------------------------------- | ----------- | ------------------------------------------------------------ |
+| `FragmentBuffer` (struct + impl)   | -           |                                                              |
+| `process_frames`                   | 必要        |                                                              |
+| `handle_decoded_frame`             | 必要        |                                                              |
+| `handle_frame`                     | 必要        |                                                              |
+| `handle_data_frame`               | 必要        |                                                              |
+| `handle_continuation`              | 必要        |                                                              |
+| `decompress_if_needed`             | 必要        | `deflate` が `None` のエラーパスで `close_internal` を呼ぶため |
+| `emit_message`                     | 必要        |                                                              |
+| `handle_close`                     | 必要        |                                                              |
+| `handle_ping`                      | 必要        |                                                              |
+| `handle_pong`                      | 不要        |                                                              |
+| `close_internal`                   | 必要        |                                                              |
+| `send_data_frame`                  | 必要        |                                                              |
+| `compress_if_enabled`              | 不要        | `self` 参照のみで完結する                                    |
+| `set_state`                        | 不要        |                                                              |
+| `check_connected`                  | 不要        |                                                              |
+| `handle_timer`                     | 必要        |                                                              |
+| `poll_event` / `poll_output`       | 不要        |                                                              |
+| `DEFAULT_MAX_FRAME_SIZE`           | -           |                                                              |
+| `DEFAULT_MAX_MESSAGE_SIZE`         | -           |                                                              |
+| `DEFAULT_MAX_DECOMPRESSED_SIZE`    | -           |                                                              |
 
 
 
@@ -73,26 +89,25 @@ High。以下の根拠から判断する。
 | `complete_handshake` (client)                  | client 固有のレスポンス検証                                  |
 | `feed_recv_buf`                                | 状態に応じて handshake / frames へ振り分ける薄いラッパー     |
 | `send_text` / `send_binary`                    | `SharedConnectionState::send_data_frame` への薄い委譲        |
-| `send_ping`                                    | `check_connected` 検証 + `awaiting_pong` 更新の薄いラッパー  |
+| `send_ping`                                    | `check_connected` 検証 + `send_ping_internal` への委譲       |
 | `close`                                        | 送信禁止 close code の検証を行う public API                  |
+| `handshake_request` (server)                   | server 固有の public API                                     |
+| `reject_handshake` (server)                    | server 固有のハンドシェイク拒否                              |
+| `select_protocol` (server)                     | server 固有のプロトコルネゴシエーション                      |
+| `select_deflate` (server)                      | server 固有の deflate ネゴシエーション                       |
 
 ### Connection 側に残留するフィールド
 
-| フィールド               | client                       | server                          |
-| ------------------------ | ---------------------------- | ------------------------------- |
-| `options`                | `ClientConnectionOptions`    | `ServerConnectionOptions`       |
-| `handshake_validator`    | `Option<HandshakeValidator>` | `HandshakeRequestValidator`     |
-| `nonce`                  | `[u8; 16]`                   | なし                            |
-| `pending_request`        | なし                         | `Option<ServerHandshakeRequest>`|
-| `pending_frame_data`     | なし                         | `Vec<u8>`                       |
-| `negotiated_protocol`    | `Option<String>`             | `Option<String>`                |
-| `negotiated_extensions`  | `Vec<String>`                | `Vec<String>`                   |
-
-`nonce` はハンドシェイク完了後は参照されないが、`connect()` 内で `request.build(self.nonce)?`
-と `HandshakeValidator::new(self.nonce)` に同じ値を 2 回渡す経路があるため Connection 側に
-残す。
-`negotiated_protocol` / `negotiated_extensions` はハンドシェイク完了時にのみ書き込まれ、
-以降は `protocol()` / `extensions()` 経由の read-only 公開のため Shared 化しない。
+| フィールド / 定数               | client                       | server                           | 残留理由                                     |
+| ------------------------------- | ---------------------------- | -------------------------------- | -------------------------------------------- |
+| `options`                       | `ClientConnectionOptions`    | `ServerConnectionOptions`        | 型が異なる                                   |
+| `handshake_validator`           | `Option<HandshakeValidator>` | `HandshakeRequestValidator`      | 型が異なる                                   |
+| `nonce`                         | `[u8; 16]`                   | なし                             | `connect()` 内で 2 回参照                    |
+| `pending_request`               | なし                         | `Option<ServerHandshakeRequest>` | server 固有                                  |
+| `pending_frame_data`            | なし                         | `Vec<u8>`                        | server 固有                                  |
+| `negotiated_protocol`           | `Option<String>`             | `Option<String>`                 | ハンドシェイク時のみ書き込み、以降 read-only |
+| `negotiated_extensions`         | `Vec<String>`                | `Vec<String>`                    | 同上                                         |
+| `MAX_PENDING_FRAME_DATA`        | なし                         | `const usize`                    | server 固有の定数                            |
 
 ### client/server で挙動が異なるメソッド
 
@@ -100,24 +115,11 @@ High。以下の根拠から判断する。
 | ------------ | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | `send_frame` | client: masking + `Result<(), Error>` / server: masked なし + `()`                                            | `FramePolicy::encode_and_send` に統合して削除する   |
 
-`send_frame` 削除後、呼び出し側 (`close`, `send_ping`, `send_data_frame`, `handle_ping`,
-`handle_close`, `close_internal`) は `policy.encode_and_send(&frame, &mut self.shared);`
-に置換される。`encode_and_send` の戻り値は `()` のため `?` 不要。
-
 ### 未使用の `now: Timestamp` パラメータ
 
 以下の 7 メソッドで client のみが `now: Timestamp` を受け取るがすべて未使用。共通化に
-合わせて削除する。
-
-| メソッド                | client 行 | server 行 |
-| ----------------------- | --------- | --------- |
-| `process_frames`        | 847       | 818       |
-| `handle_decoded_frame`  | 868       | 839       |
-| `handle_frame`          | 881       | 847       |
-| `handle_data_frame`     | 936       | 902       |
-| `handle_continuation`   | 964       | 930       |
-| `handle_close`          | 1046      | 1007      |
-| `emit_message`          | 1015      | 981       |
+合わせて削除する: `process_frames`, `handle_decoded_frame`, `handle_frame`,
+`handle_data_frame`, `handle_continuation`, `handle_close`, `emit_message`。
 
 `complete_handshake(response, _now: Timestamp)` の `_now` および client `feed_recv_buf(buf, now)`
 の `now` は public API なので削除しない（server `feed_recv_buf(buf)` との非対称は許容）。
@@ -136,34 +138,22 @@ client は `ClientFramePolicy<R: RandomSource>` 経由で `R` の単相化を po
 押し込めるため、`SharedConnectionState` のフィールド群 (10 以上) を `R` ごとに
 複製する必要がない。
 
-### 設計判断の根拠
+トレイト + デフォルト実装ではなく構造体を選ぶ理由は、トレイトのデフォルト実装では
+実装側 struct の private field に直接アクセスできず、10 を超える共通フィールドに
+getter/setter を生やすコストが割に合わないため。`FramePolicy` を Connection 構造体の
+独立フィールドに分けることで、`&mut self.shared` と `&mut self.policy` の
+disjoint field borrow を成立させる。
 
-1. **トレイトのデフォルト実装ではなく構造体を選ぶ理由**:
-   トレイト + デフォルト実装では実装側 struct の private field に直接アクセスできない。
-   10 を超える共通フィールドに対して getter/setter を全部生やすのは割に合わない。
-2. **`FramePolicy` を独立構造体に分ける理由**:
-   `SharedConnectionState` のメソッドが `&mut self.shared` と `&mut policy` を同時に
-   借りる必要があるため、Connection 構造体の独立フィールドに切り出すことで Rust の
-   disjoint field borrow を成立させる。
+`SharedConnectionState` のフィールドはすべて `pub(crate)` とする。Connection 側の
+残留メソッドが `shared` の個別フィールド (`failed`, `close_sent`, `state` 等) に
+直接アクセスする必要があり、全フィールドに getter/setter を追加するコストは割に合わない。
 
-### 借用に関するコーディング規約
+### 借用に関する注意
 
-- `SharedConnectionState` 内で `policy.encode_and_send(&frame, self)` を呼ぶ際は、
-  `self` を引数として渡すので、呼び出しの「直前まで」に必要な `self.xxx` の書き込みを
-  完了させること（呼び出し後に続けて `self.xxx` を操作するのは問題ない）。
-- `SharedConnectionState` のメソッド内で別の Shared メソッドに `policy` を渡し直す場合
-  （例: `process_frames` → `handle_decoded_frame`）、Rust の自動 reborrow が効くため
-  `self.handle_decoded_frame(decoded, policy)?;` のように単に `policy` を渡せばよい。
-  明示的な `&mut *policy` は不要。
-- Connection 側で `self.shared.<method>(..., &mut self.policy)` を呼ぶときは、
-  `&mut self.shared` と `&mut self.policy` の同時借用が disjoint field borrow として
-  成立する。残留フィールド (`self.options.X`, `self.negotiated_protocol` 等) を
-  同一式内で読む場合も、`self.shared` / 残留フィールドはそれぞれ異なるフィールドなので
-  disjoint field borrow が成立し問題ない（例:
-  `self.shared.event_queue.push_back(ConnectionEvent::Connected { protocol: self.negotiated_protocol.clone(), ... })` は通る）。
+- `policy.encode_and_send(&frame, self)` の呼び出し前に `frame` をローカル変数に
+  束縛すること。`self` を `&mut` で渡すため、`frame` の構築と送信を同一式で行えない。
 - `self.pending_frame_data` 等の他の `&mut` フィールドはローカル変数に
-  `std::mem::take` で取り出してから渡せば衝突しない（既存 `accept_handshake` L534-537
-  の書き方をそのまま踏襲する）。
+  `std::mem::take` で取り出してから渡す（既存 `accept_handshake` の書き方を踏襲する）。
 
 ## 完了条件
 
@@ -181,9 +171,7 @@ client は `ClientFramePolicy<R: RandomSource>` 経由で `R` の単相化を po
    `ConnectionState` / `TimerId` / `ConnectionEvent` / `ConnectionOutput` の
    `use crate::{...}` によるインポート、`DEFAULT_MAX_FRAME_SIZE` /
    `DEFAULT_MAX_MESSAGE_SIZE` / `DEFAULT_MAX_DECOMPRESSED_SIZE` 定数が削除されている
-9. `src/websocket_frame.rs` の `encode_unmasked` から `#[allow(dead_code)]` が
-   除去されている（本リファクタリング前でも `server::send_frame` から呼ばれており
-   事実上 dead code ではないが、本 issue を完了条件とする）
+9. `src/websocket_frame.rs` の `encode_unmasked` から `#[allow(dead_code)]` が除去されている
 10. `CHANGES.md` の `## develop` > `### misc` に変更履歴エントリが追加され、
     `@実装者名` プレースホルダが実装者の GitHub ハンドルに置換されている
 
@@ -195,9 +183,11 @@ client は `ClientFramePolicy<R: RandomSource>` 経由で `R` の単相化を po
 `ConnectionEvent`, `ConnectionOutput`, `RandomSource` の 5 型の定義を
 `src/websocket_client_connection.rs` から移動する。
 
-`RandomSource` は client 固有のトレイトだが、`ClientFramePolicy` が
-`websocket_connection_shared.rs` に定義され `RandomSource` を型パラメータ境界に使うため、
-循環参照を避ける目的で `websocket_connection_types.rs` に移動する。
+`RandomSource` は client 固有のトレイトだが、`ClientFramePolicy<R: RandomSource>` が
+`websocket_connection_shared.rs` に定義され `RandomSource` を型パラメータ境界に使う。
+`RandomSource` を `websocket_client_connection.rs` に残すと
+`websocket_connection_shared.rs` → `websocket_client_connection.rs` の依存が生じ、
+逆方向の依存と循環するため `websocket_connection_types.rs` に移動する。
 各ファイルへの型定義の配置後、削除元ファイルに `use crate::websocket_connection_types::{...};`
 を追加してから元定義を削除する（削除と追加を同時に行わないと中間状態でコンパイルエラーになる）。
 
@@ -222,9 +212,9 @@ pub use websocket_client_connection::{
 };
 ```
 
-server 側 (`src/websocket_server_connection.rs:18`) の
+server 側 (`src/websocket_server_connection.rs`) の
 `use crate::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};` は
-`lib.rs` の `pub use` 経由でそのまま動くので変更は任意。スタイル統一として
+スタイル統一のため
 `use crate::websocket_connection_types::{ConnectionEvent, ConnectionOutput, ConnectionState, TimerId};`
 に書き換える。
 
@@ -278,7 +268,7 @@ impl FragmentBuffer {
         self.payload.extend_from_slice(payload);
     }
     pub(crate) fn take(&mut self) -> (Opcode, Vec<u8>, bool) {
-        let opcode = self.opcode.take().unwrap_or(Opcode::Binary);
+        let opcode = self.opcode.take().expect("FragmentBuffer::take called on empty buffer");
         let payload = std::mem::take(&mut self.payload);
         let compressed = self.compressed;
         self.compressed = false;
@@ -417,8 +407,9 @@ impl FramePolicy for ServerFramePolicy {
 }
 ```
 
-`src/websocket_frame.rs:107` の `encode_unmasked` から `#[allow(dead_code)]` を除去する。
-本 issue 完了後は `ServerFramePolicy::encode_and_send` 経由で使用されるため不要となる。
+`src/websocket_frame.rs` の `encode_unmasked` に付与されている `#[allow(dead_code)]` を除去する。
+リファクタリング前の時点で `server::send_frame` から呼ばれており dead code ではなく、
+リファクタリング後は `ServerFramePolicy::encode_and_send` から呼ばれるため不要。
 
 ### Step 4: `SharedConnectionState` に共通メソッドを実装する
 
@@ -503,9 +494,7 @@ fn handle_decoded_frame(
 
 ### Step 4-1: `close_internal` の最終形
 
-`close_internal` が `truncate_reason` を呼び出す形になっていることを確認し、
-なっていなければ client/server 両方の `close_internal` を書き換える。
-書き換え後の最終形は以下:
+issue 0020 で `truncate_reason` が追加済みであることを前提とする。最終形は以下:
 
 ```rust
 fn close_internal(
@@ -523,7 +512,7 @@ fn close_internal(
         // Frame::close の将来的なエラー条件追加に備えて unwrap_or_else を維持する。
         let truncated = truncate_reason(reason, 123);
         let frame = Frame::close(Some(code.as_u16()), truncated)
-            .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").unwrap());
+            .unwrap_or_else(|_| Frame::close(Some(code.as_u16()), "").expect("empty reason close frame must always succeed"));
         policy.encode_and_send(&frame, self);
         self.close_sent = true;
 
@@ -576,10 +565,6 @@ TimerId::Ping => {
 }
 ```
 
-空ペイロードは `Frame::ping` が常に成功するため `send_ping_internal` の `?` は実質的に
-`Ok(())` を伝搬するのみ。外側で `state == Connected` を確認済みのため `send_ping` 内の
-`check_connected` 検証相当は自明に通過する。
-
 `TimerId::PongTimeout` 分岐の最終形:
 
 ```rust
@@ -591,11 +576,6 @@ TimerId::PongTimeout => {
     }
 }
 ```
-
-`close_internal` が `()` を返すため `handle_timer` の戻り値は PongTimeout 発火時に必ず `Ok(())`
-となる。`awaiting_pong` フラグは PongTimeout 発火後もリセットしないが、
-`close_internal` が `state` を `Closing` に遷移させるため、次の `Ping` タイマー発火時には
-`state == Connected` 条件で弾かれ Ping は送られない。
 
 ### Step 5: 各 Connection 構造体への組み込み
 
@@ -655,17 +635,15 @@ Connection 側に残る各メソッドに対して、機械的に以下の置換
 - public メソッド `state` / `protocol` / `extensions` / `poll_event` / `poll_output` /
   `handle_timer` は `self.shared.<同名>(...)` への単純委譲
 
-対象メソッド（行範囲は実装時に再確認すること）:
+対象メソッド:
 
-- client: `connect` (398-440), `feed_recv_buf` (446-461), `send_text` (464-467),
-  `send_binary` (470-473), `send_ping` (504-519), `close` (526-557),
-  `process_handshake` (663-692), `complete_handshake` (694-845),
+- client: `connect`, `feed_recv_buf`, `send_text`, `send_binary`, `send_ping`,
+  `close`, `process_handshake`, `complete_handshake`,
   公開メソッド `state` / `protocol` / `extensions` / `poll_event` / `poll_output` /
   `handle_timer`
-- server: `feed_recv_buf` (264-281), `accept_handshake_auto` (294-315) は内部で
-  `accept_handshake` を呼ぶだけなので書き換え不要, `accept_handshake` (318-541),
-  `reject_handshake` (548-581), `process_handshake` (781-816), `send_text` (584-587),
-  `send_binary` (590-593), `send_ping` (625-640), `close` (647-678),
+- server: `feed_recv_buf`, `accept_handshake_auto` (内部で `accept_handshake` を呼ぶ
+  だけなので書き換え不要), `accept_handshake`, `reject_handshake`,
+  `process_handshake`, `send_text`, `send_binary`, `send_ping`, `close`,
   公開メソッド `state` / `protocol` / `extensions` / `poll_event` / `poll_output` /
   `handle_timer`
 
@@ -735,7 +713,9 @@ pub fn send_ping(&mut self, data: &[u8]) -> Result<(), Error> {
     self.shared.send_ping_internal(data, &mut self.policy)
 }
 
-// client close 書き換え後（状態チェック部は残留フィールド参照のまま）
+// client close 書き換え後
+// 入力バリデーションのみ行い、Close フレーム送信は close_internal に委譲する。
+// close_internal 内の truncate_reason は reason が 123 バイト以下なら no-op。
 pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
     if !matches!(
         self.shared.state,
@@ -750,16 +730,16 @@ pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
             code_val
         )));
     }
-    if !self.shared.close_sent {
-        let frame = Frame::close(Some(code.as_u16()), reason)?;
-        self.policy.encode_and_send(&frame, &mut self.shared);
-        self.shared.close_sent = true;
-        self.shared.output_queue.push_back(ConnectionOutput::SetTimer {
-            id: TimerId::CloseTimeout,
-            duration_millis: self.shared.close_timeout_millis,
-        });
-        self.shared.set_state(ConnectionState::Closing);
+    // reason が 123 バイト超の場合は Frame::close がエラーを返す。
+    // close_internal は truncate_reason で切り詰めるが、public API では呼び出し元に
+    // エラーとして通知する。
+    if reason.len() > 123 {
+        return Err(Error::invalid_input(format!(
+            "close reason exceeds 123 bytes: {} bytes",
+            reason.len()
+        )));
     }
+    self.shared.close_internal(code, reason, &mut self.policy);
     Ok(())
 }
 ```
@@ -809,15 +789,25 @@ if !self.pending_frame_data.is_empty() {
 
 ### 観測可能な挙動の変化
 
-以下 2 点は意図的な内部挙動変更。テスト戦略で固定する。
+以下 3 点は意図的な内部挙動変更。テスト戦略で固定する。
 
 1. **server `emit_message` の Close 呼び出し先**:
-   `self.close(...)` が `self.close_internal(...)` に変わる。検証条件が異なるが
-   `emit_message` は `Connected` / `Closing` でのみ到達するため実害なし。
-   Close フレーム送信動作は維持される。
-2. **`handle_timer` の PongTimeout 戻り値**:
-   `close_internal` が値を返さないため戻り値は常に `Ok(())` となる。
+   `self.close(...)` が `self.close_internal(...)` に変わる。`close()` は
+   `is_sendable()` チェックと状態チェック (`Connected | Closing`) を行うが、
+   `close_internal()` は `Disconnected | Closed` のガードのみ行う。
+   `emit_message` は `Connected | Closing` 状態でのみ到達するため状態チェックは自明に通過する。
+   渡される `CloseCode::INVALID_PAYLOAD` (1007) は `is_sendable() == true` のため
+   送信禁止チェックも実害なし。Close フレーム送信動作は維持される。
+2. **client/server `handle_timer::PongTimeout` の Close 呼び出し先**:
+   client 側: `self.close(...)` が `self.close_internal(...)` に変わる。
+   server 側: `self.close(...)` が `self.close_internal(...)` に変わる。
+   渡される `CloseCode::POLICY_VIOLATION` (1008) は `is_sendable() == true` のため実害なし。
+   `close_internal` が `()` を返すため戻り値は常に `Ok(())` となる。
    エラー検出は `ConnectionEvent::Error("pong timeout")` のイベントキュー経由に一本化される。
+3. **client/server `handle_timer::Ping` の send_ping 呼び出し先**:
+   public `send_ping` から内部の `send_ping_internal` に変わる。`send_ping` 内の
+   `check_connected()` は外側の `state == Connected` ガードにより自明に通過するため
+   実害なし。この最終形は client/server 両方の `handle_timer::Ping` 分岐を置き換える。
 
 ## テスト戦略
 
@@ -826,22 +816,34 @@ if !self.pending_frame_data.is_empty() {
 PBT は公開 API のみを使用しているため、`lib.rs` の `pub use` が Step 1 通りに
 更新されればビルドに影響しない。
 
-「後方互換性」で挙げた 2 つの意図的挙動変更については、PBT の strategy としては
+「後方互換性」で挙げた 3 つの意図的挙動変更のうち 1・2 については、PBT の strategy としては
 状態遷移の自由度が低く（`emit_message` は `Connected` / `Closing` 状態でしか
 到達しない）プロパティ化が薄くなるため、**単体テストとして固定する**。
 
+`tests/` ディレクトリが存在しない場合は新規作成する。
 `tests/test_websocket_connection_shared.rs` を新規作成し以下を追加する。
 `SharedConnectionState` は `pub(crate)` のため、テストは `WebSocketClientConnection` /
 `WebSocketServerConnection` の公開 API 経由でのみアクセス可能。
 テストのセットアップでは必ずハンドシェイクを完了させてから `feed_recv_buf` に
 データを流すこと。
 
-1. server で `String::from_utf8` 不正なテキスト 1 フレームを `feed_recv_buf` に流すと、
+1. server で不正 UTF-8 を含むテキスト 1 フレームを `feed_recv_buf` に流すと、
    送信キュー (`poll_output`) に Close フレーム (close code 1007) が積まれ、
-   イベントキュー (`poll_event`) に `ConnectionEvent::Error` が積まれること
+   イベントキュー (`poll_event`) に `ConnectionEvent::Error` が積まれること。
+   リファクタリング前は `emit_message` 内で `self.close()` を呼んでおり
+   `is_sendable()` チェックが入るが、リファクタリング後は `self.close_internal()` を
+   呼ぶためチェックがスキップされる。Close フレーム送信という最終挙動が同一であることを検証する
 2. client/server 両方で `handle_timer(TimerId::PongTimeout)` を `awaiting_pong = true`
    状態で呼び出した際、`Ok(())` が返り、`ConnectionEvent::Error("pong timeout")` が
    イベントキューに積まれ、送信キューに Close フレーム (close code 1008) が積まれること
+3. client で masked フレーム（サーバーからマスク付きフレーム）を `feed_recv_buf` に流すと、
+   Close フレーム (close code 1002) が送信されエラーが返ること
+   (`FramePolicy::verify_frame_masking` の検証)
+4. server で unmasked フレーム（クライアントからマスクなしフレーム）を `feed_recv_buf` に
+   流すと、Close フレーム (close code 1002) が送信されエラーが返ること
+
+`send_ping_internal` は既存の Ping/Pong 関連テスト（PBT の `prop_client_connection.rs`,
+`prop_server_connection.rs`）で間接的にカバーされる。
 
 検証コマンド:
 
@@ -854,7 +856,8 @@ cargo doc --workspace --no-deps
 
 ## CHANGES.md
 
-既存の `### misc` セクションに以下を追記する。担当者の `@実装者名` プレースホルダは
+外部 API に変更のないリファクタリングだが、内部構造の改善として `[UPDATE]` を使用し
+`### misc` セクションに記載する。担当者の `@実装者名` プレースホルダは
 コミット前に実装者の GitHub ハンドルに差し替えること。
 
 ```text

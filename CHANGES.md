@@ -13,6 +13,36 @@
 
 ### misc
 
+## 2026.3.0
+
+**リリース日**: 2026-05-28
+
+- [CHANGE] deprecated な PerMessageDeflateConfig::from_extension を削除する
+  - @voluntas
+- [CHANGE] 内部向けシンボル `ByteSliceExt` / `VecExt` / `Compressor` / `Decompressor` / `truncate_reason` を通常の pub use から除外し #[doc(hidden)] で再エクスポートに変更する
+  - @voluntas
+- [CHANGE] Extension::parse_strict のエラー型を String から ExtensionParseError に変更する
+  - @voluntas
+- [CHANGE] ClientConnectionOptions / ServerConnectionOptions のフィールドを private にする
+  - @voluntas
+- [CHANGE] Timestamp の内部フィールドを private にする
+  - @voluntas
+- [ADD] ExtensionParseError に Display / Error を実装し、ExtensionParseContext と合わせて lib.rs から公開する
+  - @voluntas
+- [UPDATE] shiguredo_http11 を 2026.6.1 に上げる
+  - @voluntas
+- [UPDATE] close_internal の戻り値型を `()` に統一する
+  - @voluntas
+- [FIX] close_internal の reason 切り詰めが UTF-8 境界を無視する問題を修正する
+  - @voluntas
+- [FIX] サーバーレスポンスで複数行の Sec-WebSocket-Extensions を誤って拒否する問題を修正する
+  - @voluntas
+
+### misc
+
+- [ADD] nginx + testcontainers を使った WebSocket e2e テストを追加する
+  - @voluntas
+
 ## 2026.2.0
 
 **リリース日**: 2026-05-16
@@ -30,7 +60,7 @@
 - [CHANGE] `Decompressor::reset` を削除する
   - 内部処理に統合する
   - @voluntas
-- [UPDATE] shiguredo_http11 を 2026.5 に上げる
+- [UPDATE] shiguredo_http11 を 2026.5.0 に上げる
   - @voluntas
 
 ### misc

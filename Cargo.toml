@@ -1,6 +1,6 @@
 [package]
 name = "shiguredo_websocket"
-version = "2026.2.0"
+version = "2026.3.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "WebSocket Library"
@@ -28,11 +28,11 @@ rust-version = "1.88"
 shiguredo_websocket = { path = "." }
 
 # 暗号ライブラリ (SHA-1 計算や masking key/nonce 用乱数生成に使用する)
-aws-lc-rs = "1.16"
+aws-lc-rs = "1.17"
 # Sec-WebSocket-Key および Sec-WebSocket-Accept の base64 エンコード/デコードに使用する
 base64ct = { version = "1.8", features = ["std"] }
 # WebSocket ハンドシェイクの HTTP リクエスト/レスポンス処理に使用する
-shiguredo_http11 = "2026.5.0"
+shiguredo_http11 = "2026.6"
 
 [dependencies]
 # Sec-WebSocket-Accept の SHA-1 計算に使用する

@@ -40,7 +40,7 @@
 //! let mut ws = WebSocketClientConnection::new(options, DemoRandom { counter: 0 });
 //!
 //! // 接続開始
-//! ws.connect().unwrap();
+//! ws.connect().expect("handshake must succeed");
 //!
 //! // 出力データを取得してソケットに送信
 //! while let Some(output) = ws.poll_output() {
@@ -72,29 +72,52 @@
 mod buf;
 mod deflate;
 mod error;
+mod fragment_buffer;
+mod frame_policy;
 mod time;
+mod token;
 mod websocket_client_connection;
 mod websocket_close;
+mod websocket_connection_shared;
+mod websocket_connection_types;
 mod websocket_extension;
 mod websocket_frame;
 mod websocket_handshake;
+mod websocket_handshake_request;
+mod websocket_handshake_response;
 mod websocket_opcode;
 mod websocket_server_connection;
 
-pub use buf::{ByteSliceExt, VecExt};
-pub use deflate::{Compressor, Decompressor, PerMessageDeflate};
+pub use deflate::PerMessageDeflate;
 pub use error::{Error, ErrorKind, HttpResponseInfo};
 pub use time::Timestamp;
-pub use websocket_client_connection::{
-    ClientConnectionOptions, ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource,
-    TimerId, WebSocketClientConnection,
-};
+pub use websocket_client_connection::{ClientConnectionOptions, WebSocketClientConnection};
 pub use websocket_close::CloseCode;
-pub use websocket_extension::{Extension, ExtensionParam, PerMessageDeflateConfig};
+pub use websocket_connection_types::{
+    ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource, TimerId,
+};
+pub use websocket_extension::{
+    Extension, ExtensionParam, ExtensionParseContext, ExtensionParseError, PerMessageDeflateConfig,
+};
 pub use websocket_frame::{Frame, FrameDecoder};
-pub use websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};
-pub use websocket_handshake::{
-    HandshakeRequestValidator, ServerHandshakeRequest, ServerHandshakeResponse,
+pub use websocket_handshake_request::{
+    HandshakeRequest, HandshakeRequestValidator, ServerHandshakeRequest,
+};
+pub use websocket_handshake_response::{
+    HandshakeResponse, HandshakeValidator, ServerHandshakeResponse,
 };
 pub use websocket_opcode::Opcode;
 pub use websocket_server_connection::{ServerConnectionOptions, WebSocketServerConnection};
+
+// 内部向け API。クレート外の通常利用は想定していないが、PBT (`ByteSliceExt` / `VecExt` /
+// `truncate_reason`) および fuzz (`Decompressor`) から参照されるため pub のまま、通常の
+// pub use では公開せず #[doc(hidden)] でドキュメント上は非表示にする。
+// `Compressor` は同経路で hidden 再エクスポートする（PerMessageDeflate と対になる API のため）。
+#[doc(hidden)]
+pub use buf::{ByteSliceExt, VecExt};
+#[doc(hidden)]
+pub use deflate::{Compressor, Decompressor};
+#[doc(hidden)]
+pub use token::is_valid_token;
+#[doc(hidden)]
+pub use websocket_close::truncate_reason;

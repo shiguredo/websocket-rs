@@ -2,42 +2,64 @@
 # See https://prek.j178.dev for more information.
 #:schema https://www.schemastore.org/prek.json
 
+# prek の組み込み hook を使うことで、追加の依存・ネットワーク取得なしに
+# 一般的なリポジトリチェックを実施する。
 [[repos]]
 repo = "builtin"
 hooks = [
+  # 行末の余分な空白を除去する
   { id = "trailing-whitespace" },
+  # ファイル末尾に必ず改行 1 個を入れる
   { id = "end-of-file-fixer" },
+  # 改行コードを LF に統一する
+  { id = "mixed-line-ending", args = ["--fix=lf"] },
+  # TOML の構文を検証する (Cargo.toml / prek.toml / rust-toolchain.toml 等)
   { id = "check-toml" },
+  # YAML の構文を検証する (.github/workflows/*.yml 等)
+  { id = "check-yaml" },
+  # マージコンフリクトのマーカー (<<<<<<<, =======, >>>>>>>) をコミットさせない
+  { id = "check-merge-conflict" },
+  # 巨大ファイルの誤コミットを防ぐ (デフォルト 500KB)
+  { id = "check-added-large-files" },
+  # 大文字小文字違いで衝突するファイル名を防ぐ (macOS / Windows との互換性)
+  { id = "check-case-conflict" },
+  # 実行ビットの立った非スクリプトファイル (shebang 無し) を防ぐ
+  { id = "check-executables-have-shebangs" },
+  # 秘密鍵らしき内容のコミットを検出する
+  { id = "detect-private-key" },
 ]
 
+# Cargo ツールチェーンを使うローカル hook。
+# system 言語で実行することで rust-toolchain.toml のチャネルに従う。
 [[repos]]
 repo = "local"
-hooks = [
-  {
-    id = "cargo-fmt",
-    name = "cargo fmt",
-    entry = "cargo fmt --all -- --check",
-    language = "system",
-    types = ["rust"],
-    pass_filenames = false,
-    priority = 0,
-  },
-  {
-    id = "cargo-clippy",
-    name = "cargo clippy",
-    entry = "cargo clippy --workspace --all-targets -- -D warnings",
-    language = "system",
-    types = ["rust"],
-    pass_filenames = false,
-    priority = 10,
-  },
-  {
-    id = "cargo-test",
-    name = "cargo test",
-    entry = "cargo test --workspace",
-    language = "system",
-    types = ["rust"],
-    pass_filenames = false,
-    priority = 20,
-  },
-]
+
+# cargo fmt --check は最も軽量なので最初に動かす
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+entry = "cargo fmt --all -- --check"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+priority = 0
+
+# clippy は比較的時間がかかるので fmt の後に走らせる
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy"
+entry = "cargo clippy --workspace --all-targets -- -D warnings"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+priority = 10
+
+# 最も重いので最後に走らせる
+[[repos.hooks]]
+id = "cargo-test"
+name = "cargo test"
+entry = "cargo test --workspace"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+priority = 20

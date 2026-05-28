@@ -32,3 +32,7 @@ tokio = { version = "1.52", features = [
 ] }
 # tokio と rustls の統合に使用する
 tokio-rustls = "0.26"
+
+[dev-dependencies]
+# Docker コンテナ起動 (実 nginx 相手の e2e テスト)
+testcontainers = { version = "0.27", default-features = false, features = ["aws-lc-rs"] }

@@ -26,15 +26,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "fuzz_http_response"
-path = "fuzz_targets/fuzz_http_response.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "fuzz_extension_parse_strict"
-path = "fuzz_targets/fuzz_extension_parse_strict.rs"
+name = "fuzz_extension_parse"
+path = "fuzz_targets/fuzz_extension_parse.rs"
 test = false
 doc = false
 bench = false
@@ -63,6 +56,27 @@ bench = false
 [[bin]]
 name = "fuzz_client_connection"
 path = "fuzz_targets/fuzz_client_connection.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_client_connection_established"
+path = "fuzz_targets/fuzz_client_connection_established.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_server_connection_established"
+path = "fuzz_targets/fuzz_server_connection_established.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_deflate_compress"
+path = "fuzz_targets/fuzz_deflate_compress.rs"
 test = false
 doc = false
 bench = false
