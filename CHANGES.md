@@ -58,6 +58,8 @@
   - @voluntas
 - [UPDATE] websocket_connection_shared.rs を fragment_buffer / frame_policy に分割する
   - @voluntas
+- [UPDATE] websocket_handshake.rs をリクエスト / レスポンスモジュールに分割する
+  - @voluntas
 
 ## 2026.3.0
 

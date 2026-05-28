@@ -83,6 +83,8 @@ mod websocket_connection_types;
 mod websocket_extension;
 mod websocket_frame;
 mod websocket_handshake;
+mod websocket_handshake_request;
+mod websocket_handshake_response;
 mod websocket_opcode;
 mod websocket_server_connection;
 
@@ -98,9 +100,11 @@ pub use websocket_extension::{
     Extension, ExtensionParam, ExtensionParseContext, ExtensionParseError, PerMessageDeflateConfig,
 };
 pub use websocket_frame::{Frame, FrameDecoder};
-pub use websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};
-pub use websocket_handshake::{
-    HandshakeRequestValidator, ServerHandshakeRequest, ServerHandshakeResponse,
+pub use websocket_handshake_request::{
+    HandshakeRequest, HandshakeRequestValidator, ServerHandshakeRequest,
+};
+pub use websocket_handshake_response::{
+    HandshakeResponse, HandshakeValidator, ServerHandshakeResponse,
 };
 pub use websocket_opcode::Opcode;
 pub use websocket_server_connection::{ServerConnectionOptions, WebSocketServerConnection};
