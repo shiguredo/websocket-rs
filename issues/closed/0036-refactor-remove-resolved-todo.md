@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: mimo-v2.5-pro
 - Branch: feature/refactor-remove-resolved-todo
 
@@ -46,3 +47,11 @@ Low。技術的文脈（`,` 単純分割の限界、将来の stateful パーサ
 - 技術的文脈のコメントが残っている
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[UPDATE]` と担当者行がある
+
+## 解決方法
+
+- `src/websocket_handshake.rs` の 3 箇所（行 414 付近、行 616 付近、`validate_extension_entry` 関数内）から `TODO: issues/closed/0003-...` というプレフィクスと issue パス参照を削除した
+- 技術的文脈（RFC 9110 Section 5.6.1 の `#rule`、permessage-deflate のパラメータは token のため実害がないこと、stateful パーサーへの将来置き換えが必要であること）は通常コメントとして維持した
+- 3 箇所の表記揺れ（「未対応」の挿入位置）をレビュー指摘に従い「〜が必要（未対応）」形式に統一し、`validate_extension_entry` 側の上流参照を `Sec-WebSocket-Extensions の ',' 分割` に明示化した
+- `CHANGES.md` の `## develop` `### misc` セクションに `- [UPDATE] websocket_handshake.rs の解決済み issue 参照の TODO コメントを設計メモコメントに整理する` を追記した
+- `cargo fmt --all -- --check` / `cargo clippy --workspace --all-targets -- -D warnings` / `cargo test --workspace` が全件パスすることを確認した
