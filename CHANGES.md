@@ -78,6 +78,8 @@
   - @voluntas
 - [UPDATE] 64 ビットペイロード長 MSB=1 フレームの拒否を PBT で検証する
   - @voluntas
+- [UPDATE] RSV ビット違反の検出を prop_violations で検証する
+  - @voluntas
 
 ## 2026.3.0
 
