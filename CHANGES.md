@@ -72,6 +72,8 @@
   - @voluntas
 - [UPDATE] validate_extension_entry を Extension::parse_strict に統一する
   - @voluntas
+- [UPDATE] Close フレーム 1 バイトペイロードの接続層エラーを PBT で検証する
+  - @voluntas
 
 ## 2026.3.0
 
