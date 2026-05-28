@@ -74,6 +74,8 @@
   - @voluntas
 - [UPDATE] Close フレーム 1 バイトペイロードの接続層エラーを PBT で検証する
   - @voluntas
+- [UPDATE] MAX_PENDING_FRAME_DATA の境界値を PBT で検証する
+  - @voluntas
 
 ## 2026.3.0
 

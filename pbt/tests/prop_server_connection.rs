@@ -1162,3 +1162,79 @@ proptest! {
         prop_assert!(found_close, "1 バイト Close 受信後に応答 Close フレームが送出されていない");
     }
 }
+
+// ==== MAX_PENDING_FRAME_DATA の境界値テスト ====
+
+/// サーバー側 `MAX_PENDING_FRAME_DATA` (`src/websocket_server_connection.rs`) と同じ値。
+/// 実装側と同期する必要がある (両方で更新する想定)
+const MAX_PENDING_FRAME_DATA: usize = 1024 * 1024;
+
+/// ハンドシェイクリクエスト直後の `pending_frame_data` をちょうど境界まで埋めるヘルパ。
+/// `chunk_size` で分割しながら `total` バイトを feed する
+fn feed_chunks_to_pending(
+    conn: &mut WebSocketServerConnection,
+    total: usize,
+    chunk_size: usize,
+) -> Result<(), shiguredo_websocket::Error> {
+    let chunk = vec![0u8; chunk_size];
+    let mut sent = 0;
+    while sent + chunk_size <= total {
+        conn.feed_recv_buf(&chunk)?;
+        sent += chunk_size;
+    }
+    let remaining = total - sent;
+    if remaining > 0 {
+        conn.feed_recv_buf(&vec![0u8; remaining])?;
+    }
+    Ok(())
+}
+
+/// ハンドシェイクリクエストを送って Connecting 状態にし、`pending_request` を Some にする
+fn setup_pending_request_server() -> WebSocketServerConnection {
+    let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request(&key, None, None);
+    conn.feed_recv_buf(&request).expect("handshake");
+    // accept_handshake を呼ばず Connecting 状態のまま追加データを待つ
+    conn
+}
+
+proptest! {
+    /// 合計バイト数が MAX_PENDING_FRAME_DATA ちょうどなら受理される
+    /// (ハンドシェイク受理前にバッファされたフレームデータの上限境界)
+    #[test]
+    fn prop_pending_frame_data_at_exact_limit_is_accepted(
+        chunk_size in 1usize..=65_536,
+    ) {
+        let mut conn = setup_pending_request_server();
+        // ハンドシェイクリクエスト直後の pending_frame_data は 0 のはず (残余なし)
+        let result = feed_chunks_to_pending(&mut conn, MAX_PENDING_FRAME_DATA, chunk_size);
+        prop_assert!(
+            result.is_ok(),
+            "ちょうど MAX_PENDING_FRAME_DATA は受理されるべき (chunk_size={}, err={:?})",
+            chunk_size,
+            result.err()
+        );
+    }
+
+    /// 合計バイト数が MAX_PENDING_FRAME_DATA を 1 バイト超えると ProtocolViolation で拒否される
+    #[test]
+    fn prop_pending_frame_data_over_limit_by_one_is_rejected(
+        chunk_size in 1usize..=65_536,
+    ) {
+        let mut conn = setup_pending_request_server();
+        // 境界ちょうどまで詰める
+        feed_chunks_to_pending(&mut conn, MAX_PENDING_FRAME_DATA, chunk_size)
+            .expect("境界まで詰めるのは成功するはず");
+        // 1 バイト追加で超過させる
+        let result = conn.feed_recv_buf(&[0u8]);
+        prop_assert!(
+            result.is_err(),
+            "MAX_PENDING_FRAME_DATA + 1 は拒否されるべき"
+        );
+        prop_assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::ProtocolViolation
+        );
+    }
+}
