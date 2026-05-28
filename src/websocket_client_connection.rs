@@ -383,11 +383,13 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         self.negotiated_extensions = response.extensions.clone();
 
         // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
-        // RFC 7692 Section 7.1.2: クライアントがリクエストした拡張に対して
-        // サーバーが不正なレスポンスを返した場合は接続失敗
-        // RFC 6455 Section 9.1: 上の検証で ABNF 適合性は確認済み
-        // RFC 7692 Section 5 / Section 7.1.3: サーバーは offer の中から 1 つを選んで受諾する。
-        // 複数の permessage-deflate 要素を含むレスポンスは不正とみなす。
+        // RFC 6455 Section 4.2.2 step 4 (/extensions/): サーバーは client が offer していない
+        // 拡張をレスポンスに含めてはならない (MUST NOT)。
+        // RFC 6455 Section 4.1 (client validation): レスポンスが offer に無い拡張を含む場合、
+        // クライアントは WebSocket Connection を Fail する (MUST)。
+        // ABNF 適合性は上の RFC 6455 Section 9.1 の parse_strict 検証で確認済み。
+        // 複数の permessage-deflate 要素を含むレスポンスは実装ポリシーで不正とみなす
+        // (RFC 7692 では明示禁止はないが、Section 7.1.3 の例示は単一拡張のレスポンスのみ示している)。
         let pmce_count = response
             .extensions
             .iter()
@@ -447,8 +449,10 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                                     )));
                                 }
 
-                                // RFC 7692 Section 7.2.1: 合意した window bits で圧縮する必要がある
-                                // 現在の実装では window_bits=15 固定 (noflate の制約) のため、
+                                // RFC 7692 Section 7.2.1: 合意パラメータに client_max_window_bits = w が
+                                // 含まれる場合、クライアントは 2^w バイトを超える LZ77 sliding window を
+                                // 使ってメッセージを圧縮してはならない (MUST NOT)。
+                                // 現在の実装では window_bits = 15 固定 (noflate の制約) のため、
                                 // client_max_window_bits < 15 はサポートしない
                                 if let Some(cmwb) = config.client_max_window_bits
                                     && cmwb < 15

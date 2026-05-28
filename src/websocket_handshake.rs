@@ -6,7 +6,7 @@ use shiguredo_http11::{
     HeaderName, HttpHead, Request, RequestDecoder, ResponseDecoder, ResponseHead,
 };
 
-/// WebSocket ハンドシェイクで使用する固定 GUID (RFC 6455 Section 1.3)
+/// WebSocket ハンドシェイクで使用する固定 GUID (RFC 6455 Section 4.2.2 step 5 項目 4)
 const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 /// ハンドシェイクリクエストビルダー
