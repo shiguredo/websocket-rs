@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: opencode mimo-v2.5-pro
 - Branch: feature/refactor-split-connection-shared
 
@@ -42,3 +43,13 @@ Low。挙動変更なし。`FragmentBuffer` と `FramePolicy` 族は独立した
 - 上記分割が完了している
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[UPDATE]` と担当者行がある
+
+## 解決方法
+
+`src/websocket_connection_shared.rs` を 3 ファイルに分割した:
+
+- `src/fragment_buffer.rs`: `FragmentBuffer` (RFC 6455 Section 5.4 フラグメント収集バッファ)
+- `src/frame_policy.rs`: `FramePolicy` トレイト + `ClientFramePolicy` + `ServerFramePolicy` (RFC 6455 Section 5.1 マスク方向の差分)
+- `src/websocket_connection_shared.rs`: `SharedConnectionState` 本体 + 共通定数 + 内部単体テスト
+
+`src/lib.rs` に `mod fragment_buffer;` と `mod frame_policy;` を追加。公開 API (`pub use`) は変更なし。`websocket_client_connection.rs` / `websocket_server_connection.rs` の use を新パスに更新。挙動変化なし、`cargo test --workspace` 全件パス。

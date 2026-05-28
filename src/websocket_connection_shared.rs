@@ -2,16 +2,18 @@
 //!
 //! `SharedConnectionState` はフレームのデコード・エンコード・フラグメント管理・
 //! クローズハンドシェイク・タイマー処理など、WebSocket 接続の共通ロジックを集約する。
-//! マスキングの有無など client/server で異なる振る舞いは `FramePolicy` トレイト経由で
-//! 抽象化する。
+//! マスキングの有無など client/server で異なる振る舞いは `crate::frame_policy::FramePolicy`
+//! トレイト経由で抽象化する。フラグメント収集バッファは `crate::fragment_buffer` に分離。
 
 use std::collections::VecDeque;
 
 use crate::deflate::PerMessageDeflate;
 use crate::error::Error;
+use crate::fragment_buffer::FragmentBuffer;
+use crate::frame_policy::FramePolicy;
 use crate::websocket_close::{CloseCode, truncate_reason};
 use crate::websocket_connection_types::{
-    ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource, TimerId,
+    ConnectionEvent, ConnectionOutput, ConnectionState, TimerId,
 };
 use crate::websocket_frame::{DecodedFrame, Frame, FrameDecoder};
 use crate::websocket_opcode::Opcode;
@@ -24,58 +26,6 @@ pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 
 /// デフォルトの最大解凍サイズ（16MB）
 pub const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 16 * 1024 * 1024;
-
-/// フラグメント収集バッファ
-#[derive(Debug, Default)]
-pub(crate) struct FragmentBuffer {
-    /// 最初のフレームのオペコード
-    opcode: Option<Opcode>,
-    /// 収集中のペイロード
-    payload: Vec<u8>,
-    /// メッセージが圧縮されているか (最初のフレームの RSV1)
-    compressed: bool,
-}
-
-impl FragmentBuffer {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.opcode.is_none()
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.payload.len()
-    }
-
-    pub(crate) fn start(&mut self, opcode: Opcode, payload: Vec<u8>, compressed: bool) {
-        self.opcode = Some(opcode);
-        self.payload = payload;
-        self.compressed = compressed;
-    }
-
-    pub(crate) fn append(&mut self, payload: &[u8]) {
-        self.payload.extend_from_slice(payload);
-    }
-
-    pub(crate) fn take(&mut self) -> (Opcode, Vec<u8>, bool) {
-        let opcode = self
-            .opcode
-            .take()
-            .expect("FragmentBuffer::take called on empty buffer");
-        let payload = std::mem::take(&mut self.payload);
-        let compressed = self.compressed;
-        self.compressed = false;
-        (opcode, payload, compressed)
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.opcode = None;
-        self.payload.clear();
-        self.compressed = false;
-    }
-}
 
 /// クライアント / サーバー間で共有される接続状態
 ///
@@ -766,71 +716,6 @@ impl SharedConnectionState {
     /// 出力を取得する
     pub(crate) fn poll_output(&mut self) -> Option<ConnectionOutput> {
         self.output_queue.pop_front()
-    }
-}
-
-/// フレームのエンコード方向 (マスクの有無) を抽象化するトレイト
-pub(crate) trait FramePolicy {
-    /// フレームのマスク方向を検証する。
-    /// `masked` は `DecodedFrame.masked` から取得する。
-    /// `Frame` 自体には `masked` フィールドがないため、呼び出し元で分離して渡す。
-    fn verify_frame_masking(&self, masked: bool) -> Result<(), Error>;
-
-    /// フレームをエンコードして送信キューに追加する。
-    fn encode_and_send(&mut self, frame: &Frame, shared: &mut SharedConnectionState);
-}
-
-/// クライアント側のフレームポリシー
-pub(crate) struct ClientFramePolicy<R: RandomSource> {
-    random: R,
-}
-
-impl<R: RandomSource> ClientFramePolicy<R> {
-    pub(crate) fn new(random: R) -> Self {
-        Self { random }
-    }
-
-    /// ハンドシェイク用の nonce を生成する (`connect()` から利用)。
-    pub(crate) fn nonce(&mut self) -> [u8; 16] {
-        self.random.nonce()
-    }
-}
-
-impl<R: RandomSource> FramePolicy for ClientFramePolicy<R> {
-    fn verify_frame_masking(&self, masked: bool) -> Result<(), Error> {
-        // RFC 6455 Section 5.1: サーバーからのフレームはマスクしてはならない
-        // RFC 6455 Section 5.1, Section 7.4.1: 違反時は 1002 (protocol error) を使用してよい
-        if masked {
-            return Err(Error::protocol_violation("masked server frame"));
-        }
-        Ok(())
-    }
-
-    fn encode_and_send(&mut self, frame: &Frame, shared: &mut SharedConnectionState) {
-        let masking_key = self.random.masking_key();
-        let encoded = frame.encode(masking_key);
-        shared.enqueue_output(ConnectionOutput::SendData(encoded));
-    }
-}
-
-/// サーバー側のフレームポリシー
-pub(crate) struct ServerFramePolicy;
-
-impl FramePolicy for ServerFramePolicy {
-    fn verify_frame_masking(&self, masked: bool) -> Result<(), Error> {
-        // RFC 6455 Section 5.1: クライアントからのフレームはマスクしなければならない
-        // RFC 6455 Section 5.1, Section 7.4.1: 違反時は 1002 (protocol error) を使用してよい
-        if !masked {
-            return Err(Error::protocol_violation("unmasked client frame"));
-        }
-        Ok(())
-    }
-
-    fn encode_and_send(&mut self, frame: &Frame, shared: &mut SharedConnectionState) {
-        // RFC 6455 Section 5.1: サーバーは送信フレームをマスクしてはならない
-        // RFC 6455 Section 5.2: MASK=0 のとき Masking-Key field は存在しない
-        let encoded = frame.encode_unmasked();
-        shared.enqueue_output(ConnectionOutput::SendData(encoded));
     }
 }
 

@@ -5,10 +5,11 @@
 
 use crate::deflate::PerMessageDeflate;
 use crate::error::{Error, ErrorKind};
+use crate::frame_policy::ServerFramePolicy;
 use crate::websocket_close::CloseCode;
 use crate::websocket_connection_shared::{
     DEFAULT_MAX_DECOMPRESSED_SIZE, DEFAULT_MAX_FRAME_SIZE, DEFAULT_MAX_MESSAGE_SIZE,
-    ServerFramePolicy, SharedConnectionState,
+    SharedConnectionState,
 };
 use crate::websocket_connection_types::{
     ConnectionEvent, ConnectionOutput, ConnectionState, TimerId,

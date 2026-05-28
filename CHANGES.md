@@ -56,6 +56,8 @@
   - @voluntas
 - [UPDATE] ConnectionState の許可遷移を set_state で検証する
   - @voluntas
+- [UPDATE] websocket_connection_shared.rs を fragment_buffer / frame_policy に分割する
+  - @voluntas
 
 ## 2026.3.0
 
