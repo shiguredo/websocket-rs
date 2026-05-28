@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: mimo-v2.5-pro
 - Branch: feature/change-remove-deprecated-from-extension
 
@@ -44,3 +45,11 @@ Low。呼び出し 0。検証が不十分な旧 API の温存をやめる。
 - `cargo clippy --workspace --all-targets -- -D warnings` が通過する
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[CHANGE]` と担当者行がある
+
+## 解決方法
+
+- `src/websocket_extension.rs` の `PerMessageDeflateConfig::from_extension`（`#[deprecated(since = "0.3.0")]`）を関数定義ごと削除した
+  - 旧関数の検証ロジックは後継 API（`from_extension_validated` / `from_extension_for_client_response` / `from_extension_for_server_request`）で同等以上に網羅されており、リグレッションは発生しない
+- `skills/shiguredo-websocket/SKILL.md` の制限事項一覧から「`PerMessageDeflateConfig::from_extension` は deprecated」という一行を削除した
+- `CHANGES.md` の `## develop` セクション先頭の `[CHANGE]` 群に `- [CHANGE] deprecated な PerMessageDeflateConfig::from_extension を削除する` を追記した
+- `cargo fmt --all -- --check` / `cargo clippy --workspace --all-targets -- -D warnings` / `cargo test --workspace` が通過することを確認した

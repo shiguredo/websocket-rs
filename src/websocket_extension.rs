@@ -413,67 +413,6 @@ impl PerMessageDeflateConfig {
         ext
     }
 
-    /// Extension からパースする
-    ///
-    /// RFC 7692 に従い、8-15 範囲外の window_bits 値は拒否する
-    ///
-    /// # Deprecated
-    /// この関数は検証が不十分なため、`from_extension_validated` を使用してください。
-    #[deprecated(
-        since = "0.3.0",
-        note = "use from_extension_for_client_response or from_extension_for_server_request instead"
-    )]
-    pub fn from_extension(ext: &Extension) -> Option<Self> {
-        if ext.name != "permessage-deflate" {
-            return None;
-        }
-
-        let mut config = Self::default();
-
-        for param in &ext.params {
-            match param.name.as_str() {
-                "server_no_context_takeover" => {
-                    config.server_no_context_takeover = true;
-                }
-                "client_no_context_takeover" => {
-                    config.client_no_context_takeover = true;
-                }
-                "server_max_window_bits" => {
-                    if let Some(value) = &param.value {
-                        if let Ok(bits) = value.parse::<u8>() {
-                            // RFC 7692: 8-15 の範囲外は拒否
-                            if !(8..=15).contains(&bits) {
-                                return None;
-                            }
-                            config.server_max_window_bits = Some(bits);
-                        } else {
-                            return None;
-                        }
-                    }
-                }
-                "client_max_window_bits" => {
-                    if let Some(value) = &param.value {
-                        if let Ok(bits) = value.parse::<u8>() {
-                            // RFC 7692: 8-15 の範囲外は拒否
-                            if !(8..=15).contains(&bits) {
-                                return None;
-                            }
-                            config.client_max_window_bits = Some(bits);
-                        } else {
-                            return None;
-                        }
-                    } else {
-                        // 値なしの場合はデフォルト (15) を使用
-                        config.client_max_window_bits = Some(15);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        Some(config)
-    }
-
     /// Extension からパースする（検証付き）
     ///
     /// RFC 7692 に従い、パラメータの妥当性を検証する。
