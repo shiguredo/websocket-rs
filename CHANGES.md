@@ -76,6 +76,8 @@
   - @voluntas
 - [UPDATE] MAX_PENDING_FRAME_DATA の境界値を PBT で検証する
   - @voluntas
+- [UPDATE] 64 ビットペイロード長 MSB=1 フレームの拒否を PBT で検証する
+  - @voluntas
 
 ## 2026.3.0
 
