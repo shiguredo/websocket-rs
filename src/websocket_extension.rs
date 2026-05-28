@@ -33,6 +33,23 @@ pub enum ExtensionParseError {
     InvalidValue(String),
 }
 
+impl std::fmt::Display for ExtensionParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotDeflate => write!(f, "extension is not permessage-deflate"),
+            Self::UnknownParameter(name) => write!(f, "unknown parameter: {name}"),
+            Self::DuplicateParameter(name) => write!(f, "duplicate parameter: {name}"),
+            Self::MissingValue(name) => write!(f, "missing value for parameter: {name}"),
+            Self::UnexpectedValue(name) => write!(f, "unexpected value for parameter: {name}"),
+            // InvalidValue は生成側 (from_extension_validated) が
+            // 既にパラメータ名と詳細を含む自己完結的なメッセージを構築しているため、そのまま出力する。
+            Self::InvalidValue(detail) => write!(f, "{detail}"),
+        }
+    }
+}
+
+impl std::error::Error for ExtensionParseError {}
+
 /// WebSocket 拡張ネゴシエーション結果
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Extension {
