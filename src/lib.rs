@@ -83,12 +83,11 @@ mod websocket_handshake;
 mod websocket_opcode;
 mod websocket_server_connection;
 
-pub use buf::{ByteSliceExt, VecExt};
-pub use deflate::{Compressor, Decompressor, PerMessageDeflate};
+pub use deflate::PerMessageDeflate;
 pub use error::{Error, ErrorKind, HttpResponseInfo};
 pub use time::Timestamp;
 pub use websocket_client_connection::{ClientConnectionOptions, WebSocketClientConnection};
-pub use websocket_close::{CloseCode, truncate_reason};
+pub use websocket_close::CloseCode;
 pub use websocket_connection_types::{
     ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource, TimerId,
 };
@@ -102,3 +101,14 @@ pub use websocket_handshake::{
 };
 pub use websocket_opcode::Opcode;
 pub use websocket_server_connection::{ServerConnectionOptions, WebSocketServerConnection};
+
+// 内部向け API。クレート外の通常利用は想定していないが、PBT (`ByteSliceExt` / `VecExt` /
+// `truncate_reason`) および fuzz (`Decompressor`) から参照されるため pub のまま、通常の
+// pub use では公開せず #[doc(hidden)] でドキュメント上は非表示にする。
+// `Compressor` は同経路で hidden 再エクスポートする（PerMessageDeflate と対になる API のため）。
+#[doc(hidden)]
+pub use buf::{ByteSliceExt, VecExt};
+#[doc(hidden)]
+pub use deflate::{Compressor, Decompressor};
+#[doc(hidden)]
+pub use websocket_close::truncate_reason;

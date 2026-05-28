@@ -1,5 +1,7 @@
 /// reason が max_bytes を超える場合、UTF-8 文字境界で切り詰める
-#[doc(hidden)]
+///
+/// 内部向け API。`lib.rs` で `#[doc(hidden)] pub use` 経由で PBT に公開する。
+/// 通常の `pub use` で公開しないこと。
 pub fn truncate_reason(reason: &str, max_bytes: usize) -> &str {
     if reason.len() > max_bytes {
         let mut end = max_bytes;

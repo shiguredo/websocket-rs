@@ -3,6 +3,7 @@
 - Priority: Medium
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: opencode mimo-v2.5-pro
 - Branch: feature/refactor-internal-api-doc-hidden
 
@@ -69,3 +70,17 @@ Medium。不要な公開 API は将来の変更コストを上げる。`Compress
 - `cargo test --workspace` が全件パスする
 - `cargo fuzz build` が通過する（fuzz ターゲットのコンパイル確認）
 - `CHANGES.md` に上記 `[UPDATE]` と担当者行がある
+
+## 解決方法
+
+- `src/lib.rs` の通常 `pub use` から `buf::{ByteSliceExt, VecExt}` / `deflate::{Compressor, Decompressor}` / `websocket_close::truncate_reason` を除外した
+- `src/lib.rs` の末尾に `#[doc(hidden)] pub use` ブロックを追加し、上記シンボルを内部向け再エクスポートとして公開した（PBT / fuzz から参照可能）
+- `src/websocket_close.rs` の `truncate_reason` 定義から `#[doc(hidden)]` 属性を削除した
+- `src/deflate/mod.rs` の通常 `pub use` を `PerMessageDeflate` のみに分離し、内部向けに `Compressor` / `Decompressor` を別 `pub use` で公開した
+
+検証:
+
+- `cargo fmt --all -- --check` 通過
+- `cargo clippy --workspace --all-targets -- -D warnings` 通過
+- `cargo test --workspace` 全件パス
+- `cd fuzz && cargo build --bin fuzz_deflate_decompress` 通過
