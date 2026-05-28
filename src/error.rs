@@ -97,7 +97,6 @@ impl Error {
     }
 
     #[track_caller]
-    #[allow(dead_code)]
     pub(crate) fn invalid_input<T: Into<String>>(reason: T) -> Self {
         Self::with_reason(ErrorKind::InvalidInput, reason)
     }
@@ -112,8 +111,10 @@ impl Error {
         Self::with_reason(ErrorKind::InvalidState, reason)
     }
 
+    // 他の ErrorKind コンストラクタとの一貫性のため温存する。
+    // 使用が開始されると expect(dead_code) が unfulfilled となり、属性除去のタイミングを検知できる。
     #[track_caller]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn unsupported<T: Into<String>>(reason: T) -> Self {
         Self::with_reason(ErrorKind::Unsupported, reason)
     }
@@ -129,7 +130,6 @@ impl Error {
     }
 
     #[track_caller]
-    #[allow(dead_code)]
     pub(crate) fn handshake_rejected<T: Into<String>>(reason: T) -> Self {
         Self::with_reason(ErrorKind::HandshakeRejected, reason)
     }
@@ -154,7 +154,6 @@ impl Error {
     }
 
     /// WebSocket クローズコードを設定する
-    #[allow(dead_code)]
     pub fn with_close_code(mut self, code: u16) -> Self {
         self.close_code = Some(code);
         self
