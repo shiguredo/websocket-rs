@@ -48,6 +48,8 @@
   - @voluntas
 - [UPDATE] prop_error.rs の ERROR_KINDS に全 ErrorKind バリアントを含める
   - @voluntas
+- [UPDATE] ハンドシェイク後処理・Compressor・PMCE パースの fuzz ターゲットを拡充する
+  - @voluntas
 
 ## 2026.3.0
 
