@@ -895,43 +895,6 @@ proptest! {
     }
 }
 
-// ==== 不正な入力に対する耐性テスト ====
-
-proptest! {
-    /// ランダムなバイト列は適切にエラーハンドリングされる
-    #[test]
-    fn prop_random_bytes_handling(
-        random_data in prop::collection::vec(any::<u8>(), 0..1000),
-    ) {
-        let (mut conn, now, _) = setup_connected_client();
-
-        // ランダムなデータを送信してもパニックしない
-        let _ = conn.feed_recv_buf(&random_data, now);
-
-        // 状態は一貫している
-        let _ = conn.state();
-    }
-
-    /// ハンドシェイク中にランダムなレスポンスを送っても安全
-    #[test]
-    fn prop_random_bytes_during_handshake(
-        random_data in prop::collection::vec(any::<u8>(), 1..500),
-    ) {
-        let options = ClientConnectionOptions::new("example.com", "/ws");
-        let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-        let now = Timestamp::from_millis(0);
-
-        conn.connect().unwrap();
-        while conn.poll_output().is_some() {}
-
-        // ランダムなレスポンスを送信
-        let _ = conn.feed_recv_buf(&random_data, now);
-
-        // パニックしない
-        let _ = conn.state();
-    }
-}
-
 // ==== 無効な UTF-8 のテスト ====
 
 proptest! {

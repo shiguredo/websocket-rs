@@ -44,6 +44,8 @@
   - @voluntas
 - [UPDATE] websocket_handshake.rs の解決済み issue 参照の TODO コメントを設計メモコメントに整理する
   - @voluntas
+- [UPDATE] パニックのみ検証する PBT を削除し fuzzing に役割を寄せる
+  - @voluntas
 
 ## 2026.3.0
 

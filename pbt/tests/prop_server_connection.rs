@@ -711,38 +711,6 @@ proptest! {
     }
 }
 
-// ==== 不正な入力に対する耐性テスト ====
-
-proptest! {
-    /// ランダムなバイト列は適切にエラーハンドリングされる
-    #[test]
-    fn prop_random_bytes_handling(
-        random_data in prop::collection::vec(any::<u8>(), 0..1000),
-    ) {
-        let mut conn = setup_connected_server();
-
-        // ランダムなデータを送信してもパニックしない
-        let _ = conn.feed_recv_buf(&random_data);
-
-        // 状態は一貫している（パニックせずに何らかの状態）
-        let _ = conn.state();
-    }
-
-    /// ハンドシェイク中にランダムなデータを送っても安全
-    #[test]
-    fn prop_random_bytes_during_handshake(
-        random_data in prop::collection::vec(any::<u8>(), 1..500),
-    ) {
-        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
-
-        // ランダムなデータを送信
-        let _ = conn.feed_recv_buf(&random_data);
-
-        // パニックしない
-        let _ = conn.state();
-    }
-}
-
 // ==== deflate 拡張ネゴシエーションのテスト ====
 
 use shiguredo_websocket::ServerHandshakeResponse;
