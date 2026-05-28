@@ -255,7 +255,9 @@ impl WebSocketServerConnection {
         }
 
         for extension in &response.extensions {
-            // RFC 6455 Section 9.1: ABNF 不適合の拡張文字列は接続を失敗させなければならない (MUST)
+            // RFC 6455 Section 9.1: ABNF 不適合の拡張文字列は接続を失敗させなければならない (MUST)。
+            // ここはサーバー自身が組み立てたレスポンスの拡張文字列を送信前に自己検証する経路で、
+            // client が Section 9.1 により Fail the WebSocket Connection を発動する事態を未然に防ぐ。
             // parse_strict を使い、部分的に不正な拡張を見逃さないようにする
             let parsed = Extension::parse_strict(extension).map_err(|e| {
                 Error::handshake_rejected(format!("invalid extension response '{extension}': {e}"))

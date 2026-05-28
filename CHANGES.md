@@ -50,6 +50,8 @@
   - @voluntas
 - [UPDATE] ハンドシェイク後処理・Compressor・PMCE パースの fuzz ターゲットを拡充する
   - @voluntas
+- [UPDATE] RFC 引用コメントの節番号を一次資料に合わせて修正する
+  - @voluntas
 
 ## 2026.3.0
 
