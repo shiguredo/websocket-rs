@@ -32,6 +32,8 @@
   - @voluntas
 - [UPDATE] crate-level doc 内の `.unwrap()` を `.expect()` に修正する
   - @voluntas
+- [UPDATE] is_valid_token の重複実装を src/token.rs に共通化する
+  - @voluntas
 
 ## 2026.3.0
 

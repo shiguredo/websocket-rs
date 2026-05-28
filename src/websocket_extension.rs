@@ -118,7 +118,7 @@ impl Extension {
                     return None;
                 }
                 // RFC 6455 Section 9.1: extension-token は token ABNF に準拠する必要がある
-                if !Self::is_valid_token(&name) {
+                if !crate::token::is_valid_token(&name) {
                     return None;
                 }
 
@@ -132,7 +132,7 @@ impl Extension {
                     if let Some((param_name, value)) = p.split_once('=') {
                         let param_name = param_name.trim();
                         // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
-                        if !Self::is_valid_token(param_name) {
+                        if !crate::token::is_valid_token(param_name) {
                             return None;
                         }
                         let value = value.trim();
@@ -144,7 +144,7 @@ impl Extension {
                         });
                     } else {
                         // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
-                        if !Self::is_valid_token(p) {
+                        if !crate::token::is_valid_token(p) {
                             return None;
                         }
                         params.push(ExtensionParam {
@@ -181,7 +181,7 @@ impl Extension {
                 .ok_or_else(|| format!("empty extension name in '{}'", ext))?
                 .to_string();
             // RFC 6455 Section 9.1: extension-token は token ABNF に準拠する必要がある
-            if !Self::is_valid_token(&name) {
+            if !crate::token::is_valid_token(&name) {
                 return Err(format!(
                     "invalid extension name '{}': not a valid token",
                     name
@@ -203,7 +203,7 @@ impl Extension {
                 if let Some((param_name, value)) = p.split_once('=') {
                     let param_name = param_name.trim();
                     // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
-                    if !Self::is_valid_token(param_name) {
+                    if !crate::token::is_valid_token(param_name) {
                         return Err(format!(
                             "invalid parameter name in extension '{}': '{}' is not a valid token",
                             name, param_name
@@ -222,7 +222,7 @@ impl Extension {
                     });
                 } else {
                     // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
-                    if !Self::is_valid_token(p) {
+                    if !crate::token::is_valid_token(p) {
                         return Err(format!(
                             "invalid parameter name in extension '{}': '{}' is not a valid token",
                             name, p
@@ -277,21 +277,6 @@ impl Extension {
         parts
     }
 
-    /// RFC 9110 Section 5.6.2 の token ABNF に準拠するかチェック
-    ///
-    /// token = 1*tchar
-    /// tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
-    ///         "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
-    fn is_valid_token(s: &str) -> bool {
-        !s.is_empty()
-            && s.bytes().all(|b| {
-                matches!(b,
-                    b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' |
-                    b'^' | b'_' | b'`' | b'|' | b'~' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z'
-                )
-            })
-    }
-
     /// パラメータ値をパースする (quoted-string 対応)
     ///
     /// RFC 9110 Section 5.6.4 の quoted-string / quoted-pair に準拠する
@@ -312,14 +297,14 @@ impl Extension {
                 let quoted_content = &inner[..end_quote];
                 let unescaped = Self::unescape_quoted_string(quoted_content);
                 // RFC 6455 Section 9.1: 復号後の値は token ABNF に準拠する必要がある
-                if Self::is_valid_token(&unescaped) {
+                if crate::token::is_valid_token(&unescaped) {
                     return Some(unescaped);
                 }
                 return None;
             }
         }
         // token の場合: token として有効か検証
-        if Self::is_valid_token(value) {
+        if crate::token::is_valid_token(value) {
             Some(value.to_string())
         } else {
             None

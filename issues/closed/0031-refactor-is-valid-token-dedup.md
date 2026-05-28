@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: mimo-v2.5-pro
 - Branch: feature/refactor-is-valid-token-dedup
 
@@ -62,3 +63,19 @@ Low。いずれもプライベート関数で外部 API ではないが、同一
 - `cargo clippy --workspace --all-targets -- -D warnings` が通過する
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[UPDATE]` と担当者行がある
+
+## 解決方法
+
+- `src/token.rs` を新規作成し `pub fn is_valid_token(s: &str) -> bool` を定義（PBT から直接検証するため `pub` 公開し、`lib.rs` で `#[doc(hidden)] pub use` 経由でクレート外に内部向けエクスポート）
+- `src/lib.rs` に `mod token;` を追加し、`#[doc(hidden)] pub use token::is_valid_token;` で PBT 用に公開
+- `src/websocket_extension.rs` の `impl Extension` 内 `fn is_valid_token` を削除し、呼び出しを `crate::token::is_valid_token(...)` に変更
+- `src/websocket_handshake.rs` のモジュール private `fn is_valid_token` を削除し、呼び出しを `crate::token::is_valid_token(...)` に変更
+- `pbt/tests/prop_token.rs` を新規作成し、tchar のみ構成の有効性と非 tchar 含む文字列の無効性を PBT で検証
+- `tests/test_token.rs` を新規作成し、空文字列の判定を単体テストで検証
+
+検証:
+
+- `rg 'fn is_valid_token' src/` が `src/token.rs` の 1 件のみ
+- `cargo fmt --all -- --check` 通過
+- `cargo clippy --workspace --all-targets -- -D warnings` 通過
+- `cargo test --workspace` 全件パス（prop_token 2 件、test_token 1 件追加）
