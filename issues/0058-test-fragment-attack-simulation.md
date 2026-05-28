@@ -22,7 +22,7 @@ Medium。古典的 DoS ベクトル。既存フラグメント PBT は 2–5 パ
 ## 設計方針
 
 - `max_message_size = 100`（または 128）程度に設定
-- 10 バイト程度の Text フラグメントを N 個送り、合計が上限超過 → `MessageTooLarge` 相当のエラー（実装の `ErrorKind` に合わせる）
+- 10 バイト程度の Text フラグメントを N 個送り、合計が上限超過 → `Error::protocol_violation("message too large")`（`ErrorKind::ProtocolViolation`）が返ること（`src/websocket_connection_shared.rs:400-403` の実装に対応）
 - N は proptest で 15–30 程度（上限到達を確実に）
 
 ## CHANGES.md 登録内容

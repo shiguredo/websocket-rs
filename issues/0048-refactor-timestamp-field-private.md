@@ -18,10 +18,11 @@ Low。API 一貫性。`[CHANGE]`（`Timestamp(0)` 構文の利用者があれば
 
 - `src/time.rs:5`: `pub struct Timestamp(pub u64)`
 - `from_millis` / `as_millis` は既に存在
+- `rg 'Timestamp\('` で確認したところ、クレート内に `Timestamp(N)` 形式の直接構築箇所は **定義行（`src/time.rs:5`）以外に存在しない**。利用側は既に `Timestamp::from_millis(...)` 経由に統一済みのため、フィールドの可視性変更のみで完結する。
 
 ## 設計方針
 
-`Timestamp(u64)` → `Timestamp(u64)` で private 化。`rg 'Timestamp\\('` でクレート全体を置換。
+`pub struct Timestamp(pub u64);` の内側のフィールド可視性を `pub` から削り `pub struct Timestamp(u64);` にする。クレート内の構築は既に `Timestamp::from_millis` 経由に統一されているため、置換作業は不要。外部クレートが `Timestamp(0)` 等で直接構築している場合のみコンパイルエラーで検知される（意図した破壊的変更）。
 
 ## CHANGES.md 登録内容
 
