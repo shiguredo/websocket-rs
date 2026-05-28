@@ -45,7 +45,7 @@ proptest! {
 }
 
 #[test]
-fn 許可遷移表の各エントリが個別に許可される() {
+fn each_allowed_transition_entry_is_permitted() {
     for &(from, to) in ALLOWED {
         assert!(
             from.can_transition_to(to),
@@ -57,7 +57,7 @@ fn 許可遷移表の各エントリが個別に許可される() {
 }
 
 #[test]
-fn 表外の代表的な非合法遷移が拒否される() {
+fn representative_disallowed_transitions_are_denied() {
     let denied: &[(ConnectionState, ConnectionState)] = &[
         // 終端からの遷移は不可
         (ConnectionState::Closed, ConnectionState::Disconnected),
