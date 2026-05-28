@@ -41,7 +41,7 @@ impl std::fmt::Display for ExtensionParseError {
             Self::DuplicateParameter(name) => write!(f, "duplicate parameter: {name}"),
             Self::MissingValue(name) => write!(f, "missing value for parameter: {name}"),
             Self::UnexpectedValue(name) => write!(f, "unexpected value for parameter: {name}"),
-            // InvalidValue は生成側 (from_extension_validated) が
+            // InvalidValue は生成側 (from_extension_validated および parse_strict) が
             // 既にパラメータ名と詳細を含む自己完結的なメッセージを構築しているため、そのまま出力する。
             Self::InvalidValue(detail) => write!(f, "{detail}"),
         }
@@ -164,7 +164,7 @@ impl Extension {
     /// RFC 6455 Section 9.1 の ABNF に従い、不適合な値はエラーとして返す。
     /// クライアント側でサーバーレスポンスをパースする場合に使用する。
     /// RFC 6455 Section 9.1: ABNF に適合しない場合は接続を失敗させなければならない (MUST)。
-    pub fn parse_strict(s: &str) -> Result<Vec<Extension>, String> {
+    pub fn parse_strict(s: &str) -> Result<Vec<Extension>, ExtensionParseError> {
         let mut result = Vec::new();
         for ext_str in Self::split_respecting_quotes(s, b',') {
             let ext = ext_str.trim();
@@ -178,14 +178,16 @@ impl Extension {
                 .next()
                 .map(|n| n.trim())
                 .filter(|n| !n.is_empty())
-                .ok_or_else(|| format!("empty extension name in '{}'", ext))?
+                .ok_or_else(|| {
+                    ExtensionParseError::InvalidValue(format!("empty extension name in '{}'", ext))
+                })?
                 .to_string();
             // RFC 6455 Section 9.1: extension-token は token ABNF に準拠する必要がある
             if !crate::token::is_valid_token(&name) {
-                return Err(format!(
+                return Err(ExtensionParseError::InvalidValue(format!(
                     "invalid extension name '{}': not a valid token",
                     name
-                ));
+                )));
             }
 
             let mut params = Vec::new();
@@ -194,27 +196,27 @@ impl Extension {
                 // RFC 6455 Section 9.1: extension = extension-token *( ";" extension-param )
                 // ";" の後は必ず extension-param が必要。空は ABNF 違反。
                 if p.is_empty() {
-                    return Err(format!(
+                    return Err(ExtensionParseError::InvalidValue(format!(
                         "trailing ';' in extension '{}': extension-param required after ';'",
                         name
-                    ));
+                    )));
                 }
 
                 if let Some((param_name, value)) = p.split_once('=') {
                     let param_name = param_name.trim();
                     // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
                     if !crate::token::is_valid_token(param_name) {
-                        return Err(format!(
+                        return Err(ExtensionParseError::InvalidValue(format!(
                             "invalid parameter name in extension '{}': '{}' is not a valid token",
                             name, param_name
-                        ));
+                        )));
                     }
                     let value = value.trim();
                     let parsed_value = Self::parse_param_value(value).ok_or_else(|| {
-                        format!(
+                        ExtensionParseError::InvalidValue(format!(
                             "invalid parameter value in extension '{}': '{}'",
                             name, value
-                        )
+                        ))
                     })?;
                     params.push(ExtensionParam {
                         name: param_name.to_string(),
@@ -223,10 +225,10 @@ impl Extension {
                 } else {
                     // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
                     if !crate::token::is_valid_token(p) {
-                        return Err(format!(
+                        return Err(ExtensionParseError::InvalidValue(format!(
                             "invalid parameter name in extension '{}': '{}' is not a valid token",
                             name, p
-                        ));
+                        )));
                     }
                     params.push(ExtensionParam {
                         name: p.to_string(),

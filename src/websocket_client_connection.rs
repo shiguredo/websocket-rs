@@ -367,7 +367,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         // RFC 6455 Section 9.1: ABNF に不適合なら接続を失敗させる (MUST)
         for ext_str in &response.extensions {
             let extensions = Extension::parse_strict(ext_str).map_err(|e| {
-                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {}", e))
+                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {e}"))
             })?;
             for ext in &extensions {
                 if !requested_extension_names.contains(&ext.name.as_str()) {
@@ -401,7 +401,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         }
         for ext_str in &response.extensions {
             let extensions = Extension::parse_strict(ext_str).map_err(|e| {
-                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {}", e))
+                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {e}"))
             })?;
             for ext in extensions {
                 if ext.name == "permessage-deflate" {
