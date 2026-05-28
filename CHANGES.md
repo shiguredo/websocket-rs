@@ -52,6 +52,8 @@
   - @voluntas
 - [UPDATE] RFC 引用コメントの節番号を一次資料に合わせて修正する
   - @voluntas
+- [UPDATE] SharedConnectionState のフィールドをカプセル化する
+  - @voluntas
 
 ## 2026.3.0
 

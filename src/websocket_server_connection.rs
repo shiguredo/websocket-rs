@@ -157,7 +157,7 @@ impl WebSocketServerConnection {
 
     /// 現在の状態を取得
     pub fn state(&self) -> ConnectionState {
-        self.shared.state
+        self.shared.state()
     }
 
     /// ネゴシエートされたサブプロトコルを取得
@@ -180,10 +180,10 @@ impl WebSocketServerConnection {
     /// RFC 6455 Section 7.1.7: このメソッドが Err を返した後は
     /// 以降の呼び出しも即座に Err を返す。
     pub fn feed_recv_buf(&mut self, buf: &[u8]) -> Result<(), Error> {
-        if self.shared.failed {
+        if self.shared.is_failed() {
             return Err(Error::invalid_state("connection has failed"));
         }
-        let result = match self.shared.state {
+        let result = match self.shared.state() {
             ConnectionState::Disconnected | ConnectionState::Connecting => {
                 self.process_handshake(buf)
             }
@@ -195,7 +195,7 @@ impl WebSocketServerConnection {
             }
         };
         if result.is_err() {
-            self.shared.failed = true;
+            self.shared.mark_failed();
         }
         result
     }
@@ -236,7 +236,7 @@ impl WebSocketServerConnection {
 
     /// ハンドシェイクを受諾
     pub fn accept_handshake(&mut self, response: ServerHandshakeResponse) -> Result<(), Error> {
-        if self.shared.state != ConnectionState::Connecting {
+        if self.shared.state() != ConnectionState::Connecting {
             return Err(Error::invalid_state("handshake is not in progress"));
         }
 
@@ -439,29 +439,26 @@ impl WebSocketServerConnection {
             .encode()
             .map_err(|e| Error::invalid_input(e.to_string()))?;
         self.shared
-            .output_queue
-            .push_back(ConnectionOutput::SendData(encoded));
+            .enqueue_output(ConnectionOutput::SendData(encoded));
 
-        self.shared.deflate = deflate;
+        if let Some(deflate) = deflate {
+            self.shared.enable_deflate(deflate);
+        }
         self.negotiated_protocol = response.protocol.clone();
         self.negotiated_extensions = response.extensions.clone();
 
         self.shared.set_state(ConnectionState::Connected);
-        self.shared
-            .event_queue
-            .push_back(ConnectionEvent::Connected {
-                protocol: self.negotiated_protocol.clone(),
-                extensions: self.negotiated_extensions.clone(),
-            });
+        self.shared.emit_event(ConnectionEvent::Connected {
+            protocol: self.negotiated_protocol.clone(),
+            extensions: self.negotiated_extensions.clone(),
+        });
 
         // Ping タイマー設定
         if self.options.ping_interval_millis > 0 {
-            self.shared
-                .output_queue
-                .push_back(ConnectionOutput::SetTimer {
-                    id: TimerId::Ping,
-                    duration_millis: self.options.ping_interval_millis,
-                });
+            self.shared.enqueue_output(ConnectionOutput::SetTimer {
+                id: TimerId::Ping,
+                duration_millis: self.options.ping_interval_millis,
+            });
         }
 
         if !self.pending_frame_data.is_empty() {
@@ -484,7 +481,7 @@ impl WebSocketServerConnection {
         reason: &str,
         headers: &[(&str, &str)],
     ) -> Result<(), Error> {
-        if self.shared.state != ConnectionState::Connecting {
+        if self.shared.state() != ConnectionState::Connecting {
             return Err(Error::invalid_state("handshake is not in progress"));
         }
 
@@ -507,13 +504,11 @@ impl WebSocketServerConnection {
             .encode()
             .map_err(|e| Error::invalid_input(e.to_string()))?;
         self.shared
-            .output_queue
-            .push_back(ConnectionOutput::SendData(encoded));
+            .enqueue_output(ConnectionOutput::SendData(encoded));
 
         self.shared.set_state(ConnectionState::Closed);
         self.shared
-            .output_queue
-            .push_back(ConnectionOutput::CloseConnection);
+            .enqueue_output(ConnectionOutput::CloseConnection);
         Ok(())
     }
 
@@ -573,7 +568,7 @@ impl WebSocketServerConnection {
             return Ok(());
         }
 
-        if self.shared.state == ConnectionState::Disconnected {
+        if self.shared.state() == ConnectionState::Disconnected {
             self.shared.set_state(ConnectionState::Connecting);
         }
 
