@@ -360,3 +360,126 @@ fn server_で_unmasked_フレームを受信すると_close_1002_が送信され
     }
     assert!(close_found, "送信キューに Close フレームが積まれていない");
 }
+
+// ============================================================
+// テスト 5: ClientConnectionOptions / ServerConnectionOptions の
+// pong_timeout / close_timeout ビルダーが SetTimer の duration_millis に伝播する
+// ============================================================
+
+/// 任意の `duration_millis` を持つ `SetTimer` 出力が含まれているか確認する
+fn find_set_timer_with_duration(
+    outputs: &[ConnectionOutput],
+    target_id: TimerId,
+    expected_duration: u64,
+) -> bool {
+    outputs.iter().any(|o| {
+        matches!(o, ConnectionOutput::SetTimer { id, duration_millis }
+            if *id == target_id && *duration_millis == expected_duration)
+    })
+}
+
+#[test]
+fn client_で_pong_timeout_ビルダー値が_set_timer_に伝播する() {
+    let options = ClientConnectionOptions::new("example.com", "/ws").pong_timeout(33_333);
+    let random = FixedRandom::new();
+    let nonce = random.nonce;
+    let mut conn = WebSocketClientConnection::new(options, random);
+    let now = Timestamp::from_millis(0);
+
+    conn.connect().expect("connect");
+    while conn.poll_output().is_some() {}
+
+    let accept = compute_accept(&nonce);
+    let response = create_valid_handshake_response(&accept);
+    conn.feed_recv_buf(&response, now).expect("handshake");
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    conn.send_ping(&[]).expect("send_ping");
+
+    let mut outputs = Vec::new();
+    while let Some(o) = conn.poll_output() {
+        outputs.push(o);
+    }
+    assert!(
+        find_set_timer_with_duration(&outputs, TimerId::PongTimeout, 33_333),
+        "PongTimeout の SetTimer が pong_timeout(33333) を反映していない"
+    );
+}
+
+#[test]
+fn client_で_close_timeout_ビルダー値が_set_timer_に伝播する() {
+    use shiguredo_websocket::CloseCode;
+
+    let options = ClientConnectionOptions::new("example.com", "/ws").close_timeout(44_444);
+    let random = FixedRandom::new();
+    let nonce = random.nonce;
+    let mut conn = WebSocketClientConnection::new(options, random);
+    let now = Timestamp::from_millis(0);
+
+    conn.connect().expect("connect");
+    while conn.poll_output().is_some() {}
+
+    let accept = compute_accept(&nonce);
+    let response = create_valid_handshake_response(&accept);
+    conn.feed_recv_buf(&response, now).expect("handshake");
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    conn.close(CloseCode::NORMAL, "bye").expect("close");
+
+    let mut outputs = Vec::new();
+    while let Some(o) = conn.poll_output() {
+        outputs.push(o);
+    }
+    assert!(
+        find_set_timer_with_duration(&outputs, TimerId::CloseTimeout, 44_444),
+        "CloseTimeout の SetTimer が close_timeout(44444) を反映していない"
+    );
+}
+
+#[test]
+fn server_で_pong_timeout_ビルダー値が_set_timer_に伝播する() {
+    let options = ServerConnectionOptions::new().pong_timeout(22_222);
+    let mut conn = WebSocketServerConnection::new(options);
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request(&key);
+    conn.feed_recv_buf(&request).expect("feed handshake");
+    conn.accept_handshake_auto().expect("accept handshake");
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    conn.send_ping(&[]).expect("send_ping");
+    let mut outputs = Vec::new();
+    while let Some(o) = conn.poll_output() {
+        outputs.push(o);
+    }
+    assert!(
+        find_set_timer_with_duration(&outputs, TimerId::PongTimeout, 22_222),
+        "PongTimeout の SetTimer が pong_timeout(22222) を反映していない"
+    );
+}
+
+#[test]
+fn server_で_close_timeout_ビルダー値が_set_timer_に伝播する() {
+    use shiguredo_websocket::CloseCode;
+
+    let options = ServerConnectionOptions::new().close_timeout(11_111);
+    let mut conn = WebSocketServerConnection::new(options);
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request(&key);
+    conn.feed_recv_buf(&request).expect("feed handshake");
+    conn.accept_handshake_auto().expect("accept handshake");
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    conn.close(CloseCode::NORMAL, "bye").expect("close");
+    let mut outputs = Vec::new();
+    while let Some(o) = conn.poll_output() {
+        outputs.push(o);
+    }
+    assert!(
+        find_set_timer_with_duration(&outputs, TimerId::CloseTimeout, 11_111),
+        "CloseTimeout の SetTimer が close_timeout(11111) を反映していない"
+    );
+}

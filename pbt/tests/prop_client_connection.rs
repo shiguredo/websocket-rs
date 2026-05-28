@@ -104,66 +104,6 @@ fn setup_connected_client() -> (WebSocketClientConnection<FixedRandom>, Timestam
     (conn, now, nonce)
 }
 
-// ==== ClientConnectionOptions のテスト ====
-
-proptest! {
-    /// ClientConnectionOptions::new でホストとパスが設定される
-    #[test]
-    fn prop_client_options_new(
-        host in "[a-z]{1,20}\\.[a-z]{2,5}",
-        path in "/[a-z0-9/]{0,30}",
-    ) {
-        let options = ClientConnectionOptions::new(&host, &path);
-        prop_assert_eq!(options.host, host);
-        prop_assert_eq!(options.path, path);
-    }
-
-    /// ClientConnectionOptions::origin が正しく設定される
-    #[test]
-    fn prop_client_options_origin(
-        origin in "https://[a-z]{1,20}\\.[a-z]{2,5}",
-    ) {
-        let options = ClientConnectionOptions::new("example.com", "/")
-            .origin(&origin);
-        prop_assert_eq!(options.origin, Some(origin));
-    }
-
-    /// ClientConnectionOptions::protocol が複数回呼び出しても正しく蓄積される
-    #[test]
-    fn prop_client_options_multiple_protocols(
-        protocols in prop::collection::vec("[a-z]{1,20}", 0..10)
-    ) {
-        let mut options = ClientConnectionOptions::new("example.com", "/");
-        for p in &protocols {
-            options = options.protocol(p);
-        }
-        prop_assert_eq!(options.protocols.len(), protocols.len());
-        for (i, p) in protocols.iter().enumerate() {
-            prop_assert_eq!(&options.protocols[i], p);
-        }
-    }
-
-    /// ClientConnectionOptions::header が複数回呼び出しても正しく蓄積される
-    #[test]
-    fn prop_client_options_multiple_headers(
-        headers in prop::collection::vec(("[a-zA-Z-]{1,20}", "[a-zA-Z0-9 ]{0,50}"), 0..10)
-    ) {
-        let mut options = ClientConnectionOptions::new("example.com", "/");
-        for (name, value) in &headers {
-            options = options.header(name, value);
-        }
-        prop_assert_eq!(options.additional_headers.len(), headers.len());
-    }
-
-    /// ping_interval は任意の値を設定可能
-    #[test]
-    fn prop_client_options_ping_interval(interval in 0u64..=u64::MAX) {
-        let options = ClientConnectionOptions::new("example.com", "/")
-            .ping_interval(interval);
-        prop_assert_eq!(options.ping_interval_millis, interval);
-    }
-}
-
 // ==== 接続開始テスト ====
 
 proptest! {

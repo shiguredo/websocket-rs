@@ -3,6 +3,7 @@
 - Priority: Medium
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: mimo-v2.5-pro
 - Branch: feature/change-options-fields-private
 
@@ -49,3 +50,13 @@ Medium。公開フィールドとビルダーの二重経路は API 表面を曖
 - PBT がビルダーのみで構築し、フィールド読み取りに依存していない
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[CHANGE]` と担当者行がある
+
+## 解決方法
+
+`ClientConnectionOptions` (12 フィールド) と `ServerConnectionOptions` (9 フィールド) の全 `pub` フィールドを private 化した。同一モジュール内の `WebSocketClientConnection` / `WebSocketServerConnection` からは引き続きフィールドへ直接アクセスできるが、外部クレートからはビルダーチェイン経由のみとなる。
+
+ビルダー未提供だった `pong_timeout(millis)` / `close_timeout(millis)` を両 Options に追加。既存ビルダー (`new` / `origin` / `protocol` / `deflate` / `header` / `ping_interval` / `max_frame_size` / `max_message_size` / `max_decompressed_size`) はそのまま維持。
+
+`pbt/tests/prop_client_connection.rs` の `prop_client_options_*` 5 件と `pbt/tests/prop_server_connection.rs` の `prop_server_options_*` 3 件は、フィールド private 化で参照不能となるため削除。これらは「ビルダー代入の確認」という panic-only に近い性質で、ビルダーが入力値を正しく取り込めることは既存の接続テスト (`prop_connect_sends_handshake_request` 等) で間接検証されている。
+
+公開 API 利用者にとっては破壊的変更 (`[CHANGE]`)。`cargo test --workspace` 全件パス。
