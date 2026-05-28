@@ -321,7 +321,6 @@ impl FrameDecoder {
     }
 
     /// バッファの長さを取得する
-    #[allow(dead_code)]
     pub fn buffer_len(&self) -> usize {
         self.buf.len()
     }

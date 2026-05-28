@@ -22,6 +22,8 @@
 
 - [UPDATE] クライアント / サーバー間のフレーム処理ロジックを SharedConnectionState に共通化する
   - @voluntas
+- [UPDATE] 不要な `#[allow(dead_code)]` を削除し、未使用の `unsupported` のみ `#[expect(dead_code)]` に変更する
+  - @voluntas
 
 ## 2026.3.0
 
