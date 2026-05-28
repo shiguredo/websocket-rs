@@ -1115,3 +1115,50 @@ proptest! {
         prop_assert!(second.is_err());
     }
 }
+
+// ==== Close フレームの接続層検証 ====
+
+proptest! {
+    /// RFC 6455 Section 5.5.1: Close ペイロードは 0 または 2 以上でなければならない。
+    /// 接続済みサーバーが 1 バイト Close フレームを受信した場合、
+    /// `handle_close` 経路で `ProtocolViolation` を返し、Close フレーム (1002) を送出する
+    #[test]
+    fn prop_close_frame_single_byte_payload_at_application_layer(
+        payload_byte in any::<u8>(),
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server();
+
+        let masked_payload = payload_byte ^ mask_key[0];
+        let frame = vec![
+            0x88,       // FIN=1 + Close opcode
+            0x80 | 1,   // MASK=1 + length=1
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            masked_payload,
+        ];
+
+        let result = conn.feed_recv_buf(&frame);
+        prop_assert!(result.is_err(), "1 バイトの Close ペイロードはアプリ層でエラーになるべき");
+        let err = result.unwrap_err();
+        prop_assert_eq!(err.kind, ErrorKind::ProtocolViolation);
+
+        // サーバーは応答 Close (1002 Protocol Error) を送出する
+        let mut found_close = false;
+        while let Some(output) = conn.poll_output() {
+            if let ConnectionOutput::SendData(data) = output {
+                let mut decoder = shiguredo_websocket::FrameDecoder::new();
+                decoder.feed(&data);
+                if let Ok(Some(decoded)) = decoder.decode()
+                    && decoded.opcode == shiguredo_websocket::Opcode::Close
+                    && decoded.payload.len() >= 2
+                {
+                    let code = u16::from_be_bytes([decoded.payload[0], decoded.payload[1]]);
+                    prop_assert_eq!(code, CloseCode::PROTOCOL_ERROR.as_u16());
+                    found_close = true;
+                    break;
+                }
+            }
+        }
+        prop_assert!(found_close, "1 バイト Close 受信後に応答 Close フレームが送出されていない");
+    }
+}
