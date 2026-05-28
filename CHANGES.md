@@ -80,6 +80,8 @@
   - @voluntas
 - [UPDATE] RSV ビット違反の検出を prop_violations で検証する
   - @voluntas
+- [UPDATE] 送信禁止 Close コード受信時の返送動作を PBT で検証する
+  - @voluntas
 
 ## 2026.3.0
 
