@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: mimo-v2.5-pro
 - Branch: feature/change-timestamp-field-private
 
@@ -39,3 +40,11 @@ Low。API 一貫性。`[CHANGE]`（`Timestamp(0)` 構文の利用者があれば
 - クレート内に `Timestamp(` の公開構築子利用が無い（`from_millis` のみ）
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[CHANGE]` と担当者行がある
+
+## 解決方法
+
+`src/time.rs` の `pub struct Timestamp(pub u64);` を `pub struct Timestamp(u64);` に変更し、タプルフィールドの可視性を `pub` から private に下げた。
+
+事前の grep で確認した通り、クレート内で `Timestamp(N)` 形式の直接構築箇所は定義行以外に存在せず、置換作業は不要。`from_millis` / `as_millis` / `saturating_sub` / `add_millis` / `Add` / `Sub` 実装はすべて維持。挙動変化なし、`cargo test --workspace` 全件パス。
+
+外部クレートが `Timestamp(0)` 等で直接構築している場合のみコンパイルエラー (`[CHANGE]` 後方互換のない変更)。

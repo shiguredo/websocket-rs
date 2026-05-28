@@ -19,6 +19,8 @@
   - @voluntas
 - [CHANGE] ClientConnectionOptions / ServerConnectionOptions のフィールドを private にする
   - @voluntas
+- [CHANGE] Timestamp の内部フィールドを private にする
+  - @voluntas
 - [ADD] ExtensionParseError に Display / Error を実装し、ExtensionParseContext と合わせて lib.rs から公開する
   - @voluntas
 - [UPDATE] close_internal の戻り値型を `()` に統一する
