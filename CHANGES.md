@@ -42,6 +42,8 @@
   - @voluntas
 - [UPDATE] send_text 等の重複ロジックを SharedConnectionState に集約する
   - @voluntas
+- [UPDATE] websocket_handshake.rs の解決済み issue 参照の TODO コメントを設計メモコメントに整理する
+  - @voluntas
 
 ## 2026.3.0
 
