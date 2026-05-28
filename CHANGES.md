@@ -34,6 +34,8 @@
   - @voluntas
 - [UPDATE] is_valid_token の重複実装を src/token.rs に共通化する
   - @voluntas
+- [UPDATE] close メソッドの検証ロジックを SharedConnectionState に共通化する
+  - @voluntas
 
 ## 2026.3.0
 
