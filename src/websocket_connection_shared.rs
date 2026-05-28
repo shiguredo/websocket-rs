@@ -221,6 +221,38 @@ impl SharedConnectionState {
         }
     }
 
+    /// テキストメッセージを送信する公開 API 用ヘルパ
+    pub(crate) fn send_text(
+        &mut self,
+        text: &str,
+        policy: &mut impl FramePolicy,
+    ) -> Result<(), Error> {
+        self.check_connected()?;
+        self.send_data_frame(Opcode::Text, text.as_bytes().to_vec(), policy)
+    }
+
+    /// バイナリメッセージを送信する公開 API 用ヘルパ
+    pub(crate) fn send_binary(
+        &mut self,
+        data: &[u8],
+        policy: &mut impl FramePolicy,
+    ) -> Result<(), Error> {
+        self.check_connected()?;
+        self.send_data_frame(Opcode::Binary, data.to_vec(), policy)
+    }
+
+    /// Ping を送信する公開 API 用ヘルパ
+    ///
+    /// RFC 6455 Section 5.5: data は 125 バイト以下でなければならない
+    pub(crate) fn send_ping(
+        &mut self,
+        data: &[u8],
+        policy: &mut impl FramePolicy,
+    ) -> Result<(), Error> {
+        self.check_connected()?;
+        self.send_ping_internal(data, policy)
+    }
+
     /// データフレームを送信（圧縮対応）
     pub(crate) fn send_data_frame(
         &mut self,

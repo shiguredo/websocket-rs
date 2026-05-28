@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: opencode mimo-v2.5-pro
 - Branch: feature/refactor-duplicate-methods-dedup
 
@@ -69,3 +70,13 @@ impl SharedConnectionState {
 - `cargo clippy --workspace --all-targets -- -D warnings` が通過する
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[UPDATE]` と担当者行がある
+
+## 解決方法
+
+`src/websocket_connection_shared.rs` に `pub(crate) fn send_text` / `send_binary` / `send_ping` を追加し、`check_connected()` + `send_data_frame` / `send_ping_internal` への委譲を集約した。クライアント / サーバーの `send_text` / `send_binary` / `send_ping` は `self.shared.send_*(...)` への単一行委譲に置き換えた。`use Opcode` が両ファイルで不要になったため削除した。
+
+検証:
+
+- `cargo fmt --all -- --check` 通過
+- `cargo clippy --workspace --all-targets -- -D warnings` 通過
+- `cargo test --workspace` 全件パス
