@@ -70,7 +70,7 @@ impl HandshakeRequest {
     pub fn build(&self, nonce: [u8; 16]) -> Result<Vec<u8>, Error> {
         // RFC 6455 Section 4.2.1: Sec-WebSocket-Protocol の各要素は token でなければならない
         for p in &self.protocols {
-            if !is_valid_token(p) {
+            if !crate::token::is_valid_token(p) {
                 return Err(Error::invalid_input(format!(
                     "invalid Sec-WebSocket-Protocol value: {}",
                     p
@@ -391,7 +391,7 @@ impl HandshakeRequestValidator {
                 ));
             }
             for p in &protocols {
-                if !is_valid_token(p) {
+                if !crate::token::is_valid_token(p) {
                     return Err(Error::handshake_rejected(format!(
                         "invalid Sec-WebSocket-Protocol value: {}",
                         p
@@ -669,21 +669,6 @@ fn sha1_digest(data: &[u8]) -> [u8; 20] {
     out
 }
 
-/// RFC 9110 Section 5.6.2 の token ABNF に準拠するかチェックする
-///
-/// token = 1*tchar
-/// tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
-///         "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
-fn is_valid_token(s: &str) -> bool {
-    !s.is_empty()
-        && s.bytes().all(|b| {
-            matches!(b,
-                b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' |
-                b'^' | b'_' | b'`' | b'|' | b'~' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z'
-            )
-        })
-}
-
 /// RFC 6455 Section 9.1 の extension ABNF を検証する
 ///
 /// extension       = extension-token *( ";" extension-param )
@@ -694,7 +679,7 @@ fn validate_extension_entry(ext: &str) -> Result<(), Error> {
     // 上流の ',' 分割と同様に stateful パーサーへの置き換えが必要。
     let parts: Vec<&str> = ext.split(';').collect();
     let token = parts[0].trim();
-    if !is_valid_token(token) {
+    if !crate::token::is_valid_token(token) {
         return Err(Error::handshake_rejected(format!(
             "invalid Sec-WebSocket-Extensions token: {}",
             token
@@ -712,7 +697,7 @@ fn validate_extension_entry(ext: &str) -> Result<(), Error> {
             Some((name, value)) => {
                 let name = name.trim();
                 let value = value.trim();
-                if !is_valid_token(name) {
+                if !crate::token::is_valid_token(name) {
                     return Err(Error::handshake_rejected(format!(
                         "invalid extension-param name: '{}'",
                         name
@@ -767,13 +752,13 @@ fn validate_extension_entry(ext: &str) -> Result<(), Error> {
                         )));
                     }
                     // RFC 6455 Section 9.1: unescape 後の値は token ABNF に準拠する必要がある
-                    if !is_valid_token(&unescaped) {
+                    if !crate::token::is_valid_token(&unescaped) {
                         return Err(Error::handshake_rejected(format!(
                             "quoted-string value after unescaping is not a valid token: '{}'",
                             param
                         )));
                     }
-                } else if !is_valid_token(value) {
+                } else if !crate::token::is_valid_token(value) {
                     return Err(Error::handshake_rejected(format!(
                         "invalid extension-param value: '{}'",
                         param
@@ -781,7 +766,7 @@ fn validate_extension_entry(ext: &str) -> Result<(), Error> {
                 }
             }
             None => {
-                if !is_valid_token(param) {
+                if !crate::token::is_valid_token(param) {
                     return Err(Error::handshake_rejected(format!(
                         "invalid extension-param name: '{}'",
                         param

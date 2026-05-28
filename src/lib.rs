@@ -73,6 +73,7 @@ mod buf;
 mod deflate;
 mod error;
 mod time;
+mod token;
 mod websocket_client_connection;
 mod websocket_close;
 mod websocket_connection_shared;
@@ -110,5 +111,7 @@ pub use websocket_server_connection::{ServerConnectionOptions, WebSocketServerCo
 pub use buf::{ByteSliceExt, VecExt};
 #[doc(hidden)]
 pub use deflate::{Compressor, Decompressor};
+#[doc(hidden)]
+pub use token::is_valid_token;
 #[doc(hidden)]
 pub use websocket_close::truncate_reason;
