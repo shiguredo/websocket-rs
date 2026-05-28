@@ -54,6 +54,8 @@
   - @voluntas
 - [UPDATE] SharedConnectionState のフィールドをカプセル化する
   - @voluntas
+- [UPDATE] ConnectionState の許可遷移を set_state で検証する
+  - @voluntas
 
 ## 2026.3.0
 

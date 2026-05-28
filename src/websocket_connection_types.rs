@@ -49,6 +49,19 @@ pub trait RandomSource: Send {
 }
 
 /// 接続状態
+///
+/// 許可される状態遷移は以下のとおり。同一状態への遷移は no-op として扱う。
+///
+/// | 現在の状態 | 遷移先 | 起点 |
+/// |---|---|---|
+/// | `Disconnected` | `Connecting` | client `connect()` / server ハンドシェイク受信 |
+/// | `Connecting` | `Connected` | client / server ハンドシェイク完了 |
+/// | `Connecting` | `Closed` | server `reject_handshake()` |
+/// | `Connected` | `Closing` | Close フレーム送信 (`close_internal`) |
+/// | `Connected` | `Closed` | 相手 Close フレーム受信 (close 未送信時) |
+/// | `Closing` | `Closed` | 相手 Close フレーム受信 / Close タイムアウト |
+///
+/// 表外の遷移は `set_state` が `Error::invalid_state` を返す。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConnectionState {
     /// 切断状態
@@ -62,6 +75,25 @@ pub enum ConnectionState {
     Closing,
     /// 切断完了
     Closed,
+}
+
+impl ConnectionState {
+    /// `next` への遷移が許可されているかを返す。同一状態への遷移も許可する
+    #[doc(hidden)]
+    pub fn can_transition_to(self, next: ConnectionState) -> bool {
+        if self == next {
+            return true;
+        }
+        matches!(
+            (self, next),
+            (Self::Disconnected, Self::Connecting)
+                | (Self::Connecting, Self::Connected)
+                | (Self::Connecting, Self::Closed)
+                | (Self::Connected, Self::Closing)
+                | (Self::Connected, Self::Closed)
+                | (Self::Closing, Self::Closed)
+        )
+    }
 }
 
 /// タイマー ID

@@ -160,13 +160,23 @@ impl SharedConnectionState {
     }
 
     /// `state` への書き込みは本メソッドに集約する。差分時のみ
-    /// `StateChanged` イベントを emit して二重通知を避ける
-    pub(crate) fn set_state(&mut self, new_state: ConnectionState) {
-        if self.state != new_state {
-            self.state = new_state;
-            self.event_queue
-                .push_back(ConnectionEvent::StateChanged(new_state));
+    /// `StateChanged` イベントを emit して二重通知を避ける。
+    /// 許可されていない遷移は `Error::invalid_state` を返す。
+    /// 許可遷移表は `ConnectionState` の doc コメントを参照
+    pub(crate) fn set_state(&mut self, new_state: ConnectionState) -> Result<(), Error> {
+        if self.state == new_state {
+            return Ok(());
         }
+        if !self.state.can_transition_to(new_state) {
+            return Err(Error::invalid_state(format!(
+                "invalid state transition from {:?} to {:?}",
+                self.state, new_state
+            )));
+        }
+        self.state = new_state;
+        self.event_queue
+            .push_back(ConnectionEvent::StateChanged(new_state));
+        Ok(())
     }
 
     pub(crate) fn check_connected(&self) -> Result<(), Error> {
@@ -227,7 +237,12 @@ impl SharedConnectionState {
         reason: &str,
         policy: &mut impl FramePolicy,
     ) {
-        if self.state == ConnectionState::Disconnected || self.state == ConnectionState::Closed {
+        // RFC 6455 Section 7.1.2: Close フレーム送信は確立済み接続のみ。
+        // Connecting / Disconnected / Closed では Close フレームを送らず終了する
+        if !matches!(
+            self.state,
+            ConnectionState::Connected | ConnectionState::Closing
+        ) {
             return;
         }
 
@@ -250,7 +265,11 @@ impl SharedConnectionState {
                 duration_millis: self.close_timeout_millis,
             });
 
-            self.set_state(ConnectionState::Closing);
+            // close_internal の冒頭で Connected / Closing 以外を弾いているため、
+            // ここでの遷移元は Connected または Closing に限定される。
+            // Closing → Closing は set_state 内で同一状態として早期 Ok 返却される
+            self.set_state(ConnectionState::Closing)
+                .expect("unreachable: Connected/Closing -> Closing must be valid");
         }
     }
 
@@ -634,7 +653,10 @@ impl SharedConnectionState {
         self.output_queue.push_back(ConnectionOutput::ClearTimer {
             id: TimerId::CloseTimeout,
         });
-        self.set_state(ConnectionState::Closed);
+        // handle_close は process_frames 経由で呼ばれ、caller の feed_recv_buf が
+        // Connected または Closing でのみ process_frames に到達させる。
+        // 通常は Ok を返すが、前提崩れに備えて `?` で伝播する
+        self.set_state(ConnectionState::Closed)?;
         self.output_queue
             .push_back(ConnectionOutput::CloseConnection);
 
@@ -710,8 +732,8 @@ impl SharedConnectionState {
             }
             TimerId::CloseTimeout => {
                 if self.state == ConnectionState::Closing {
-                    // クローズタイムアウト - 強制切断
-                    self.set_state(ConnectionState::Closed);
+                    // クローズタイムアウト - 強制切断。直前の if で Closing を確認済み
+                    self.set_state(ConnectionState::Closed)?;
                     self.output_queue
                         .push_back(ConnectionOutput::CloseConnection);
                 }
@@ -809,5 +831,95 @@ impl FramePolicy for ServerFramePolicy {
         // RFC 6455 Section 5.2: MASK=0 のとき Masking-Key field は存在しない
         let encoded = frame.encode_unmasked();
         shared.enqueue_output(ConnectionOutput::SendData(encoded));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::ErrorKind;
+
+    fn new_shared() -> SharedConnectionState {
+        SharedConnectionState::new(
+            DEFAULT_MAX_FRAME_SIZE,
+            DEFAULT_MAX_MESSAGE_SIZE,
+            DEFAULT_MAX_DECOMPRESSED_SIZE,
+            0,
+            0,
+            0,
+        )
+    }
+
+    #[test]
+    fn set_state_は許可遷移を成功させ_state_changed_を_emit_する() {
+        let mut shared = new_shared();
+        assert!(matches!(
+            shared.set_state(ConnectionState::Connecting),
+            Ok(())
+        ));
+        assert_eq!(shared.state(), ConnectionState::Connecting);
+        let event = shared
+            .poll_event()
+            .expect("StateChanged event must be emitted");
+        assert_eq!(
+            event,
+            ConnectionEvent::StateChanged(ConnectionState::Connecting)
+        );
+    }
+
+    #[test]
+    fn set_state_は同一状態への遷移を_no_op_として_ok_を返す() {
+        let mut shared = new_shared();
+        // Disconnected -> Disconnected は no-op
+        assert!(matches!(
+            shared.set_state(ConnectionState::Disconnected),
+            Ok(())
+        ));
+        assert!(shared.poll_event().is_none());
+    }
+
+    #[test]
+    fn set_state_は不正遷移を_invalid_state_で拒否し_state_を変えない() {
+        let mut shared = new_shared();
+        // Disconnected -> Connected は許可遷移表外
+        let err = shared
+            .set_state(ConnectionState::Connected)
+            .expect_err("invalid transition must return Err");
+        assert_eq!(err.kind, ErrorKind::InvalidState);
+        assert!(err.reason.contains("Disconnected"));
+        assert!(err.reason.contains("Connected"));
+        assert_eq!(shared.state(), ConnectionState::Disconnected);
+        assert!(shared.poll_event().is_none());
+    }
+
+    #[test]
+    fn set_state_は終端状態からの遷移を拒否する() {
+        let mut shared = new_shared();
+        // Disconnected -> Connecting -> Connected -> Closing -> Closed
+        shared
+            .set_state(ConnectionState::Connecting)
+            .expect("Disconnected -> Connecting");
+        shared
+            .set_state(ConnectionState::Connected)
+            .expect("Connecting -> Connected");
+        shared
+            .set_state(ConnectionState::Closing)
+            .expect("Connected -> Closing");
+        shared
+            .set_state(ConnectionState::Closed)
+            .expect("Closing -> Closed");
+        // Closed から他状態への遷移は全て拒否される
+        for next in [
+            ConnectionState::Disconnected,
+            ConnectionState::Connecting,
+            ConnectionState::Connected,
+            ConnectionState::Closing,
+        ] {
+            let err = shared
+                .set_state(next)
+                .expect_err("transition from Closed must be rejected");
+            assert_eq!(err.kind, ErrorKind::InvalidState);
+        }
+        assert_eq!(shared.state(), ConnectionState::Closed);
     }
 }
