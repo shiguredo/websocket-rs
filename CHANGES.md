@@ -24,6 +24,8 @@
   - @voluntas
 - [UPDATE] 不要な `#[allow(dead_code)]` を削除し、未使用の `unsupported` のみ `#[expect(dead_code)]` に変更する
   - @voluntas
+- [UPDATE] shiguredo_http11 のバージョン指定をマイナーまでに修正する
+  - @voluntas
 
 ## 2026.3.0
 
