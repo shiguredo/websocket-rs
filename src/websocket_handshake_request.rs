@@ -10,7 +10,8 @@ use base64ct::{Base64, Encoding};
 use shiguredo_http11::{HeaderName, Request, RequestDecoder};
 
 use crate::error::Error;
-use crate::websocket_handshake::{validate_extension_entry, validate_key};
+use crate::websocket_extension::Extension;
+use crate::websocket_handshake::validate_key;
 
 /// ハンドシェイクリクエストビルダー
 #[derive(Debug, Clone)]
@@ -399,7 +400,11 @@ impl HandshakeRequestValidator {
             }
             // RFC 6455 Section 9.1: extension-token / extension-param の ABNF を検証
             for ext in &extensions {
-                validate_extension_entry(ext)?;
+                Extension::parse_strict(ext).map_err(|e| {
+                    Error::handshake_rejected(format!(
+                        "invalid Sec-WebSocket-Extensions value: {e}"
+                    ))
+                })?;
             }
             extensions
         };

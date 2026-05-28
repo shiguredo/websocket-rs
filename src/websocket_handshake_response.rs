@@ -7,7 +7,8 @@
 use shiguredo_http11::{HttpHead, ResponseDecoder, ResponseHead};
 
 use crate::error::Error;
-use crate::websocket_handshake::{calculate_accept, validate_extension_entry};
+use crate::websocket_extension::Extension;
+use crate::websocket_handshake::calculate_accept;
 
 /// サーバー側ハンドシェイクレスポンス
 #[derive(Debug, Clone, Default)]
@@ -222,7 +223,9 @@ impl HandshakeValidator {
         }
         // RFC 6455 Section 9.1: extension-token / extension-param の ABNF を検証
         for ext in &extensions {
-            validate_extension_entry(ext)?;
+            Extension::parse_strict(ext).map_err(|e| {
+                Error::handshake_rejected(format!("invalid Sec-WebSocket-Extensions value: {e}"))
+            })?;
         }
 
         Ok(Some(HandshakeResponse {
