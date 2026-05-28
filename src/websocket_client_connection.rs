@@ -16,7 +16,8 @@ use crate::websocket_connection_types::{
     ConnectionEvent, ConnectionOutput, ConnectionState, RandomSource, TimerId,
 };
 use crate::websocket_extension::{Extension, PerMessageDeflateConfig};
-use crate::websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};
+use crate::websocket_handshake_request::HandshakeRequest;
+use crate::websocket_handshake_response::{HandshakeResponse, HandshakeValidator};
 
 /// 接続オプション
 #[derive(Debug, Clone)]

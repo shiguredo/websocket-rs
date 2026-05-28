@@ -15,10 +15,9 @@ use crate::websocket_connection_types::{
     ConnectionEvent, ConnectionOutput, ConnectionState, TimerId,
 };
 use crate::websocket_extension::{Extension, PerMessageDeflateConfig};
-use crate::websocket_handshake::{
-    HandshakeRequestValidator, ServerHandshakeRequest, ServerHandshakeResponse,
-    calculate_accept_from_key,
-};
+use crate::websocket_handshake::calculate_accept_from_key;
+use crate::websocket_handshake_request::{HandshakeRequestValidator, ServerHandshakeRequest};
+use crate::websocket_handshake_response::ServerHandshakeResponse;
 use shiguredo_http11::{HeaderName, Response};
 
 /// ハンドシェイク受理待ち中の最大バッファサイズ（1MB）
