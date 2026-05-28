@@ -447,4 +447,3 @@ match ws.feed_recv_buf(&buf, now) {
 - **window_bits は 15 固定**: `noflate` 制約により `server_max_window_bits < 15` の要求はハンドシェイク段階で拒否する。
 - **`Sec-WebSocket-Extensions` の quoted-string**: 現在は `,` で単純分割しており、`extension-param` 値が quoted-string の場合に誤分割する可能性がある。permessage-deflate (RFC 7692) のパラメータはすべて token のため実害はないが、将来の拡張実装時には RFC 7230 §7 の `#rule` に準拠した stateful パーサーへの置き換えが必要。
 - **HTTP/1.1 のみ**: HTTP/2 (RFC 8441) や HTTP/3 (RFC 9220) 上の WebSocket には対応していない。
-- **`PerMessageDeflateConfig::from_extension` は deprecated**: 検証が不十分なため、`from_extension_for_client_response` / `from_extension_for_server_request` / `from_extension_validated` を使うこと。

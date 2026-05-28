@@ -11,6 +11,8 @@
 
 ## develop
 
+- [CHANGE] deprecated な PerMessageDeflateConfig::from_extension を削除する
+  - @voluntas
 - [CHANGE] 内部向けシンボル `ByteSliceExt` / `VecExt` / `Compressor` / `Decompressor` / `truncate_reason` を通常の pub use から除外し #[doc(hidden)] で再エクスポートに変更する
   - @voluntas
 - [CHANGE] Extension::parse_strict のエラー型を String から ExtensionParseError に変更する
