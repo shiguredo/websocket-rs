@@ -46,6 +46,8 @@
   - @voluntas
 - [UPDATE] パニックのみ検証する PBT を削除し fuzzing に役割を寄せる
   - @voluntas
+- [UPDATE] prop_error.rs の ERROR_KINDS に全 ErrorKind バリアントを含める
+  - @voluntas
 
 ## 2026.3.0
 

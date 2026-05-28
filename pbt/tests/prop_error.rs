@@ -8,7 +8,7 @@ use proptest::prelude::*;
 use shiguredo_websocket::{Error, ErrorKind};
 
 /// ErrorKind の全バリアント
-const ERROR_KINDS: [ErrorKind; 8] = [
+const ERROR_KINDS: [ErrorKind; 10] = [
     ErrorKind::InvalidInput,
     ErrorKind::InvalidData,
     ErrorKind::InvalidState,
@@ -16,7 +16,9 @@ const ERROR_KINDS: [ErrorKind; 8] = [
     ErrorKind::Unsupported,
     ErrorKind::ProtocolViolation,
     ErrorKind::HandshakeRejected,
+    ErrorKind::VersionNotSupported,
     ErrorKind::InvalidUtf8,
+    ErrorKind::HttpResponse,
 ];
 
 proptest! {
