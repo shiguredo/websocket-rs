@@ -1199,6 +1199,105 @@ fn setup_pending_request_server() -> WebSocketServerConnection {
     conn
 }
 
+/// deflate 有効のサーバ接続を Connected 状態まで進めるヘルパ。
+/// RSV1=1 が許容される (permessage-deflate が合意済み) 経路の検証に使う
+fn setup_connected_server_with_deflate() -> WebSocketServerConnection {
+    let options = ServerConnectionOptions::new().deflate(PerMessageDeflateConfig::default());
+    let mut conn = WebSocketServerConnection::new(options);
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request(&key, None, Some("permessage-deflate"));
+    conn.feed_recv_buf(&request).expect("handshake");
+    conn.accept_handshake_auto().expect("accept handshake");
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+    conn
+}
+
+// ==== RSV ビット違反の検出 ====
+
+proptest! {
+    /// RFC 6455 Section 5.2: クライアントから RSV2=1 のフレームは ProtocolViolation で拒否される
+    #[test]
+    fn prop_rsv2_rejected_at_server(
+        opcode in prop::sample::select(vec![0x01u8, 0x02, 0x08, 0x09, 0x0A]),
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server();
+        // byte 0: FIN=1 (0x80) + RSV2=1 (0x20) + opcode
+        // byte 1: MASK=1 (0x80) + length=0
+        let frame = vec![
+            0x80 | 0x20 | opcode,
+            0x80,
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        let result = conn.feed_recv_buf(&frame);
+        prop_assert!(result.is_err(), "RSV2=1 は拒否されるべき");
+        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+    }
+
+    /// RFC 6455 Section 5.2: クライアントから RSV3=1 のフレームは ProtocolViolation で拒否される
+    #[test]
+    fn prop_rsv3_rejected_at_server(
+        opcode in prop::sample::select(vec![0x01u8, 0x02, 0x08, 0x09, 0x0A]),
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server();
+        // byte 0: FIN=1 (0x80) + RSV3=1 (0x10) + opcode
+        let frame = vec![
+            0x80 | 0x10 | opcode,
+            0x80,
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        let result = conn.feed_recv_buf(&frame);
+        prop_assert!(result.is_err(), "RSV3=1 は拒否されるべき");
+        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+    }
+
+    /// RFC 7692 Section 6: permessage-deflate 合意済みでも、制御フレームに RSV1=1 を設定するのは禁止
+    #[test]
+    fn prop_rsv1_on_control_frame_rejected_with_deflate(
+        control_opcode in prop::sample::select(vec![0x08u8, 0x09, 0x0A]), // Close, Ping, Pong
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server_with_deflate();
+        // byte 0: FIN=1 (0x80) + RSV1=1 (0x40) + control opcode
+        let frame = vec![
+            0x80 | 0x40 | control_opcode,
+            0x80,
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        let result = conn.feed_recv_buf(&frame);
+        prop_assert!(result.is_err(), "制御フレーム + RSV1=1 は拒否されるべき");
+        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+    }
+
+    /// RFC 7692 Section 6: permessage-deflate 合意済みでも、Continuation フレームに RSV1=1 は禁止
+    /// (RSV1 はメッセージの最初のフレームにのみ設定される)
+    #[test]
+    fn prop_rsv1_on_continuation_frame_rejected_with_deflate(
+        mask_key in prop::array::uniform4(any::<u8>()),
+    ) {
+        let mut conn = setup_connected_server_with_deflate();
+        // 先に Text フレーム (RSV1=0, FIN=0) を送って Continuation 待ち状態にする
+        let text_frame_first = vec![
+            0x01,           // FIN=0 + Text opcode
+            0x80,           // MASK=1 + length=0
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        conn.feed_recv_buf(&text_frame_first).expect("first fragment");
+
+        // Continuation + RSV1=1 を送る (違反)
+        let continuation_with_rsv1 = vec![
+            0x80 | 0x40,    // FIN=1 + RSV1=1 + Continuation opcode (0)
+            0x80,           // MASK=1 + length=0
+            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+        ];
+        let result = conn.feed_recv_buf(&continuation_with_rsv1);
+        prop_assert!(result.is_err(), "Continuation + RSV1=1 は拒否されるべき");
+        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+    }
+}
+
 proptest! {
     /// 合計バイト数が MAX_PENDING_FRAME_DATA ちょうどなら受理される
     /// (ハンドシェイク受理前にバッファされたフレームデータの上限境界)
