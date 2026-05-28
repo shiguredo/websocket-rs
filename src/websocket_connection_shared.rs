@@ -143,6 +143,48 @@ impl SharedConnectionState {
         Ok(())
     }
 
+    /// 公開 API 用の検証付きクローズ
+    ///
+    /// 状態・送信可能コード・reason 長を検証し、いずれかが不正なら `Err` を返す。
+    /// 成功時は `close_internal` に委譲する。
+    ///
+    /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
+    /// RFC 6455 Section 7.4.1: 送信禁止のクローズコード (1005, 1006, 1015) は拒否される
+    /// RFC 6455 Section 5.5: reason は 123 バイト以下でなければならない
+    pub(crate) fn close(
+        &mut self,
+        code: CloseCode,
+        reason: &str,
+        policy: &mut impl FramePolicy,
+    ) -> Result<(), Error> {
+        if !matches!(
+            self.state,
+            ConnectionState::Connected | ConnectionState::Closing
+        ) {
+            return Err(Error::invalid_state("connection is not established"));
+        }
+
+        // RFC 6455 Section 7.4.1: 送信禁止のクローズコードをチェック
+        if !code.is_sendable() {
+            return Err(Error::invalid_input(format!(
+                "close code {} is not sendable",
+                code.as_u16()
+            )));
+        }
+
+        // reason が 123 バイト超の場合は public API では呼び出し元にエラーとして通知する。
+        // close_internal は truncate_reason で切り詰めるが、公開 API では拒否する。
+        if reason.len() > 123 {
+            return Err(Error::invalid_input(format!(
+                "close reason exceeds 123 bytes: {} bytes",
+                reason.len()
+            )));
+        }
+
+        self.close_internal(code, reason, policy);
+        Ok(())
+    }
+
     /// 内部エラー処理用のクローズ
     ///
     /// 理由が長すぎる場合は UTF-8 文字境界で切り詰める

@@ -546,34 +546,10 @@ impl WebSocketServerConnection {
     /// RFC 6455 Section 7.4.1: 送信禁止のクローズコード (1005, 1006, 1015) は拒否される
     /// RFC 6455 Section 5.5: reason は 123 バイト以下でなければならない
     /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
+    ///
+    /// 検証ロジックの実装はクライアント / サーバー間で共通化されている。
     pub fn close(&mut self, code: CloseCode, reason: &str) -> Result<(), Error> {
-        if !matches!(
-            self.shared.state,
-            ConnectionState::Connected | ConnectionState::Closing
-        ) {
-            return Err(Error::invalid_state("connection is not established"));
-        }
-
-        // RFC 6455 Section 7.4.1: 送信禁止のクローズコードをチェック
-        if !code.is_sendable() {
-            return Err(Error::invalid_input(format!(
-                "close code {} is not sendable",
-                code.as_u16()
-            )));
-        }
-
-        // reason が 123 バイト超の場合は Frame::close がエラーを返す。
-        // close_internal は truncate_reason で切り詰めるが、public API では呼び出し元に
-        // エラーとして通知する。
-        if reason.len() > 123 {
-            return Err(Error::invalid_input(format!(
-                "close reason exceeds 123 bytes: {} bytes",
-                reason.len()
-            )));
-        }
-
-        self.shared.close_internal(code, reason, &mut self.policy);
-        Ok(())
+        self.shared.close(code, reason, &mut self.policy)
     }
 
     /// タイマーイベントを処理

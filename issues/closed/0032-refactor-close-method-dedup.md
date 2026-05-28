@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: mimo-v2.5-pro
 - Branch: feature/refactor-close-method-dedup
 
@@ -68,3 +69,16 @@ pub(crate) fn close(
 - `cargo clippy --workspace --all-targets -- -D warnings` が通過する
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[UPDATE]` と担当者行がある
+
+## 解決方法
+
+`src/websocket_connection_shared.rs` に `pub(crate) fn close(&mut self, code, reason, policy) -> Result<(), Error>` を追加し、状態 / 送信可能コード / reason 長の 3 段検証を集約した。成功時は内部の `close_internal` に委譲する。
+
+`src/websocket_client_connection.rs::close` と `src/websocket_server_connection.rs::close` は `self.shared.close(code, reason, &mut self.policy)` への委譲のみに置き換えた。公開 API シグネチャと RFC 引用 doc コメント (7.4.1 / 5.5 / 7.1.2) はそのまま維持し、`cargo doc` から見える契約情報を失わないようにしている。
+
+検証:
+
+- `cargo fmt --all -- --check` 通過
+- `cargo clippy --workspace --all-targets -- -D warnings` 通過
+- `cargo test --workspace` 全件パス
+- 既存テストでカバーされるのは状態エラー（`prop_close_rejected_in_connecting_state` 等）のみで、送信禁止コードと reason 長エラーの Connection 経由テストは develop 時点で存在しないが、リファクタ前後の検証コードは文字列レベルで完全一致しているため挙動退化はない。追加テストは issue 本文「新規テスト不要」の方針に従い見送る
