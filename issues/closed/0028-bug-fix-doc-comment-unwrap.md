@@ -3,6 +3,7 @@
 - Priority: Medium
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: opencode mimo-v2.5-pro
 - Branch: feature/refactor-doc-comment-unwrap
 
@@ -57,3 +58,12 @@ doc 例は `no_run` 属性付きのため実行はされないが、コンパイ
 - `src/lib.rs` の doc 内に `.unwrap()` が残っていない（`rg '\.unwrap\(' src` が 0 件）
 - `cargo test --doc` が通過する（コンパイル検証）
 - `CHANGES.md` の `## develop` > `### misc` に上記 `[UPDATE]` エントリと担当者行が追加されている
+
+## 解決方法
+
+`src/lib.rs:43` の `//! ws.connect().unwrap();` を `//! ws.connect().expect("handshake must succeed");` に置換した。`no_run` 属性は維持している。
+
+検証:
+
+- `rg '\.unwrap\(' src/` の結果が 0 件
+- `cargo test --doc` 通過（doc 例のコンパイル検証）

@@ -40,7 +40,7 @@
 //! let mut ws = WebSocketClientConnection::new(options, DemoRandom { counter: 0 });
 //!
 //! // 接続開始
-//! ws.connect().unwrap();
+//! ws.connect().expect("handshake must succeed");
 //!
 //! // 出力データを取得してソケットに送信
 //! while let Some(output) = ws.poll_output() {
