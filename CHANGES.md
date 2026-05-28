@@ -26,6 +26,8 @@
   - @voluntas
 - [UPDATE] shiguredo_http11 のバージョン指定をマイナーまでに修正する
   - @voluntas
+- [UPDATE] crate-level doc 内の `.unwrap()` を `.expect()` に修正する
+  - @voluntas
 
 ## 2026.3.0
 
