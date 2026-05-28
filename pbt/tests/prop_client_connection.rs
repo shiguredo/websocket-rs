@@ -9,8 +9,9 @@
 use base64ct::{Base64, Encoding};
 use proptest::prelude::*;
 use shiguredo_websocket::{
-    ClientConnectionOptions, CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, Frame,
-    Opcode, PerMessageDeflateConfig, RandomSource, Timestamp, WebSocketClientConnection,
+    ClientConnectionOptions, CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState,
+    ErrorKind, Frame, Opcode, PerMessageDeflateConfig, RandomSource, Timestamp,
+    WebSocketClientConnection,
 };
 
 /// nonce から Sec-WebSocket-Accept を計算する
@@ -983,5 +984,110 @@ proptest! {
         // 2 回目以降も即座にエラーになる (failed フラグ)
         let second = conn.feed_recv_buf(&[], now);
         prop_assert!(second.is_err());
+    }
+}
+
+// ==== max_message_size 上限に対する大量フラグメント攻撃シミュレーション ====
+
+/// `max_message_size` を指定したクライアント接続を Connected 状態まで進めるヘルパ
+fn setup_connected_client_with_max_message_size(
+    max_message_size: usize,
+) -> (WebSocketClientConnection<FixedRandom>, Timestamp) {
+    let options =
+        ClientConnectionOptions::new("example.com", "/ws").max_message_size(max_message_size);
+    let random = FixedRandom::new();
+    let nonce = random.nonce;
+    let mut conn = WebSocketClientConnection::new(options, random);
+    let now = Timestamp::from_millis(0);
+
+    conn.connect().expect("connect");
+    while conn.poll_output().is_some() {}
+
+    let accept = compute_accept(&nonce);
+    let response = create_valid_handshake_response(&accept, None, None);
+    conn.feed_recv_buf(&response, now).expect("handshake");
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    (conn, now)
+}
+
+/// マスクなし Text フレーム (FIN=fin) を構築する
+fn build_unmasked_text_fragment(payload: &[u8], fin: bool) -> Vec<u8> {
+    let mut frame = vec![
+        if fin { 0x81 } else { 0x01 }, // FIN + Text opcode
+        payload.len() as u8,           // MASK=0 + length
+    ];
+    frame.extend_from_slice(payload);
+    frame
+}
+
+/// マスクなし Continuation フレーム (FIN=fin) を構築する
+fn build_unmasked_continuation_fragment(payload: &[u8], fin: bool) -> Vec<u8> {
+    let mut frame = vec![
+        if fin { 0x80 } else { 0x00 }, // FIN + Continuation opcode (0)
+        payload.len() as u8,           // MASK=0 + length
+    ];
+    frame.extend_from_slice(payload);
+    frame
+}
+
+proptest! {
+    /// `max_message_size = 100` のクライアント接続に対し、10 バイトずつの Text + Continuation
+    /// フラグメントを連続で送ると、累積サイズが上限を超えた時点で
+    /// `Err(ErrorKind::ProtocolViolation)` となり、MESSAGE_TOO_BIG (1009) で接続が閉じられる
+    #[test]
+    fn prop_fragment_flood_exceeds_max_message_size(num_fragments in 15usize..=30) {
+        const MAX_MSG: usize = 100;
+        const FRAG_PAYLOAD: &[u8] = b"0123456789";
+
+        let (mut conn, now) = setup_connected_client_with_max_message_size(MAX_MSG);
+
+        // 最初の Text フラグメント (FIN=0)
+        let first = build_unmasked_text_fragment(FRAG_PAYLOAD, false);
+        conn.feed_recv_buf(&first, now).expect("最初のフラグメントは受理されるべき");
+
+        // Continuation フラグメントを送り、上限超過まで feed
+        let mut overflowed = false;
+        for _ in 0..num_fragments {
+            let cont = build_unmasked_continuation_fragment(FRAG_PAYLOAD, false);
+            let result = conn.feed_recv_buf(&cont, now);
+            if let Err(e) = result {
+                prop_assert_eq!(e.kind, ErrorKind::ProtocolViolation);
+                overflowed = true;
+                break;
+            }
+        }
+        prop_assert!(
+            overflowed,
+            "num_fragments={} で max_message_size={} を超えても拒否されなかった",
+            num_fragments, MAX_MSG
+        );
+
+        // 接続が close 状態 (close_internal が呼ばれている) になっており、
+        // MESSAGE_TOO_BIG (1009) の Close フレームが送出されている
+        let mut found_close = false;
+        while let Some(output) = conn.poll_output() {
+            if let ConnectionOutput::SendData(data) = output {
+                let mut decoder = shiguredo_websocket::FrameDecoder::new();
+                decoder.feed(&data);
+                if let Ok(Some(decoded)) = decoder.decode_with_info()
+                    && decoded.frame.opcode == Opcode::Close
+                    && decoded.frame.payload.len() >= 2
+                {
+                    let code = u16::from_be_bytes([
+                        decoded.frame.payload[0],
+                        decoded.frame.payload[1],
+                    ]);
+                    prop_assert_eq!(code, CloseCode::MESSAGE_TOO_BIG.as_u16());
+                    found_close = true;
+                    break;
+                }
+            }
+        }
+        prop_assert!(
+            found_close,
+            "MESSAGE_TOO_BIG (1009) Close フレームが送出されていない"
+        );
     }
 }

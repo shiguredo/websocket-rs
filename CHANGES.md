@@ -82,6 +82,8 @@
   - @voluntas
 - [UPDATE] 送信禁止 Close コード受信時の返送動作を PBT で検証する
   - @voluntas
+- [UPDATE] 大量フラグメントによる max_message_size 到達を PBT で検証する
+  - @voluntas
 
 ## 2026.3.0
 
