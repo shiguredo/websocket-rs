@@ -235,8 +235,9 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
         self.shared
             .enqueue_output(ConnectionOutput::SendData(encoded));
 
-        // 状態遷移
-        self.shared.set_state(ConnectionState::Connecting);
+        // 状態遷移: 直前のガードで Disconnected であることを保証済みのため
+        // 通常は Ok を返すが、保守時の前提崩れに備えて `?` で伝播する
+        self.shared.set_state(ConnectionState::Connecting)?;
 
         Ok(())
     }
@@ -480,7 +481,9 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             }
         }
 
-        self.shared.set_state(ConnectionState::Connected);
+        // complete_handshake は feed_recv_buf の Connecting 状態経路でのみ呼ばれる。
+        // 通常は Ok を返すが、前提崩れに備えて `?` で伝播する
+        self.shared.set_state(ConnectionState::Connected)?;
 
         self.shared.emit_event(ConnectionEvent::Connected {
             protocol: self.negotiated_protocol.clone(),

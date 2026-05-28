@@ -3,6 +3,7 @@
 - Priority: Medium
 - Created: 2026-05-27
 - Polished: 2026-05-28
+- Completed: 2026-05-28
 - Model: opencode mimo-v2.5-pro
 - Branch: feature/refactor-connection-state-transition
 
@@ -61,3 +62,13 @@ Medium。現状は任意の `ConnectionState` へ代入可能（`0041` 完了後
 - PBT で少なくとも 1 件非法遷移が拒否されることを検証
 - `cargo test --workspace` が全件パスする
 - `CHANGES.md` に上記 `[UPDATE]` と担当者行がある
+
+## 解決方法
+
+`ConnectionState` に許可遷移表を doc コメントとして明記し、`can_transition_to` メソッド (`#[doc(hidden)] pub`) を追加した。`SharedConnectionState::set_state` のシグネチャを `Result<(), Error>` に変更し、許可遷移表外への遷移を `Error::invalid_state` で拒否するようにした。同一状態への遷移は no-op として `Ok(())` を返し、`StateChanged` イベントの二重発火を避ける。
+
+呼び出し側は基本的に `?` で伝播させ、issue の方針「パニックにしない」に近づけた。例外は `close_internal` のみで、戻り値が `()` のため `?` を使えず `.expect("unreachable: ...")` で囲む。代わりに `close_internal` 冒頭ガードを `Connected | Closing` 以外を弾く形に絞り、`Connecting` 状態で呼ばれても panic ではなく早期 return するようにした。
+
+`pbt/tests/prop_connection_state.rs` を新規追加し、`can_transition_to` の許可遷移表との一致を proptest と単体テストで網羅検証。さらに `src/websocket_connection_shared.rs` の `#[cfg(test)] mod tests` で `set_state` の Err 経路 (不正遷移拒否) / Ok 経路 (許可遷移成功 + StateChanged emit / 同一状態 no-op / 終端 Closed からの全遷移拒否) を直接検証した。
+
+issue 文 line 26-34 の遷移表は実装の真実 (`Connecting → Closed` の reject_handshake、`Connected → Closed` の handle_close) と一部齟齬があったため、実装側の遷移表 (`ConnectionState` doc コメント) を真実の源として実装を進めた。

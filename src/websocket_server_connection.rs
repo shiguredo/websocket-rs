@@ -447,7 +447,9 @@ impl WebSocketServerConnection {
         self.negotiated_protocol = response.protocol.clone();
         self.negotiated_extensions = response.extensions.clone();
 
-        self.shared.set_state(ConnectionState::Connected);
+        // accept_handshake は冒頭で Connecting であることをガード済み。
+        // 通常は Ok を返すが、前提崩れに備えて `?` で伝播する
+        self.shared.set_state(ConnectionState::Connected)?;
         self.shared.emit_event(ConnectionEvent::Connected {
             protocol: self.negotiated_protocol.clone(),
             extensions: self.negotiated_extensions.clone(),
@@ -506,7 +508,9 @@ impl WebSocketServerConnection {
         self.shared
             .enqueue_output(ConnectionOutput::SendData(encoded));
 
-        self.shared.set_state(ConnectionState::Closed);
+        // reject_handshake は冒頭で Connecting であることをガード済み。
+        // 通常は Ok を返すが、前提崩れに備えて `?` で伝播する
+        self.shared.set_state(ConnectionState::Closed)?;
         self.shared
             .enqueue_output(ConnectionOutput::CloseConnection);
         Ok(())
@@ -569,7 +573,8 @@ impl WebSocketServerConnection {
         }
 
         if self.shared.state() == ConnectionState::Disconnected {
-            self.shared.set_state(ConnectionState::Connecting);
+            // 直前の if で Disconnected を確認済み。前提崩れに備えて `?` で伝播
+            self.shared.set_state(ConnectionState::Connecting)?;
         }
 
         self.handshake_validator.feed(buf);
