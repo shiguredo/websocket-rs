@@ -70,6 +70,8 @@
   - @voluntas
 - [UPDATE] Extension::parse と parse_strict の共通パースロジックを抽出する
   - @voluntas
+- [UPDATE] validate_extension_entry を Extension::parse_strict に統一する
+  - @voluntas
 
 ## 2026.3.0
 
