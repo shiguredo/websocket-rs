@@ -72,6 +72,8 @@
 mod buf;
 mod deflate;
 mod error;
+mod fragment_buffer;
+mod frame_policy;
 mod time;
 mod token;
 mod websocket_client_connection;
