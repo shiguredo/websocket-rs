@@ -68,6 +68,8 @@
   - @voluntas
 - [UPDATE] complete_handshake から deflate ネゴシエーション検証を抽出する
   - @voluntas
+- [UPDATE] Extension::parse と parse_strict の共通パースロジックを抽出する
+  - @voluntas
 
 ## 2026.3.0
 

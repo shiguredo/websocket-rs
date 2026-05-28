@@ -103,59 +103,10 @@ impl Extension {
     /// サーバー側でクライアントリクエストをパースする場合に使用する。
     /// 不正な拡張オファーは無視して次の候補を試すため、エラーにしない。
     pub fn parse(s: &str) -> Vec<Extension> {
+        // loose モードはエラーを Err として返さず None 化して拡張ごと除外する
         Self::split_respecting_quotes(s, b',')
             .into_iter()
-            .filter_map(|ext| {
-                let ext = ext.trim();
-                if ext.is_empty() {
-                    return None;
-                }
-
-                let parts = Self::split_respecting_quotes(ext, b';');
-                let mut parts_iter = parts.into_iter();
-                let name = parts_iter.next()?.trim().to_string();
-                if name.is_empty() {
-                    return None;
-                }
-                // RFC 6455 Section 9.1: extension-token は token ABNF に準拠する必要がある
-                if !crate::token::is_valid_token(&name) {
-                    return None;
-                }
-
-                let mut params = Vec::new();
-                for p in parts_iter {
-                    let p = p.trim();
-                    if p.is_empty() {
-                        continue;
-                    }
-
-                    if let Some((param_name, value)) = p.split_once('=') {
-                        let param_name = param_name.trim();
-                        // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
-                        if !crate::token::is_valid_token(param_name) {
-                            return None;
-                        }
-                        let value = value.trim();
-                        // RFC 6455 Section 9.1: 値が token に準拠しない場合は拡張全体を除外
-                        let parsed_value = Self::parse_param_value(value)?;
-                        params.push(ExtensionParam {
-                            name: param_name.to_string(),
-                            value: Some(parsed_value),
-                        });
-                    } else {
-                        // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
-                        if !crate::token::is_valid_token(p) {
-                            return None;
-                        }
-                        params.push(ExtensionParam {
-                            name: p.to_string(),
-                            value: None,
-                        });
-                    }
-                }
-
-                Some(Extension { name, params })
-            })
+            .filter_map(|ext_str| Self::parse_one(ext_str, false).ok().flatten())
             .collect()
     }
 
@@ -167,79 +118,130 @@ impl Extension {
     pub fn parse_strict(s: &str) -> Result<Vec<Extension>, ExtensionParseError> {
         let mut result = Vec::new();
         for ext_str in Self::split_respecting_quotes(s, b',') {
-            let ext = ext_str.trim();
-            if ext.is_empty() {
-                continue;
+            if let Some(ext) = Self::parse_one(ext_str, true)? {
+                result.push(ext);
             }
+        }
+        Ok(result)
+    }
 
-            let parts = Self::split_respecting_quotes(ext, b';');
-            let mut parts_iter = parts.into_iter();
-            let name = parts_iter
-                .next()
-                .map(|n| n.trim())
-                .filter(|n| !n.is_empty())
-                .ok_or_else(|| {
-                    ExtensionParseError::InvalidValue(format!("empty extension name in '{}'", ext))
-                })?
-                .to_string();
-            // RFC 6455 Section 9.1: extension-token は token ABNF に準拠する必要がある
-            if !crate::token::is_valid_token(&name) {
-                return Err(ExtensionParseError::InvalidValue(format!(
+    /// 1 つの extension をパースする内部関数
+    ///
+    /// `strict == true`: ABNF 不適合は `Err` を返す。
+    /// `strict == false`: ABNF 不適合は `Ok(None)` を返し、呼び出し側でその拡張を除外する。
+    ///
+    /// trailing `;` の扱いだけは strict / loose で挙動が異なる点に注意。
+    /// strict はエラー、loose はその param をスキップして残りの param を採用する。
+    fn parse_one(ext_str: &str, strict: bool) -> Result<Option<Extension>, ExtensionParseError> {
+        let ext = ext_str.trim();
+        if ext.is_empty() {
+            return Ok(None);
+        }
+
+        let parts = Self::split_respecting_quotes(ext, b';');
+        let mut parts_iter = parts.into_iter();
+        let name = match parts_iter.next() {
+            Some(n) => n.trim().to_string(),
+            None => {
+                return if strict {
+                    Err(ExtensionParseError::InvalidValue(format!(
+                        "empty extension name in '{}'",
+                        ext
+                    )))
+                } else {
+                    Ok(None)
+                };
+            }
+        };
+        if name.is_empty() {
+            return if strict {
+                Err(ExtensionParseError::InvalidValue(format!(
+                    "empty extension name in '{}'",
+                    ext
+                )))
+            } else {
+                Ok(None)
+            };
+        }
+        // RFC 6455 Section 9.1: extension-token は token ABNF に準拠する必要がある
+        if !crate::token::is_valid_token(&name) {
+            return if strict {
+                Err(ExtensionParseError::InvalidValue(format!(
                     "invalid extension name '{}': not a valid token",
                     name
-                )));
-            }
+                )))
+            } else {
+                Ok(None)
+            };
+        }
 
-            let mut params = Vec::new();
-            for p in parts_iter {
-                let p = p.trim();
+        let mut params = Vec::new();
+        for p in parts_iter {
+            let p = p.trim();
+            if p.is_empty() {
                 // RFC 6455 Section 9.1: extension = extension-token *( ";" extension-param )
-                // ";" の後は必ず extension-param が必要。空は ABNF 違反。
-                if p.is_empty() {
+                // ";" の後は必ず extension-param が必要。strict は ABNF 違反でエラー、
+                // loose はその param をスキップして残りを採用する
+                if strict {
                     return Err(ExtensionParseError::InvalidValue(format!(
                         "trailing ';' in extension '{}': extension-param required after ';'",
                         name
                     )));
                 }
-
-                if let Some((param_name, value)) = p.split_once('=') {
-                    let param_name = param_name.trim();
-                    // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
-                    if !crate::token::is_valid_token(param_name) {
-                        return Err(ExtensionParseError::InvalidValue(format!(
-                            "invalid parameter name in extension '{}': '{}' is not a valid token",
-                            name, param_name
-                        )));
-                    }
-                    let value = value.trim();
-                    let parsed_value = Self::parse_param_value(value).ok_or_else(|| {
-                        ExtensionParseError::InvalidValue(format!(
-                            "invalid parameter value in extension '{}': '{}'",
-                            name, value
-                        ))
-                    })?;
-                    params.push(ExtensionParam {
-                        name: param_name.to_string(),
-                        value: Some(parsed_value),
-                    });
-                } else {
-                    // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
-                    if !crate::token::is_valid_token(p) {
-                        return Err(ExtensionParseError::InvalidValue(format!(
-                            "invalid parameter name in extension '{}': '{}' is not a valid token",
-                            name, p
-                        )));
-                    }
-                    params.push(ExtensionParam {
-                        name: p.to_string(),
-                        value: None,
-                    });
-                }
+                continue;
             }
 
-            result.push(Extension { name, params });
+            if let Some((param_name, value)) = p.split_once('=') {
+                let param_name = param_name.trim();
+                // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
+                if !crate::token::is_valid_token(param_name) {
+                    return if strict {
+                        Err(ExtensionParseError::InvalidValue(format!(
+                            "invalid parameter name in extension '{}': '{}' is not a valid token",
+                            name, param_name
+                        )))
+                    } else {
+                        Ok(None)
+                    };
+                }
+                let value = value.trim();
+                let parsed_value = match Self::parse_param_value(value) {
+                    Some(v) => v,
+                    None => {
+                        return if strict {
+                            Err(ExtensionParseError::InvalidValue(format!(
+                                "invalid parameter value in extension '{}': '{}'",
+                                name, value
+                            )))
+                        } else {
+                            Ok(None)
+                        };
+                    }
+                };
+                params.push(ExtensionParam {
+                    name: param_name.to_string(),
+                    value: Some(parsed_value),
+                });
+            } else {
+                // RFC 6455 Section 9.1: パラメータ名は token ABNF に準拠する必要がある
+                if !crate::token::is_valid_token(p) {
+                    return if strict {
+                        Err(ExtensionParseError::InvalidValue(format!(
+                            "invalid parameter name in extension '{}': '{}' is not a valid token",
+                            name, p
+                        )))
+                    } else {
+                        Ok(None)
+                    };
+                }
+                params.push(ExtensionParam {
+                    name: p.to_string(),
+                    value: None,
+                });
+            }
         }
-        Ok(result)
+
+        Ok(Some(Extension { name, params }))
     }
 
     /// quoted-string を考慮して区切り文字で分割する
