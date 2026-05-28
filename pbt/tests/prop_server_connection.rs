@@ -60,44 +60,6 @@ fn create_masked_close_frame(code: Option<u16>, reason: &str, mask_key: [u8; 4])
     Frame::close(code, reason).unwrap().encode(mask_key)
 }
 
-// ==== ServerConnectionOptions のテスト ====
-
-proptest! {
-    /// ServerConnectionOptions::protocol は複数回呼び出しても正しく蓄積される
-    #[test]
-    fn prop_server_options_multiple_protocols(
-        protocols in prop::collection::vec("[a-z]{1,20}", 0..10)
-    ) {
-        let mut options = ServerConnectionOptions::new();
-        for p in &protocols {
-            options = options.protocol(p);
-        }
-        prop_assert_eq!(options.protocols.len(), protocols.len());
-        for (i, p) in protocols.iter().enumerate() {
-            prop_assert_eq!(&options.protocols[i], p);
-        }
-    }
-
-    /// ServerConnectionOptions::header は複数回呼び出しても正しく蓄積される
-    #[test]
-    fn prop_server_options_multiple_headers(
-        headers in prop::collection::vec(("[a-zA-Z-]{1,20}", "[a-zA-Z0-9 ]{0,50}"), 0..10)
-    ) {
-        let mut options = ServerConnectionOptions::new();
-        for (name, value) in &headers {
-            options = options.header(name, value);
-        }
-        prop_assert_eq!(options.additional_headers.len(), headers.len());
-    }
-
-    /// ping_interval は任意の値を設定可能
-    #[test]
-    fn prop_server_options_ping_interval(interval in 0u64..=u64::MAX) {
-        let options = ServerConnectionOptions::new().ping_interval(interval);
-        prop_assert_eq!(options.ping_interval_millis, interval);
-    }
-}
-
 // ==== ハンドシェイク処理のテスト ====
 
 proptest! {

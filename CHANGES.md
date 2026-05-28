@@ -17,6 +17,8 @@
   - @voluntas
 - [CHANGE] Extension::parse_strict のエラー型を String から ExtensionParseError に変更する
   - @voluntas
+- [CHANGE] ClientConnectionOptions / ServerConnectionOptions のフィールドを private にする
+  - @voluntas
 - [ADD] ExtensionParseError に Display / Error を実装し、ExtensionParseContext と合わせて lib.rs から公開する
   - @voluntas
 - [UPDATE] close_internal の戻り値型を `()` に統一する

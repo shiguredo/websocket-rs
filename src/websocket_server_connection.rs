@@ -24,26 +24,28 @@ use shiguredo_http11::{HeaderName, Response};
 const MAX_PENDING_FRAME_DATA: usize = 1024 * 1024;
 
 /// サーバー接続オプション
+///
+/// フィールドはビルダーメソッド経由でのみ設定する。直接代入はできない
 #[derive(Debug, Clone)]
 pub struct ServerConnectionOptions {
     /// サブプロトコル候補
-    pub protocols: Vec<String>,
+    protocols: Vec<String>,
     /// permessage-deflate 設定（オプション）
-    pub deflate_config: Option<PerMessageDeflateConfig>,
+    deflate_config: Option<PerMessageDeflateConfig>,
     /// 追加ヘッダー
-    pub additional_headers: Vec<(String, String)>,
+    additional_headers: Vec<(String, String)>,
     /// Ping 間隔（ミリ秒、0 で無効）
-    pub ping_interval_millis: u64,
+    ping_interval_millis: u64,
     /// Pong タイムアウト（ミリ秒）
-    pub pong_timeout_millis: u64,
+    pong_timeout_millis: u64,
     /// クローズタイムアウト（ミリ秒）
-    pub close_timeout_millis: u64,
+    close_timeout_millis: u64,
     /// 最大フレームサイズ（メモリ DoS 対策）
-    pub max_frame_size: usize,
+    max_frame_size: usize,
     /// 最大メッセージサイズ（フラグメント累積サイズ制限）
-    pub max_message_size: usize,
+    max_message_size: usize,
     /// 最大解凍サイズ（Zip Bomb 対策）
-    pub max_decompressed_size: usize,
+    max_decompressed_size: usize,
 }
 
 impl Default for ServerConnectionOptions {
@@ -90,6 +92,18 @@ impl ServerConnectionOptions {
     /// Ping 間隔を設定
     pub fn ping_interval(mut self, millis: u64) -> Self {
         self.ping_interval_millis = millis;
+        self
+    }
+
+    /// Pong タイムアウトを設定（ミリ秒）
+    pub fn pong_timeout(mut self, millis: u64) -> Self {
+        self.pong_timeout_millis = millis;
+        self
+    }
+
+    /// クローズタイムアウトを設定（ミリ秒）
+    pub fn close_timeout(mut self, millis: u64) -> Self {
+        self.close_timeout_millis = millis;
         self
     }
 
