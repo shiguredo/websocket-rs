@@ -11,6 +11,8 @@
 
 ## develop
 
+- [ADD] ExtensionParseError に Display / Error を実装し、ExtensionParseContext と合わせて lib.rs から公開する
+  - @voluntas
 - [UPDATE] close_internal の戻り値型を `()` に統一する
   - @voluntas
 - [FIX] close_internal の reason 切り詰めが UTF-8 境界を無視する問題を修正する
