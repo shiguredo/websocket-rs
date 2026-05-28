@@ -36,6 +36,8 @@
   - @voluntas
 - [UPDATE] close メソッドの検証ロジックを SharedConnectionState に共通化する
   - @voluntas
+- [UPDATE] send_text 等の重複ロジックを SharedConnectionState に集約する
+  - @voluntas
 
 ## 2026.3.0
 

@@ -16,7 +16,6 @@ use crate::websocket_connection_types::{
 };
 use crate::websocket_extension::{Extension, PerMessageDeflateConfig};
 use crate::websocket_handshake::{HandshakeRequest, HandshakeResponse, HandshakeValidator};
-use crate::websocket_opcode::Opcode;
 
 /// 接続オプション
 #[derive(Debug, Clone)]
@@ -268,24 +267,19 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
     /// テキストメッセージを送信
     pub fn send_text(&mut self, text: &str) -> Result<(), Error> {
-        self.shared.check_connected()?;
-        self.shared
-            .send_data_frame(Opcode::Text, text.as_bytes().to_vec(), &mut self.policy)
+        self.shared.send_text(text, &mut self.policy)
     }
 
     /// バイナリメッセージを送信
     pub fn send_binary(&mut self, data: &[u8]) -> Result<(), Error> {
-        self.shared.check_connected()?;
-        self.shared
-            .send_data_frame(Opcode::Binary, data.to_vec(), &mut self.policy)
+        self.shared.send_binary(data, &mut self.policy)
     }
 
     /// Ping を送信
     ///
     /// RFC 6455 Section 5.5: data は 125 バイト以下でなければならない
     pub fn send_ping(&mut self, data: &[u8]) -> Result<(), Error> {
-        self.shared.check_connected()?;
-        self.shared.send_ping_internal(data, &mut self.policy)
+        self.shared.send_ping(data, &mut self.policy)
     }
 
     /// 接続をクローズ
