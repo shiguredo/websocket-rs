@@ -60,6 +60,8 @@
   - @voluntas
 - [UPDATE] websocket_handshake.rs をリクエスト / レスポンスモジュールに分割する
   - @voluntas
+- [UPDATE] accept_handshake を責務ごとの private メソッドに分割する
+  - @voluntas
 
 ## 2026.3.0
 

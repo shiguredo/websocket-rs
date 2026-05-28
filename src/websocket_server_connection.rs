@@ -245,6 +245,51 @@ impl WebSocketServerConnection {
             .take()
             .ok_or_else(|| Error::invalid_state("handshake request not available"))?;
 
+        Self::validate_handshake_response(&request, &response)?;
+        // 旧来の検証順序を維持するため、PMCE ネゴシエーションより先にレスポンスを
+        // 組み立てて additional_headers の ABNF token 検証を済ませる
+        let encoded = Self::build_handshake_response(&request, &response)?;
+        let deflate = Self::negotiate_deflate(&request, &response)?;
+
+        self.shared
+            .enqueue_output(ConnectionOutput::SendData(encoded));
+
+        if let Some(deflate) = deflate {
+            self.shared.enable_deflate(deflate);
+        }
+        self.negotiated_protocol = response.protocol.clone();
+        self.negotiated_extensions = response.extensions.clone();
+
+        // accept_handshake は冒頭で Connecting であることをガード済み。
+        // 通常は Ok を返すが、前提崩れに備えて `?` で伝播する
+        self.shared.set_state(ConnectionState::Connected)?;
+        self.shared.emit_event(ConnectionEvent::Connected {
+            protocol: self.negotiated_protocol.clone(),
+            extensions: self.negotiated_extensions.clone(),
+        });
+
+        // Ping タイマー設定
+        if self.options.ping_interval_millis > 0 {
+            self.shared.enqueue_output(ConnectionOutput::SetTimer {
+                id: TimerId::Ping,
+                duration_millis: self.options.ping_interval_millis,
+            });
+        }
+
+        if !self.pending_frame_data.is_empty() {
+            let pending = std::mem::take(&mut self.pending_frame_data);
+            self.shared.process_frames(&pending, &mut self.policy)?;
+        }
+
+        self.handshake_validator.reset();
+        Ok(())
+    }
+
+    /// レスポンス本体の事前検証 (protocol / extensions / 予約済みヘッダー)
+    fn validate_handshake_response(
+        request: &ServerHandshakeRequest,
+        response: &ServerHandshakeResponse,
+    ) -> Result<(), Error> {
         if let Some(protocol) = &response.protocol
             && !request.protocols.iter().any(|p| p == protocol)
         {
@@ -330,37 +375,14 @@ impl WebSocketServerConnection {
             }
         }
 
-        let accept = calculate_accept_from_key(&request.key);
-        let mut response_builder = Response::new(101, "Switching Protocols")
-            .map_err(|e| Error::invalid_input(e.to_string()))?
-            .header("Upgrade", "websocket")
-            .map_err(|e| Error::invalid_input(e.to_string()))?
-            .header("Connection", "Upgrade")
-            .map_err(|e| Error::invalid_input(e.to_string()))?
-            .header("Sec-WebSocket-Accept", &accept)
-            .map_err(|e| Error::invalid_input(e.to_string()))?;
+        Ok(())
+    }
 
-        if let Some(protocol) = &response.protocol {
-            response_builder = response_builder
-                .header("Sec-WebSocket-Protocol", protocol)
-                .map_err(|e| Error::invalid_input(e.to_string()))?;
-        }
-
-        if !response.extensions.is_empty() {
-            response_builder = response_builder
-                .header("Sec-WebSocket-Extensions", response.extensions.join(", "))
-                .map_err(|e| Error::invalid_input(e.to_string()))?;
-        }
-
-        for (name, value) in &response.additional_headers {
-            let header_name =
-                HeaderName::new(name).map_err(|e| Error::invalid_input(e.to_string()))?;
-            response_builder = response_builder
-                .header(header_name, value)
-                .map_err(|e| Error::invalid_input(e.to_string()))?;
-        }
-
-        // permessage-deflate のネゴシエーション結果を解析し、コーデックを作成
+    /// permessage-deflate (RFC 7692) のネゴシエーション結果を解析し、コーデックを返す
+    fn negotiate_deflate(
+        request: &ServerHandshakeRequest,
+        response: &ServerHandshakeResponse,
+    ) -> Result<Option<PerMessageDeflate>, Error> {
         // RFC 7692 Section 7: 検証をレスポンス送信前に行い、エラー時は送信しない
 
         // RFC 7692 Section 7.1.2.1: クライアントが offer した server_max_window_bits を取得する
@@ -434,42 +456,47 @@ impl WebSocketServerConnection {
                 }
             }
         }
+        Ok(deflate)
+    }
 
-        let encoded = response_builder
-            .encode()
+    /// 101 Switching Protocols レスポンスをエンコードする
+    fn build_handshake_response(
+        request: &ServerHandshakeRequest,
+        response: &ServerHandshakeResponse,
+    ) -> Result<Vec<u8>, Error> {
+        let accept = calculate_accept_from_key(&request.key);
+        let mut response_builder = Response::new(101, "Switching Protocols")
+            .map_err(|e| Error::invalid_input(e.to_string()))?
+            .header("Upgrade", "websocket")
+            .map_err(|e| Error::invalid_input(e.to_string()))?
+            .header("Connection", "Upgrade")
+            .map_err(|e| Error::invalid_input(e.to_string()))?
+            .header("Sec-WebSocket-Accept", &accept)
             .map_err(|e| Error::invalid_input(e.to_string()))?;
-        self.shared
-            .enqueue_output(ConnectionOutput::SendData(encoded));
 
-        if let Some(deflate) = deflate {
-            self.shared.enable_deflate(deflate);
-        }
-        self.negotiated_protocol = response.protocol.clone();
-        self.negotiated_extensions = response.extensions.clone();
-
-        // accept_handshake は冒頭で Connecting であることをガード済み。
-        // 通常は Ok を返すが、前提崩れに備えて `?` で伝播する
-        self.shared.set_state(ConnectionState::Connected)?;
-        self.shared.emit_event(ConnectionEvent::Connected {
-            protocol: self.negotiated_protocol.clone(),
-            extensions: self.negotiated_extensions.clone(),
-        });
-
-        // Ping タイマー設定
-        if self.options.ping_interval_millis > 0 {
-            self.shared.enqueue_output(ConnectionOutput::SetTimer {
-                id: TimerId::Ping,
-                duration_millis: self.options.ping_interval_millis,
-            });
+        if let Some(protocol) = &response.protocol {
+            response_builder = response_builder
+                .header("Sec-WebSocket-Protocol", protocol)
+                .map_err(|e| Error::invalid_input(e.to_string()))?;
         }
 
-        if !self.pending_frame_data.is_empty() {
-            let pending = std::mem::take(&mut self.pending_frame_data);
-            self.shared.process_frames(&pending, &mut self.policy)?;
+        if !response.extensions.is_empty() {
+            response_builder = response_builder
+                .header("Sec-WebSocket-Extensions", response.extensions.join(", "))
+                .map_err(|e| Error::invalid_input(e.to_string()))?;
         }
 
-        self.handshake_validator.reset();
-        Ok(())
+        for (name, value) in &response.additional_headers {
+            let header_name =
+                HeaderName::new(name).map_err(|e| Error::invalid_input(e.to_string()))?;
+            response_builder = response_builder
+                .header(header_name, value)
+                .map_err(|e| Error::invalid_input(e.to_string()))?;
+        }
+
+        response_builder
+            .encode()
+            .map_err(|e| Error::invalid_input(e.to_string()))
     }
 
     /// ハンドシェイクを拒否
