@@ -78,23 +78,25 @@ impl FragmentBuffer {
 }
 
 /// クライアント / サーバー間で共有される接続状態
+///
+/// `state` の書き込みは `set_state` に限定して不正な遷移を防ぐ。
 pub(crate) struct SharedConnectionState {
-    pub(crate) state: ConnectionState,
-    pub(crate) close_sent: bool,
-    pub(crate) close_received: bool,
-    pub(crate) awaiting_pong: bool,
-    pub(crate) failed: bool,
-    pub(crate) event_queue: VecDeque<ConnectionEvent>,
-    pub(crate) output_queue: VecDeque<ConnectionOutput>,
-    pub(crate) frame_decoder: FrameDecoder,
-    pub(crate) fragment_buffer: FragmentBuffer,
-    pub(crate) deflate: Option<PerMessageDeflate>,
-    pub(crate) max_frame_size: usize,
-    pub(crate) max_message_size: usize,
-    pub(crate) max_decompressed_size: usize,
-    pub(crate) ping_interval_millis: u64,
-    pub(crate) pong_timeout_millis: u64,
-    pub(crate) close_timeout_millis: u64,
+    state: ConnectionState,
+    close_sent: bool,
+    close_received: bool,
+    awaiting_pong: bool,
+    failed: bool,
+    event_queue: VecDeque<ConnectionEvent>,
+    output_queue: VecDeque<ConnectionOutput>,
+    frame_decoder: FrameDecoder,
+    fragment_buffer: FragmentBuffer,
+    deflate: Option<PerMessageDeflate>,
+    max_frame_size: usize,
+    max_message_size: usize,
+    max_decompressed_size: usize,
+    ping_interval_millis: u64,
+    pong_timeout_millis: u64,
+    close_timeout_millis: u64,
 }
 
 impl SharedConnectionState {
@@ -128,6 +130,37 @@ impl SharedConnectionState {
 
     // === 共通メソッド ===
 
+    pub(crate) fn state(&self) -> ConnectionState {
+        self.state
+    }
+
+    /// 致命的エラーが発生済みかを返す。RFC 6455 Section 7.1.7 の
+    /// Fail the WebSocket Connection ラッチを表す
+    pub(crate) fn is_failed(&self) -> bool {
+        self.failed
+    }
+
+    /// 致命的エラー発生を記録する。以降の feed_recv_buf は即時 Err となる
+    pub(crate) fn mark_failed(&mut self) {
+        self.failed = true;
+    }
+
+    /// permessage-deflate を有効化する。ハンドシェイクで合意が成立した
+    /// 直後に 1 回だけ呼び出される想定
+    pub(crate) fn enable_deflate(&mut self, deflate: PerMessageDeflate) {
+        self.deflate = Some(deflate);
+    }
+
+    pub(crate) fn emit_event(&mut self, event: ConnectionEvent) {
+        self.event_queue.push_back(event);
+    }
+
+    pub(crate) fn enqueue_output(&mut self, output: ConnectionOutput) {
+        self.output_queue.push_back(output);
+    }
+
+    /// `state` への書き込みは本メソッドに集約する。差分時のみ
+    /// `StateChanged` イベントを emit して二重通知を避ける
     pub(crate) fn set_state(&mut self, new_state: ConnectionState) {
         if self.state != new_state {
             self.state = new_state;
@@ -727,7 +760,7 @@ pub(crate) trait FramePolicy {
 
 /// クライアント側のフレームポリシー
 pub(crate) struct ClientFramePolicy<R: RandomSource> {
-    pub(crate) random: R,
+    random: R,
 }
 
 impl<R: RandomSource> ClientFramePolicy<R> {
@@ -754,9 +787,7 @@ impl<R: RandomSource> FramePolicy for ClientFramePolicy<R> {
     fn encode_and_send(&mut self, frame: &Frame, shared: &mut SharedConnectionState) {
         let masking_key = self.random.masking_key();
         let encoded = frame.encode(masking_key);
-        shared
-            .output_queue
-            .push_back(ConnectionOutput::SendData(encoded));
+        shared.enqueue_output(ConnectionOutput::SendData(encoded));
     }
 }
 
@@ -777,8 +808,6 @@ impl FramePolicy for ServerFramePolicy {
         // RFC 6455 Section 5.1: サーバーは送信フレームをマスクしてはならない
         // RFC 6455 Section 5.2: MASK=0 のとき Masking-Key field は存在しない
         let encoded = frame.encode_unmasked();
-        shared
-            .output_queue
-            .push_back(ConnectionOutput::SendData(encoded));
+        shared.enqueue_output(ConnectionOutput::SendData(encoded));
     }
 }

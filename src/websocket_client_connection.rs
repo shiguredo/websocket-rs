@@ -183,7 +183,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
     /// 現在の状態を取得
     pub fn state(&self) -> ConnectionState {
-        self.shared.state
+        self.shared.state()
     }
 
     /// ネゴシエートされたサブプロトコルを取得
@@ -198,7 +198,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
     /// 接続を開始
     pub fn connect(&mut self) -> Result<(), Error> {
-        if self.shared.state != ConnectionState::Disconnected {
+        if self.shared.state() != ConnectionState::Disconnected {
             return Err(Error::invalid_state("already connected or connecting"));
         }
 
@@ -233,8 +233,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
         // 送信キューに追加
         self.shared
-            .output_queue
-            .push_back(ConnectionOutput::SendData(encoded));
+            .enqueue_output(ConnectionOutput::SendData(encoded));
 
         // 状態遷移
         self.shared.set_state(ConnectionState::Connecting);
@@ -247,10 +246,10 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
     /// RFC 6455 Section 7.1.7: このメソッドが Err を返した後は
     /// 以降の呼び出しも即座に Err を返す。
     pub fn feed_recv_buf(&mut self, buf: &[u8], now: Timestamp) -> Result<(), Error> {
-        if self.shared.failed {
+        if self.shared.is_failed() {
             return Err(Error::invalid_state("connection has failed"));
         }
-        let result = match self.shared.state {
+        let result = match self.shared.state() {
             ConnectionState::Connecting => self.process_handshake(buf, now),
             ConnectionState::Connected | ConnectionState::Closing => {
                 self.shared.process_frames(buf, &mut self.policy)
@@ -260,7 +259,7 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
             }
         };
         if result.is_err() {
-            self.shared.failed = true;
+            self.shared.mark_failed();
         }
         result
     }
@@ -463,7 +462,8 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
                                     )));
                                 }
                             }
-                            self.shared.deflate = Some(PerMessageDeflate::new_client(config));
+                            self.shared
+                                .enable_deflate(PerMessageDeflate::new_client(config));
                         }
                         Err(e) => {
                             // クライアントがリクエストした拡張なら接続失敗
@@ -482,21 +482,17 @@ impl<R: RandomSource> WebSocketClientConnection<R> {
 
         self.shared.set_state(ConnectionState::Connected);
 
-        self.shared
-            .event_queue
-            .push_back(ConnectionEvent::Connected {
-                protocol: self.negotiated_protocol.clone(),
-                extensions: self.negotiated_extensions.clone(),
-            });
+        self.shared.emit_event(ConnectionEvent::Connected {
+            protocol: self.negotiated_protocol.clone(),
+            extensions: self.negotiated_extensions.clone(),
+        });
 
         // Ping タイマー設定
         if self.options.ping_interval_millis > 0 {
-            self.shared
-                .output_queue
-                .push_back(ConnectionOutput::SetTimer {
-                    id: TimerId::Ping,
-                    duration_millis: self.options.ping_interval_millis,
-                });
+            self.shared.enqueue_output(ConnectionOutput::SetTimer {
+                id: TimerId::Ping,
+                duration_millis: self.options.ping_interval_millis,
+            });
         }
 
         Ok(())
