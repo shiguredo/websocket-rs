@@ -24,7 +24,7 @@ Sans I/O 設計に基づく WebSocket (RFC 6455) ライブラリ。HTTP/1.1 上�
 - crate 名: `shiguredo_websocket`
 - バージョン: 2026.3.0
 - Rust Edition: 2024
-- 最小 Rust バージョン: 1.88
+- 最小 Rust バージョン: 1.93
 - ライセンス: Apache-2.0
 
 ## 依存
