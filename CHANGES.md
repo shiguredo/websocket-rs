@@ -11,10 +11,17 @@
 
 ## develop
 
-- [CHANGE] MSRV (rust-version) を 1.93 に上げる
+- [CHANGE] 最小対応 Rust バージョン (MSRV) を 1.88 から 1.95 に引き上げる
   - @voluntas
 
 ### misc
+
+- [UPDATE] ツールチェーンを `rust-toolchain.toml` で MSRV の 1.95 に固定する
+  - CI で `rustup show` により MSRV のツールチェーンを導入する
+  - workspace 外の fuzz にも rust-version を設定し、fmt を CI で確認する
+  - @voluntas
+- [UPDATE] Git フックを prek の標準構成に揃え、cargo test を pre-push でのみ実行するようにする
+  - @voluntas
 
 ## 2026.3.0
 

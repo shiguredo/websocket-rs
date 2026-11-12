@@ -2,39 +2,79 @@
 # See https://prek.j178.dev for more information.
 #:schema https://www.schemastore.org/prek.json
 
-# prek の組み込み hook を使うことで、追加の依存・ネットワーク取得なしに
-# 一般的なリポジトリチェックを実施する。
+# 最初に失敗したフックで残りをスキップする
+fail_fast = true
+# stages 未指定のフックは pre-commit でだけ実行される
+default_stages = ["pre-commit"]
+# prek install で pre-commit と pre-push の両方の Git フックを入れる
+default_install_hook_types = ["pre-commit", "pre-push"]
+# ビルド生成物、バイナリの fuzz 入力、RFC 原文はフックで書き換えない
+exclude = {
+  glob = [
+    "target/**",
+    "fuzz/target/**",
+    "fuzz/corpus/**",
+    "fuzz/artifacts/**",
+    "refs/**",
+  ]
+}
+
+# prek 組み込みフック (オフラインで動作する Rust ネイティブ実装)
 [[repos]]
 repo = "builtin"
 hooks = [
-  # 行末の余分な空白を除去する
+  # 行末の空白を取り除く
   { id = "trailing-whitespace" },
-  # ファイル末尾に必ず改行 1 個を入れる
+  # ファイル末尾を改行 1 つで終わらせる
   { id = "end-of-file-fixer" },
-  # 改行コードを LF に統一する
-  { id = "mixed-line-ending", args = ["--fix=lf"] },
-  # TOML の構文を検証する (Cargo.toml / prek.toml / rust-toolchain.toml 等)
+  # ファイル先頭の UTF-8 BOM を取り除く
+  { id = "fix-byte-order-marker" },
+  # TOML の構文エラーを検出する
   { id = "check-toml" },
-  # YAML の構文を検証する (.github/workflows/*.yml 等)
+  # YAML の構文エラーを検出する
   { id = "check-yaml" },
-  # マージコンフリクトのマーカー (<<<<<<<, =======, >>>>>>>) をコミットさせない
+  # JSON の構文エラーと重複キーを検出する
+  { id = "check-json" },
+  # マージコンフリクトマーカーが残ったコミットを防ぐ
   { id = "check-merge-conflict" },
-  # 巨大ファイルの誤コミットを防ぐ (デフォルト 500KB)
-  { id = "check-added-large-files" },
-  # 大文字小文字違いで衝突するファイル名を防ぐ (macOS / Windows との互換性)
+  # 大文字小文字だけが異なるファイル名の衝突を防ぐ
   { id = "check-case-conflict" },
-  # 実行ビットの立った非スクリプトファイル (shebang 無し) を防ぐ
-  { id = "check-executables-have-shebangs" },
-  # 秘密鍵らしき内容のコミットを検出する
+  # Windows で使えないファイル名の混入を防ぐ
+  { id = "check-illegal-windows-names" },
+  # 大きなファイルの誤コミットを防ぐ
+  { id = "check-added-large-files" },
+  # 秘密鍵の誤コミットを防ぐ
   { id = "detect-private-key" },
+  # 改行コードの混在を防ぐ
+  { id = "mixed-line-ending" },
+  # リンク切れのシンボリックリンクを検出する
+  { id = "check-symlinks" },
+  # シンボリックリンクだったファイルが実体ファイルとしてコミットされるのを検出する
+  { id = "destroyed-symlinks" },
+  # 実行権限のあるファイルに shebang があるか確認する
+  { id = "check-executables-have-shebangs" },
+  # shebang 付きスクリプトに実行権限があるか確認する
+  # Rust の inner attribute #![...] が shebang と誤判定されるため Rust ファイルは除外する
+  { id = "check-shebang-scripts-are-executable", exclude_types = ["rust"] },
 ]
 
-# Cargo ツールチェーンを使うローカル hook。
-# system 言語で実行することで rust-toolchain.toml のチャネルに従う。
+# tombi: TOML のフォーマッタ・リンタ
+# rev は prek auto-update で更新する
+[[repos]]
+repo = "https://github.com/tombi-toml/tombi-pre-commit"
+rev = "v1.8.10"
+hooks = [
+  # Cargo.lock は自動生成ファイルなので tombi の対象外にする
+  { id = "tombi-lint", exclude = { glob = "**/Cargo.lock" } },
+  { id = "tombi-format", exclude = { glob = "**/Cargo.lock" } },
+]
+
+# プロジェクト固有のローカルフック
+# priority が小さいほど先に実行される。同じ priority なら並列実行される
 [[repos]]
 repo = "local"
 
-# cargo fmt --check は最も軽量なので最初に動かす
+# --all でワークスペース全体を対象にし、--check で書き換えずに未フォーマットを検出だけする
 [[repos.hooks]]
 id = "cargo-fmt"
 name = "cargo fmt"
@@ -44,7 +84,7 @@ types = ["rust"]
 pass_filenames = false
 priority = 0
 
-# clippy は比較的時間がかかるので fmt の後に走らせる
+# --workspace で全メンバーを、--all-targets でテスト・example・ベンチも lint し、-D warnings で警告をエラーに昇格する
 [[repos.hooks]]
 id = "cargo-clippy"
 name = "cargo clippy"
@@ -54,7 +94,8 @@ types = ["rust"]
 pass_filenames = false
 priority = 10
 
-# 最も重いので最後に走らせる
+# cargo test: コミットを遅くしないため pre-push でだけ実行する
+# --workspace で examples と pbt も含める
 [[repos.hooks]]
 id = "cargo-test"
 name = "cargo test"
@@ -62,4 +103,5 @@ entry = "cargo test --workspace"
 language = "system"
 types = ["rust"]
 pass_filenames = false
+stages = ["pre-push"]
 priority = 20
