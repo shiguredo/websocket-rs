@@ -1,15 +1,15 @@
 //! WebSocket フレームのプロパティベーステスト
 
-use proptest::prelude::*;
 use shiguredo_websocket::{Frame, FrameDecoder, Opcode};
 
-proptest! {
-    /// テキストフレームのエンコード・デコードラウンドトリップ
-    #[test]
-    fn prop_text_frame_roundtrip(
-        text in "\\PC{0,1000}",
-        masking_key in any::<[u8; 4]>()
-    ) {
+const REASON_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";
+
+/// テキストフレームのエンコード・デコードラウンドトリップ
+#[test]
+fn prop_text_frame_roundtrip() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let text = pbt::sample_text(ctx, 0, 1000);
+        let masking_key = noprop::sample_bytes::<4>(ctx);
         let frame = Frame::text(&text);
         let encoded = frame.encode(masking_key);
 
@@ -17,17 +17,20 @@ proptest! {
         decoder.feed(&encoded);
         let decoded = decoder.decode().unwrap().unwrap();
 
-        prop_assert!(decoded.fin);
-        prop_assert_eq!(decoded.opcode, Opcode::Text);
-        prop_assert_eq!(decoded.payload, text.as_bytes());
-    }
+        assert!(decoded.fin);
+        assert_eq!(decoded.opcode, Opcode::Text);
+        assert_eq!(decoded.payload, text.as_bytes());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// バイナリフレームのエンコード・デコードラウンドトリップ
-    #[test]
-    fn prop_binary_frame_roundtrip(
-        data in prop::collection::vec(any::<u8>(), 0..10000),
-        masking_key in any::<[u8; 4]>()
-    ) {
+/// バイナリフレームのエンコード・デコードラウンドトリップ
+#[test]
+fn prop_binary_frame_roundtrip() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 0, 10000);
+        let masking_key = noprop::sample_bytes::<4>(ctx);
         let frame = Frame::binary(data.clone());
         let encoded = frame.encode(masking_key);
 
@@ -35,17 +38,21 @@ proptest! {
         decoder.feed(&encoded);
         let decoded = decoder.decode().unwrap().unwrap();
 
-        prop_assert!(decoded.fin);
-        prop_assert_eq!(decoded.opcode, Opcode::Binary);
-        prop_assert_eq!(decoded.payload, data);
-    }
+        assert!(decoded.fin);
+        assert_eq!(decoded.opcode, Opcode::Binary);
+        assert_eq!(decoded.payload, data);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Ping フレームのラウンドトリップ（ペイロードは125バイト以下）
-    #[test]
-    fn prop_ping_frame_roundtrip(
-        data in prop::collection::vec(any::<u8>(), 0..125),
-        masking_key in any::<[u8; 4]>()
-    ) {
+/// Ping フレームのラウンドトリップ（ペイロードは125バイト以下）
+#[test]
+fn prop_ping_frame_roundtrip() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        // 0..125 なので 125 自体は含まない。
+        let data = pbt::sample_byte_vec(ctx, 0, 125);
+        let masking_key = noprop::sample_bytes::<4>(ctx);
         let frame = Frame::ping(data.clone()).unwrap();
         let encoded = frame.encode(masking_key);
 
@@ -53,17 +60,20 @@ proptest! {
         decoder.feed(&encoded);
         let decoded = decoder.decode().unwrap().unwrap();
 
-        prop_assert!(decoded.fin);
-        prop_assert_eq!(decoded.opcode, Opcode::Ping);
-        prop_assert_eq!(decoded.payload, data);
-    }
+        assert!(decoded.fin);
+        assert_eq!(decoded.opcode, Opcode::Ping);
+        assert_eq!(decoded.payload, data);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Pong フレームのラウンドトリップ
-    #[test]
-    fn prop_pong_frame_roundtrip(
-        data in prop::collection::vec(any::<u8>(), 0..125),
-        masking_key in any::<[u8; 4]>()
-    ) {
+/// Pong フレームのラウンドトリップ
+#[test]
+fn prop_pong_frame_roundtrip() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 0, 125);
+        let masking_key = noprop::sample_bytes::<4>(ctx);
         let frame = Frame::pong(data.clone()).unwrap();
         let encoded = frame.encode(masking_key);
 
@@ -71,25 +81,25 @@ proptest! {
         decoder.feed(&encoded);
         let decoded = decoder.decode().unwrap().unwrap();
 
-        prop_assert!(decoded.fin);
-        prop_assert_eq!(decoded.opcode, Opcode::Pong);
-        prop_assert_eq!(decoded.payload, data);
-    }
+        assert!(decoded.fin);
+        assert_eq!(decoded.opcode, Opcode::Pong);
+        assert_eq!(decoded.payload, data);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Close フレームのラウンドトリップ
-    /// コントロールフレームは 125 バイト以下、Close は code (2バイト) + reason なので
-    /// reason は 123 バイト以下に制限
-    /// 有効な Close コード: 1000-1003, 1007-1011, 3000-4999
-    #[test]
-    fn prop_close_frame_roundtrip(
-        code in prop_oneof![
-            1000u16..=1003,
-            1007u16..=1011,
-            3000u16..5000
-        ],
-        reason in "[a-zA-Z0-9 ]{0,50}",  // ASCII のみで50文字以下
-        masking_key in any::<[u8; 4]>()
-    ) {
+/// Close フレームのラウンドトリップ
+/// コントロールフレームは 125 バイト以下、Close は code (2バイト) + reason なので
+/// reason は 123 バイト以下に制限
+/// 有効な Close コード: 1000-1003, 1007-1011, 3000-4999
+#[test]
+fn prop_close_frame_roundtrip() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let code = pbt::sample_frame_close_code(ctx);
+        // ASCII のみで 50 文字以下
+        let reason = pbt::sample_alphabet(ctx, REASON_ALPHABET, 0, 50);
+        let masking_key = noprop::sample_bytes::<4>(ctx);
         let frame = Frame::close(Some(code), &reason).unwrap();
         let encoded = frame.encode(masking_key);
 
@@ -97,25 +107,28 @@ proptest! {
         decoder.feed(&encoded);
         let decoded = decoder.decode().unwrap().unwrap();
 
-        prop_assert!(decoded.fin);
-        prop_assert_eq!(decoded.opcode, Opcode::Close);
+        assert!(decoded.fin);
+        assert_eq!(decoded.opcode, Opcode::Close);
 
         // ペイロードを検証
-        prop_assert!(decoded.payload.len() >= 2);
+        assert!(decoded.payload.len() >= 2);
         let parsed_code = u16::from_be_bytes([decoded.payload[0], decoded.payload[1]]);
-        prop_assert_eq!(parsed_code, code);
+        assert_eq!(parsed_code, code);
 
         let parsed_reason = String::from_utf8_lossy(&decoded.payload[2..]);
-        prop_assert_eq!(parsed_reason.as_ref(), reason);
-    }
+        assert_eq!(parsed_reason.as_ref(), reason);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// パーシャルデータでのデコード
-    #[test]
-    fn prop_partial_decode(
-        data in prop::collection::vec(any::<u8>(), 1..1000),
-        masking_key in any::<[u8; 4]>(),
-        chunk_size in 1usize..50
-    ) {
+/// パーシャルデータでのデコード
+#[test]
+fn prop_partial_decode() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 1, 1000);
+        let masking_key = noprop::sample_bytes::<4>(ctx);
+        let chunk_size = pbt::sample_len(ctx, 1, 50);
         let frame = Frame::binary(data.clone());
         let encoded = frame.encode(masking_key);
 
@@ -127,42 +140,49 @@ proptest! {
         }
 
         let decoded = decoder.decode().unwrap().unwrap();
-        prop_assert_eq!(decoded.payload, data);
-    }
+        assert_eq!(decoded.payload, data);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// マスキングキーの一貫性
-    #[test]
-    fn prop_masking_consistency(
-        data in prop::collection::vec(any::<u8>(), 0..1000),
-        masking_key in any::<[u8; 4]>()
-    ) {
+/// マスキングキーの一貫性
+#[test]
+fn prop_masking_consistency() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 0, 1000);
+        let masking_key = noprop::sample_bytes::<4>(ctx);
         let frame = Frame::binary(data.clone());
         let encoded1 = frame.encode(masking_key);
         let encoded2 = frame.encode(masking_key);
 
         // 同じマスキングキーなら同じ結果
-        prop_assert_eq!(encoded1, encoded2);
-    }
+        assert_eq!(encoded1, encoded2);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// 異なるマスキングキーでの結果
-    #[test]
-    fn prop_different_masking_keys(
-        data in prop::collection::vec(any::<u8>(), 1..100),
-        key1 in any::<[u8; 4]>(),
-        key2 in any::<[u8; 4]>()
-    ) {
-        prop_assume!(key1 != key2);
+/// 異なるマスキングキーでの結果
+#[test]
+fn prop_different_masking_keys() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        // 1..100 なのでペイロードは空にならない。
+        let data = pbt::sample_byte_vec(ctx, 1, 100);
+        let (key1, key2) = pbt::sample_distinct_bytes::<4>(ctx);
 
         let frame = Frame::binary(data.clone());
         let encoded1 = frame.encode(key1);
         let encoded2 = frame.encode(key2);
 
         // ヘッダーは同じ
-        prop_assert_eq!(encoded1[0], encoded2[0]);
+        assert_eq!(encoded1[0], encoded2[0]);
 
         // マスキングキーとペイロードは異なる（空でなければ）
         if !data.is_empty() {
-            prop_assert_ne!(encoded1, encoded2);
+            assert_ne!(encoded1, encoded2);
         }
-    }
+        Ok(())
+    })?;
+    Ok(())
 }

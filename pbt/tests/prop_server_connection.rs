@@ -7,11 +7,53 @@
 //! - タイマー処理の整合性
 
 use base64ct::{Base64, Encoding};
-use proptest::prelude::*;
 use shiguredo_websocket::{
     CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, ErrorKind, Frame,
     PerMessageDeflateConfig, ServerConnectionOptions, WebSocketServerConnection,
 };
+
+/// 小文字の ASCII アルファベット。
+const LOWER_ASCII: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
+
+/// 大文字の ASCII アルファベット。
+const UPPER_ASCII: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/// 英字。ヘッダー名の先頭に使う。
+const ASCII_LETTERS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/// 英字、数字、ハイフン。ヘッダー名の 2 文字目以降に使う。
+const HEADER_NAME_REST: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-";
+
+/// 英数字。
+const ASCII_ALNUM: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+/// close() に渡す Close コードの候補。
+const CLOSE_CODE_CHOICES: [CloseCode; 3] = [
+    CloseCode::NORMAL,
+    CloseCode::GOING_AWAY,
+    CloseCode::PROTOCOL_ERROR,
+];
+
+/// 不正な UTF-8 の先頭になり得るバイト。
+const INVALID_UTF8_LEAD_BYTES: [u8; 5] = [0x80, 0x81, 0xBF, 0xFE, 0xFF];
+
+/// 予約済みのハンドシェイクヘッダー名。
+const RESERVED_HEADER_NAMES: [&str; 5] = [
+    "Upgrade",
+    "Connection",
+    "Sec-WebSocket-Accept",
+    "Sec-WebSocket-Protocol",
+    "Sec-WebSocket-Extensions",
+];
+
+/// 13 以外のバージョン番号。
+const UNSUPPORTED_VERSIONS: [u8; 7] = [0, 1, 7, 8, 12, 14, 255];
+
+/// RSV 違反の検査に使う opcode の一覧。
+const FRAME_OPCODES: [u8; 5] = [0x01, 0x02, 0x08, 0x09, 0x0A];
+
+/// 制御 opcode (Close, Ping, Pong) の候補。
+const CONTROL_OPCODES: [u8; 3] = [0x08, 0x09, 0x0A];
 
 /// 有効なハンドシェイクリクエストを生成
 fn create_valid_handshake_request(
@@ -62,53 +104,57 @@ fn create_masked_close_frame(code: Option<u16>, reason: &str, mask_key: [u8; 4])
 
 // ==== ハンドシェイク処理のテスト ====
 
-proptest! {
-    /// 有効なハンドシェイクリクエストは正しく処理される
-    #[test]
-    fn prop_valid_handshake_accepted(
-        key in prop::array::uniform16(any::<u8>()),
-    ) {
+/// 有効なハンドシェイクリクエストは正しく処理される
+#[test]
+fn prop_valid_handshake_accepted() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
         conn.feed_recv_buf(&request).unwrap();
 
         // ハンドシェイクリクエストが利用可能になるはず
-        prop_assert!(conn.handshake_request().is_some());
-        prop_assert_eq!(conn.state(), ConnectionState::Connecting);
+        assert!(conn.handshake_request().is_some());
+        assert_eq!(conn.state(), ConnectionState::Connecting);
 
         // accept_handshake_auto で受諾
         conn.accept_handshake_auto().unwrap();
-        prop_assert_eq!(conn.state(), ConnectionState::Connected);
-    }
+        assert_eq!(conn.state(), ConnectionState::Connected);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// プロトコル付きのハンドシェイクリクエストが正しく処理される
-    #[test]
-    fn prop_handshake_with_protocol(
-        key in prop::array::uniform16(any::<u8>()),
-        protocol in "[a-z]{1,20}",
-    ) {
-        let mut conn = WebSocketServerConnection::new(
-            ServerConnectionOptions::new().protocol(&protocol)
-        );
+/// プロトコル付きのハンドシェイクリクエストが正しく処理される
+#[test]
+fn prop_handshake_with_protocol() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let protocol = pbt::sample_alphabet(ctx, LOWER_ASCII, 1, 20);
+        let mut conn =
+            WebSocketServerConnection::new(ServerConnectionOptions::new().protocol(&protocol));
         let request = create_valid_handshake_request(&key, Some(&protocol), None);
 
         conn.feed_recv_buf(&request).unwrap();
         conn.accept_handshake_auto().unwrap();
 
-        prop_assert_eq!(conn.state(), ConnectionState::Connected);
-        prop_assert_eq!(conn.protocol(), Some(protocol.as_str()));
-    }
+        assert_eq!(conn.state(), ConnectionState::Connected);
+        assert_eq!(conn.protocol(), Some(protocol.as_str()));
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// 対応していないプロトコルは選択されない
-    #[test]
-    fn prop_handshake_unsupported_protocol(
-        key in prop::array::uniform16(any::<u8>()),
-        client_protocol in "[a-z]{1,20}",
-        server_protocol in "[A-Z]{1,20}",
-    ) {
+/// 対応していないプロトコルは選択されない
+#[test]
+fn prop_handshake_unsupported_protocol() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let client_protocol = pbt::sample_alphabet(ctx, LOWER_ASCII, 1, 20);
+        let server_protocol = pbt::sample_alphabet(ctx, UPPER_ASCII, 1, 20);
         let mut conn = WebSocketServerConnection::new(
-            ServerConnectionOptions::new().protocol(&server_protocol)
+            ServerConnectionOptions::new().protocol(&server_protocol),
         );
         let request = create_valid_handshake_request(&key, Some(&client_protocol), None);
 
@@ -116,39 +162,50 @@ proptest! {
         conn.accept_handshake_auto().unwrap();
 
         // プロトコルが一致しないので None
-        prop_assert!(conn.protocol().is_none());
-    }
+        assert!(conn.protocol().is_none());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// ハンドシェイクを拒否すると Closed 状態になる
-    #[test]
-    fn prop_handshake_reject(
-        key in prop::array::uniform16(any::<u8>()),
-    ) {
+/// ハンドシェイクを拒否すると Closed 状態になる
+#[test]
+fn prop_handshake_reject() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
         conn.feed_recv_buf(&request).unwrap();
         conn.reject_handshake(403, "Forbidden", &[]).unwrap();
 
-        prop_assert_eq!(conn.state(), ConnectionState::Closed);
-    }
+        assert_eq!(conn.state(), ConnectionState::Closed);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// reject_handshake() で渡した任意のヘッダーが出力に含まれる
-    ///
-    /// RFC 6455 Section 4.4: バージョン不一致時は Sec-WebSocket-Version MUST
-    #[test]
-    fn prop_handshake_reject_with_headers(
-        key in prop::array::uniform16(any::<u8>()),
-        header_name in "[A-Za-z][A-Za-z0-9-]{2,15}",
-        header_value in "[A-Za-z0-9]{1,20}",
-    ) {
+/// reject_handshake() で渡した任意のヘッダーが出力に含まれる
+///
+/// RFC 6455 Section 4.4: バージョン不一致時は Sec-WebSocket-Version MUST
+#[test]
+fn prop_handshake_reject_with_headers() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let header_name = pbt::sample_prefixed(ctx, ASCII_LETTERS, HEADER_NAME_REST, 2, 15);
+        let header_value = pbt::sample_alphabet(ctx, ASCII_ALNUM, 1, 20);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
         conn.feed_recv_buf(&request).unwrap();
-        conn.reject_handshake(426, "Upgrade Required", &[(header_name.as_str(), header_value.as_str())]).unwrap();
+        conn.reject_handshake(
+            426,
+            "Upgrade Required",
+            &[(header_name.as_str(), header_value.as_str())],
+        )
+        .unwrap();
 
-        prop_assert_eq!(conn.state(), ConnectionState::Closed);
+        assert_eq!(conn.state(), ConnectionState::Closed);
 
         // 出力に渡したヘッダーが含まれることを確認
         let expected = format!("{}: {}", header_name, header_value);
@@ -161,8 +218,14 @@ proptest! {
                 }
             }
         }
-        prop_assert!(found, "header '{}' must be present in reject response", expected);
-    }
+        assert!(
+            found,
+            "header '{}' must be present in reject response",
+            expected
+        );
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== 接続状態でのデータ送受信テスト ====
@@ -181,92 +244,101 @@ fn setup_connected_server() -> WebSocketServerConnection {
     conn
 }
 
-proptest! {
-    /// テキストメッセージの送信
-    #[test]
-    fn prop_send_text_message(
-        text in ".*",
-    ) {
+/// テキストメッセージの送信
+#[test]
+fn prop_send_text_message() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let text = pbt::sample_text(ctx, 0, 99);
         let mut conn = setup_connected_server();
 
         let result = conn.send_text(&text);
-        prop_assert!(result.is_ok());
+        assert!(result.is_ok());
 
         // 出力があるはず
         let output = conn.poll_output();
-        prop_assert!(matches!(output, Some(ConnectionOutput::SendData(_))));
-    }
+        assert!(matches!(output, Some(ConnectionOutput::SendData(_))));
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// バイナリメッセージの送信
-    #[test]
-    fn prop_send_binary_message(
-        data in prop::collection::vec(any::<u8>(), 0..1000),
-    ) {
+/// バイナリメッセージの送信
+#[test]
+fn prop_send_binary_message() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 0, 1000);
         let mut conn = setup_connected_server();
 
         let result = conn.send_binary(&data);
-        prop_assert!(result.is_ok());
+        assert!(result.is_ok());
 
         let output = conn.poll_output();
-        prop_assert!(matches!(output, Some(ConnectionOutput::SendData(_))));
-    }
+        assert!(matches!(output, Some(ConnectionOutput::SendData(_))));
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// テキストフレームの受信
-    #[test]
-    fn prop_receive_text_frame(
-        text in "[\\x20-\\x7E]{0,100}",
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// テキストフレームの受信
+#[test]
+fn prop_receive_text_frame() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let text = pbt::sample_printable_ascii(ctx, 0, 100);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         let frame = create_masked_text_frame(&text, mask_key);
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_ok());
+        assert!(result.is_ok());
 
         // TextMessage イベントが発生するはず
         let mut found = false;
         while let Some(event) = conn.poll_event() {
             if let ConnectionEvent::TextMessage(received) = event {
-                prop_assert_eq!(received, text);
+                assert_eq!(received, text);
                 found = true;
                 break;
             }
         }
-        prop_assert!(found, "TextMessage event not found");
-    }
+        assert!(found, "TextMessage event not found");
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// バイナリフレームの受信
-    #[test]
-    fn prop_receive_binary_frame(
-        data in prop::collection::vec(any::<u8>(), 0..1000),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// バイナリフレームの受信
+#[test]
+fn prop_receive_binary_frame() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 0, 1000);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         let frame = create_masked_binary_frame(&data, mask_key);
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_ok());
+        assert!(result.is_ok());
 
         let mut found = false;
         while let Some(event) = conn.poll_event() {
             if let ConnectionEvent::BinaryMessage(received) = event {
-                prop_assert_eq!(received, data);
+                assert_eq!(received, data);
                 found = true;
                 break;
             }
         }
-        prop_assert!(found, "BinaryMessage event not found");
-    }
+        assert!(found, "BinaryMessage event not found");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== 未マスクフレームの拒否テスト ====
 
-proptest! {
-    /// 未マスクのフレームは拒否される
-    #[test]
-    fn prop_unmasked_frame_rejected(
-        payload in prop::collection::vec(any::<u8>(), 1..50),
-    ) {
+/// 未マスクのフレームは拒否される
+#[test]
+fn prop_unmasked_frame_rejected() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let payload = pbt::sample_byte_vec(ctx, 1, 50);
         let mut conn = setup_connected_server();
 
         // 未マスクのバイナリフレームを構築
@@ -276,19 +348,20 @@ proptest! {
         frame.extend_from_slice(&payload);
 
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== Ping/Pong のテスト ====
 
-proptest! {
-    /// Ping を受信すると Pong を自動返信する
-    #[test]
-    fn prop_ping_auto_pong(
-        data in prop::collection::vec(any::<u8>(), 0..125),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// Ping を受信すると Pong を自動返信する
+#[test]
+fn prop_ping_auto_pong() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 0, 125);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         let ping = create_masked_ping_frame(&data, mask_key);
@@ -298,12 +371,12 @@ proptest! {
         let mut ping_found = false;
         while let Some(event) = conn.poll_event() {
             if let ConnectionEvent::Ping(received) = event {
-                prop_assert_eq!(received, data);
+                assert_eq!(received, data);
                 ping_found = true;
                 break;
             }
         }
-        prop_assert!(ping_found, "Ping event not found");
+        assert!(ping_found, "Ping event not found");
 
         // Pong が送信される
         let mut pong_found = false;
@@ -313,15 +386,18 @@ proptest! {
                 break;
             }
         }
-        prop_assert!(pong_found, "Pong response not sent");
-    }
+        assert!(pong_found, "Pong response not sent");
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Pong を受信すると awaiting_pong がリセットされる
-    #[test]
-    fn prop_pong_clears_awaiting(
-        data in prop::collection::vec(any::<u8>(), 0..125),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// Pong を受信すると awaiting_pong がリセットされる
+#[test]
+fn prop_pong_clears_awaiting() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 0, 125);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // まず Ping を送信
@@ -340,30 +416,21 @@ proptest! {
                 break;
             }
         }
-        prop_assert!(found, "Pong event not found");
-    }
+        assert!(found, "Pong event not found");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== Close のテスト ====
 
-/// 有効な Close コードを生成する strategy
-fn valid_close_code_strategy() -> impl Strategy<Value = u16> {
-    prop_oneof![
-        1000u16..=1003, // 正常終了系
-        1007u16..=1011, // エラー系
-        3000u16..4000,  // ライブラリ用
-        4000u16..5000,  // アプリケーション用
-    ]
-}
-
-proptest! {
-    /// Close フレームを受信すると Close イベントが発生する
-    #[test]
-    fn prop_close_frame_received(
-        code in valid_close_code_strategy(),
-        reason in "[\\x20-\\x7E]{0,50}",
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// Close フレームを受信すると Close イベントが発生する
+#[test]
+fn prop_close_frame_received() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let code = pbt::sample_sendable_close_code(ctx);
+        let reason = pbt::sample_printable_ascii(ctx, 0, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         let close = create_masked_close_frame(Some(code), &reason, mask_key);
@@ -372,34 +439,37 @@ proptest! {
         // Close イベントが発生
         let mut found = false;
         while let Some(event) = conn.poll_event() {
-            if let ConnectionEvent::Close { code: Some(c), reason: r } = event {
-                prop_assert_eq!(c.as_u16(), code);
-                prop_assert_eq!(r, reason);
+            if let ConnectionEvent::Close {
+                code: Some(c),
+                reason: r,
+            } = event
+            {
+                assert_eq!(c.as_u16(), code);
+                assert_eq!(r, reason);
                 found = true;
                 break;
             }
         }
-        prop_assert!(found, "Close event not found");
+        assert!(found, "Close event not found");
 
         // 状態が Closed に変わる
-        prop_assert_eq!(conn.state(), ConnectionState::Closed);
-    }
+        assert_eq!(conn.state(), ConnectionState::Closed);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// close() を呼び出すと Close フレームが送信される
-    #[test]
-    fn prop_close_sends_frame(
-        code in prop::sample::select(vec![
-            CloseCode::NORMAL,
-            CloseCode::GOING_AWAY,
-            CloseCode::PROTOCOL_ERROR,
-        ]),
-        reason in "[\\x20-\\x7E]{0,50}".prop_map(|s| s.to_string()),
-    ) {
+/// close() を呼び出すと Close フレームが送信される
+#[test]
+fn prop_close_sends_frame() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let code = noprop::sample_choice(ctx, &CLOSE_CODE_CHOICES);
+        let reason = pbt::sample_printable_ascii(ctx, 0, 50);
         let mut conn = setup_connected_server();
 
         conn.close(code, &reason).unwrap();
 
-        prop_assert_eq!(conn.state(), ConnectionState::Closing);
+        assert_eq!(conn.state(), ConnectionState::Closing);
 
         let mut found = false;
         while let Some(output) = conn.poll_output() {
@@ -408,14 +478,17 @@ proptest! {
                 break;
             }
         }
-        prop_assert!(found, "Close frame not sent");
-    }
+        assert!(found, "Close frame not sent");
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// コードなしの Close フレーム
-    #[test]
-    fn prop_close_without_code(
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// コードなしの Close フレーム
+#[test]
+fn prop_close_without_code() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         let close = create_masked_close_frame(None, "", mask_key);
@@ -424,116 +497,134 @@ proptest! {
         let mut found = false;
         while let Some(event) = conn.poll_event() {
             if let ConnectionEvent::Close { code: None, reason } = event {
-                prop_assert!(reason.is_empty());
+                assert!(reason.is_empty());
                 found = true;
                 break;
             }
         }
-        prop_assert!(found, "Close event not found");
-    }
+        assert!(found, "Close event not found");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== 状態遷移のテスト ====
 
-proptest! {
-    /// Disconnected 状態では送信できない
-    #[test]
-    fn prop_cannot_send_while_disconnected(
-        text in ".*",
-    ) {
+/// Disconnected 状態では送信できない
+#[test]
+fn prop_cannot_send_while_disconnected() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let text = pbt::sample_text(ctx, 0, 99);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
 
         let result = conn.send_text(&text);
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Connecting 状態では送信できない
-    #[test]
-    fn prop_cannot_send_while_connecting(
-        key in prop::array::uniform16(any::<u8>()),
-        text in ".*",
-    ) {
+/// Connecting 状態では送信できない
+#[test]
+fn prop_cannot_send_while_connecting() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let text = pbt::sample_text(ctx, 0, 99);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
         conn.feed_recv_buf(&request).unwrap();
-        prop_assert_eq!(conn.state(), ConnectionState::Connecting);
+        assert_eq!(conn.state(), ConnectionState::Connecting);
 
         let result = conn.send_text(&text);
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Closed 状態ではデータを受信できない
-    #[test]
-    fn prop_feed_to_closed_connection_fails(
-        extra in prop::collection::vec(any::<u8>(), 1..50),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// Closed 状態ではデータを受信できない
+#[test]
+fn prop_feed_to_closed_connection_fails() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let extra = pbt::sample_byte_vec(ctx, 1, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // Close フレームを送受信
         let close = create_masked_close_frame(Some(1000), "", mask_key);
         conn.feed_recv_buf(&close).unwrap();
 
-        prop_assert_eq!(conn.state(), ConnectionState::Closed);
+        assert_eq!(conn.state(), ConnectionState::Closed);
 
         // Closed 状態でデータを送ろうとするとエラー
         let result = conn.feed_recv_buf(&extra);
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== RSV ビットのテスト ====
 
-proptest! {
-    /// RSV2 ビットが立ったフレームは拒否される
-    #[test]
-    fn prop_rsv2_bit_rejected(
-        payload in prop::collection::vec(any::<u8>(), 1..50),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// RSV2 ビットが立ったフレームは拒否される
+#[test]
+fn prop_rsv2_bit_rejected() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let payload = pbt::sample_byte_vec(ctx, 1, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // RSV2 ビットが立ったフレーム（0x81 | 0x20 = 0xA1）
         let len = payload.len() as u8;
         let mut frame = vec![0xA1, 0x80 | len];
         frame.extend_from_slice(&mask_key);
-        let masked: Vec<u8> = payload.iter().enumerate()
+        let masked: Vec<u8> = payload
+            .iter()
+            .enumerate()
             .map(|(i, &b)| b ^ mask_key[i % 4])
             .collect();
         frame.extend_from_slice(&masked);
 
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// RSV3 ビットが立ったフレームは拒否される
-    #[test]
-    fn prop_rsv3_bit_rejected(
-        payload in prop::collection::vec(any::<u8>(), 1..50),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// RSV3 ビットが立ったフレームは拒否される
+#[test]
+fn prop_rsv3_bit_rejected() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let payload = pbt::sample_byte_vec(ctx, 1, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // RSV3 ビットが立ったフレーム（0x81 | 0x10 = 0x91）
         let len = payload.len() as u8;
         let mut frame = vec![0x91, 0x80 | len];
         frame.extend_from_slice(&mask_key);
-        let masked: Vec<u8> = payload.iter().enumerate()
+        let masked: Vec<u8> = payload
+            .iter()
+            .enumerate()
             .map(|(i, &b)| b ^ mask_key[i % 4])
             .collect();
         frame.extend_from_slice(&masked);
 
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// permessage-deflate なしで RSV1 ビットは拒否される
-    #[test]
-    fn prop_rsv1_without_deflate_rejected(
-        payload in prop::collection::vec(any::<u8>(), 1..50),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// permessage-deflate なしで RSV1 ビットは拒否される
+#[test]
+fn prop_rsv1_without_deflate_rejected() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let payload = pbt::sample_byte_vec(ctx, 1, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // RSV1 ビットが立ったフレーム（0x81 | 0x40 = 0xC1）
@@ -541,25 +632,28 @@ proptest! {
         let len = payload.len() as u8;
         let mut frame = vec![0xC1, 0x80 | len];
         frame.extend_from_slice(&mask_key);
-        let masked: Vec<u8> = payload.iter().enumerate()
+        let masked: Vec<u8> = payload
+            .iter()
+            .enumerate()
             .map(|(i, &b)| b ^ mask_key[i % 4])
             .collect();
         frame.extend_from_slice(&masked);
 
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== フラグメント処理のテスト ====
 
-proptest! {
-    /// フラグメントされたテキストメッセージが正しく再構築される
-    #[test]
-    fn prop_fragmented_text_message(
-        parts in prop::collection::vec("[\\x20-\\x7E]{1,50}", 2..5),
-        mask_keys in prop::collection::vec(prop::array::uniform4(any::<u8>()), 2..5),
-    ) {
+/// フラグメントされたテキストメッセージが正しく再構築される
+#[test]
+fn prop_fragmented_text_message() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let parts = pbt::sample_vec(ctx, 2, 5, |ctx| pbt::sample_printable_ascii(ctx, 1, 50));
+        let mask_keys = pbt::sample_vec(ctx, 2, 5, |ctx| noprop::sample_bytes::<4>(ctx));
         let mut conn = setup_connected_server();
 
         let full_text: String = parts.iter().cloned().collect();
@@ -575,7 +669,10 @@ proptest! {
         // 中間のフラグメント（opcode=Continuation, fin=false）
         for (i, part) in parts.iter().enumerate().take(parts.len() - 1).skip(1) {
             let mask_idx = i.min(mask_keys.len() - 1);
-            let mut frame = Frame::new(shiguredo_websocket::Opcode::Continuation, part.as_bytes().to_vec());
+            let mut frame = Frame::new(
+                shiguredo_websocket::Opcode::Continuation,
+                part.as_bytes().to_vec(),
+            );
             frame.fin = false;
             let encoded = frame.encode(mask_keys[mask_idx]);
             conn.feed_recv_buf(&encoded).unwrap();
@@ -584,7 +681,10 @@ proptest! {
         // 最後のフラグメント（opcode=Continuation, fin=true）
         let last_idx = parts.len() - 1;
         let mask_idx = last_idx.min(mask_keys.len() - 1);
-        let mut frame = Frame::new(shiguredo_websocket::Opcode::Continuation, parts[last_idx].as_bytes().to_vec());
+        let mut frame = Frame::new(
+            shiguredo_websocket::Opcode::Continuation,
+            parts[last_idx].as_bytes().to_vec(),
+        );
         frame.fin = true;
         let encoded = frame.encode(mask_keys[mask_idx]);
         conn.feed_recv_buf(&encoded).unwrap();
@@ -593,64 +693,69 @@ proptest! {
         let mut found = false;
         while let Some(event) = conn.poll_event() {
             if let ConnectionEvent::TextMessage(received) = event {
-                prop_assert_eq!(received, full_text);
+                assert_eq!(received, full_text);
                 found = true;
                 break;
             }
         }
-        prop_assert!(found, "Complete message not received");
-    }
+        assert!(found, "Complete message not received");
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// 開始フレームなしで Continuation は失敗
-    #[test]
-    fn prop_continuation_without_start_fails(
-        data in prop::collection::vec(any::<u8>(), 0..100),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// 開始フレームなしで Continuation は失敗
+#[test]
+fn prop_continuation_without_start_fails() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let data = pbt::sample_byte_vec(ctx, 0, 100);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // 開始フレームなしで Continuation を送る
-        let cont = Frame::new(shiguredo_websocket::Opcode::Continuation, data)
-            .encode(mask_key);
+        let cont = Frame::new(shiguredo_websocket::Opcode::Continuation, data).encode(mask_key);
 
         let result = conn.feed_recv_buf(&cont);
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
-    #[test]
-    fn prop_new_message_during_fragment_fails(
-        first_part in "[\\x20-\\x7E]{1,50}",
-        new_message in "[\\x20-\\x7E]{1,50}",
-        mask_key1 in prop::array::uniform4(any::<u8>()),
-        mask_key2 in prop::array::uniform4(any::<u8>()),
-    ) {
+/// RFC 6455 Section 5.4: フラグメント中に新しいデータフレームは禁止
+#[test]
+fn prop_new_message_during_fragment_fails() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let first_part = pbt::sample_printable_ascii(ctx, 1, 50);
+        let new_message = pbt::sample_printable_ascii(ctx, 1, 50);
+        let mask_key1 = noprop::sample_bytes::<4>(ctx);
+        let mask_key2 = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // フラグメント開始（fin=false）
         let mut frame1 = Frame::text(&first_part);
         frame1.fin = false;
-        conn.feed_recv_buf(&frame1.encode(mask_key1))
-            .unwrap();
+        conn.feed_recv_buf(&frame1.encode(mask_key1)).unwrap();
 
         // 完了前に新しいメッセージ開始
         let frame2 = Frame::text(&new_message).encode(mask_key2);
         let result = conn.feed_recv_buf(&frame2);
 
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== 部分的なデータ受信のテスト ====
 
-proptest! {
-    /// データを小さなチャンクで分割して送っても正しく処理される
-    #[test]
-    fn prop_chunked_frame_reception(
-        text in "[\\x20-\\x7E]{10,100}",
-        mask_key in prop::array::uniform4(any::<u8>()),
-        chunk_size in 1usize..10,
-    ) {
+/// データを小さなチャンクで分割して送っても正しく処理される
+#[test]
+fn prop_chunked_frame_reception() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let text = pbt::sample_printable_ascii(ctx, 10, 100);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
+        let chunk_size = pbt::sample_len(ctx, 1, 10);
         let mut conn = setup_connected_server();
 
         let frame = create_masked_text_frame(&text, mask_key);
@@ -664,64 +769,71 @@ proptest! {
         let mut found = false;
         while let Some(event) = conn.poll_event() {
             if let ConnectionEvent::TextMessage(received) = event {
-                prop_assert_eq!(received, text);
+                assert_eq!(received, text);
                 found = true;
                 break;
             }
         }
-        prop_assert!(found, "Message not received after chunked delivery");
-    }
+        assert!(found, "Message not received after chunked delivery");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== deflate 拡張ネゴシエーションのテスト ====
 
 use shiguredo_websocket::ServerHandshakeResponse;
 
-proptest! {
-    /// permessage-deflate 拡張がネゴシエートされる
-    #[test]
-    fn prop_deflate_negotiation(
-        key in prop::array::uniform16(any::<u8>()),
-    ) {
+/// permessage-deflate 拡張がネゴシエートされる
+#[test]
+fn prop_deflate_negotiation() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
         let config = PerMessageDeflateConfig::default();
-        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new().deflate(config));
+        let mut conn =
+            WebSocketServerConnection::new(ServerConnectionOptions::new().deflate(config));
         let request = create_valid_handshake_request(&key, None, Some("permessage-deflate"));
 
         conn.feed_recv_buf(&request).unwrap();
         conn.accept_handshake_auto().unwrap();
 
-        prop_assert_eq!(conn.state(), ConnectionState::Connected);
+        assert_eq!(conn.state(), ConnectionState::Connected);
         // 拡張がネゴシエートされている
-        prop_assert!(!conn.extensions().is_empty());
-    }
+        assert!(!conn.extensions().is_empty());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// クライアントが deflate を要求しない場合はネゴシエートされない
-    #[test]
-    fn prop_deflate_not_negotiated_without_client_request(
-        key in prop::array::uniform16(any::<u8>()),
-    ) {
+/// クライアントが deflate を要求しない場合はネゴシエートされない
+#[test]
+fn prop_deflate_not_negotiated_without_client_request() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
         let config = PerMessageDeflateConfig::default();
-        let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new().deflate(config));
+        let mut conn =
+            WebSocketServerConnection::new(ServerConnectionOptions::new().deflate(config));
         // 拡張なしのリクエスト
         let request = create_valid_handshake_request(&key, None, None);
 
         conn.feed_recv_buf(&request).unwrap();
         conn.accept_handshake_auto().unwrap();
 
-        prop_assert_eq!(conn.state(), ConnectionState::Connected);
+        assert_eq!(conn.state(), ConnectionState::Connected);
         // 拡張はネゴシエートされない
-        prop_assert!(conn.extensions().is_empty());
-    }
+        assert!(conn.extensions().is_empty());
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== 追加ヘッダー設定のテスト ====
 
-proptest! {
-    /// 追加ヘッダーがレスポンスに含まれる
-    #[test]
-    fn prop_additional_headers_in_response(
-        key in prop::array::uniform16(any::<u8>()),
-    ) {
+/// 追加ヘッダーがレスポンスに含まれる
+#[test]
+fn prop_additional_headers_in_response() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
         let mut conn = WebSocketServerConnection::new(
             ServerConnectionOptions::new()
                 .header("X-Custom-Header", "custom-value")
@@ -743,18 +855,19 @@ proptest! {
                 break;
             }
         }
-        prop_assert!(found_response, "Custom header not found in response");
-    }
+        assert!(found_response, "Custom header not found in response");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== accept_handshake でのエラーテスト ====
 
-proptest! {
-    /// accept_handshake でクライアントが要求していないプロトコルを指定するとエラー
-    #[test]
-    fn prop_accept_handshake_unsupported_protocol_error(
-        key in prop::array::uniform16(any::<u8>()),
-    ) {
+/// accept_handshake でクライアントが要求していないプロトコルを指定するとエラー
+#[test]
+fn prop_accept_handshake_unsupported_protocol_error() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         // クライアントは "chat" を要求
         let request = create_valid_handshake_request(&key, Some("chat"), None);
@@ -765,14 +878,17 @@ proptest! {
         let response = ServerHandshakeResponse::new().protocol("other");
         let result = conn.accept_handshake(response);
 
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// accept_handshake でクライアントが要求していない拡張を指定するとエラー
-    #[test]
-    fn prop_accept_handshake_unsupported_extension_error(
-        key in prop::array::uniform16(any::<u8>()),
-    ) {
+/// accept_handshake でクライアントが要求していない拡張を指定するとエラー
+#[test]
+fn prop_accept_handshake_unsupported_extension_error() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         // クライアントは拡張を要求しない
         let request = create_valid_handshake_request(&key, None, None);
@@ -783,20 +899,21 @@ proptest! {
         let response = ServerHandshakeResponse::new().extension("permessage-deflate");
         let result = conn.accept_handshake(response);
 
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== pending_frame_data 処理のテスト ====
 
-proptest! {
-    /// ハンドシェイクリクエストの後にフレームデータが続く場合
-    #[test]
-    fn prop_pending_frame_data_after_handshake(
-        key in prop::array::uniform16(any::<u8>()),
-        text in "[\\x20-\\x7E]{1,50}",
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// ハンドシェイクリクエストの後にフレームデータが続く場合
+#[test]
+fn prop_pending_frame_data_after_handshake() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let text = pbt::sample_printable_ascii(ctx, 1, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
@@ -812,21 +929,24 @@ proptest! {
         let mut found = false;
         while let Some(event) = conn.poll_event() {
             if let ConnectionEvent::TextMessage(msg) = event {
-                prop_assert_eq!(msg, text);
+                assert_eq!(msg, text);
                 found = true;
                 break;
             }
         }
-        prop_assert!(found, "Pending frame data not processed");
-    }
+        assert!(found, "Pending frame data not processed");
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// ハンドシェイク完了前に追加データが来た場合
-    #[test]
-    fn prop_additional_data_during_handshake(
-        key in prop::array::uniform16(any::<u8>()),
-        text in "[\\x20-\\x7E]{1,50}",
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// ハンドシェイク完了前に追加データが来た場合
+#[test]
+fn prop_additional_data_during_handshake() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let text = pbt::sample_printable_ascii(ctx, 1, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
@@ -844,95 +964,95 @@ proptest! {
         let mut found = false;
         while let Some(event) = conn.poll_event() {
             if let ConnectionEvent::TextMessage(msg) = event {
-                prop_assert_eq!(msg, text);
+                assert_eq!(msg, text);
                 found = true;
                 break;
             }
         }
-        prop_assert!(found, "Early frame data not processed");
-    }
+        assert!(found, "Early frame data not processed");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== close() エラーのテスト ====
 
-proptest! {
-    /// 既に Closed 状態で close() を呼ぶとエラー
-    #[test]
-    fn prop_close_on_closed_connection_fails(
-        close_code in valid_close_code_strategy(),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// 既に Closed 状態で close() を呼ぶとエラー
+#[test]
+fn prop_close_on_closed_connection_fails() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let close_code = pbt::sample_sendable_close_code(ctx);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // Close フレームを受信して Closed 状態にする
         let close = create_masked_close_frame(Some(close_code), "", mask_key);
         conn.feed_recv_buf(&close).unwrap();
 
-        prop_assert_eq!(conn.state(), ConnectionState::Closed);
+        assert_eq!(conn.state(), ConnectionState::Closed);
 
         // Closed 状態で close() を呼ぶとエラー
         let result = conn.close(CloseCode::NORMAL, "");
-        prop_assert!(result.is_err());
-    }
+        assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Connecting 状態で close() を呼び出すとエラーになる
-    ///
-    /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
-    #[test]
-    fn prop_close_rejected_in_connecting_state(
-        key in prop::array::uniform16(any::<u8>()),
-        code in prop::sample::select(vec![
-            CloseCode::NORMAL,
-            CloseCode::GOING_AWAY,
-            CloseCode::PROTOCOL_ERROR,
-        ]),
-        reason in "[\\x20-\\x7E]{0,50}".prop_map(|s| s.to_string()),
-    ) {
+/// Connecting 状態で close() を呼び出すとエラーになる
+///
+/// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
+#[test]
+fn prop_close_rejected_in_connecting_state() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let code = noprop::sample_choice(ctx, &CLOSE_CODE_CHOICES);
+        let reason = pbt::sample_printable_ascii(ctx, 0, 50);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
         conn.feed_recv_buf(&request).unwrap();
         // accept() を呼ばず Connecting 状態のまま
-        prop_assert_eq!(conn.state(), ConnectionState::Connecting);
+        assert_eq!(conn.state(), ConnectionState::Connecting);
 
         // close() はエラーになるはず
         let result = conn.close(code, &reason);
-        prop_assert!(result.is_err(), "close() should fail in Connecting state");
+        assert!(result.is_err(), "close() should fail in Connecting state");
 
-        prop_assert_eq!(conn.state(), ConnectionState::Connecting);
-    }
+        assert_eq!(conn.state(), ConnectionState::Connecting);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Disconnected 状態で close() を呼び出すとエラーになる
-    ///
-    /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
-    #[test]
-    fn prop_close_rejected_in_disconnected_state(
-        code in prop::sample::select(vec![
-            CloseCode::NORMAL,
-            CloseCode::GOING_AWAY,
-            CloseCode::PROTOCOL_ERROR,
-        ]),
-        reason in "[\\x20-\\x7E]{0,50}".prop_map(|s| s.to_string()),
-    ) {
+/// Disconnected 状態で close() を呼び出すとエラーになる
+///
+/// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
+#[test]
+fn prop_close_rejected_in_disconnected_state() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let code = noprop::sample_choice(ctx, &CLOSE_CODE_CHOICES);
+        let reason = pbt::sample_printable_ascii(ctx, 0, 50);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
-        prop_assert_eq!(conn.state(), ConnectionState::Disconnected);
+        assert_eq!(conn.state(), ConnectionState::Disconnected);
 
         let result = conn.close(code, &reason);
-        prop_assert!(result.is_err(), "close() should fail in Disconnected state");
-    }
+        assert!(result.is_err(), "close() should fail in Disconnected state");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== UTF-8 不正エラーのテスト ====
 
-proptest! {
-    /// 不正な UTF-8 バイト列は適切にエラーを返す
-    #[test]
-    fn prop_invalid_utf8_sequences(
+/// 不正な UTF-8 バイト列は適切にエラーを返す
+#[test]
+fn prop_invalid_utf8_sequences() -> noprop::TestResult {
+    pbt::run(|ctx| {
         // 確実に無効な UTF-8 シーケンス: 単独の継続バイト (0x80-0xBF) または不正な開始バイト
-        first_byte in prop::sample::select(vec![0x80u8, 0x81, 0xBF, 0xFE, 0xFF]),
-        extra_bytes in prop::collection::vec(any::<u8>(), 0..5),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+        let first_byte = noprop::sample_choice(ctx, &INVALID_UTF8_LEAD_BYTES);
+        let extra_bytes = pbt::sample_byte_vec(ctx, 0, 5);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         let mut invalid_bytes = vec![first_byte];
@@ -944,28 +1064,23 @@ proptest! {
 
         // RFC 6455 準拠: 無効な UTF-8 は即座にエラーを返す
         let result = conn.feed_recv_buf(&encoded);
-        prop_assert!(result.is_err(), "Invalid UTF-8 should return error");
-    }
+        assert!(result.is_err(), "Invalid UTF-8 should return error");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== accept_handshake 予約済みヘッダー拒否のテスト ====
 
-proptest! {
-    /// accept_handshake で予約済みヘッダーを additional_headers に渡すとエラーになる
-    ///
-    /// RFC 6455 Section 4.2.2: サーバーハンドシェイクの予約済みヘッダーは重複してはならない
-    #[test]
-    fn prop_accept_handshake_rejects_reserved_header(
-        key in prop::array::uniform16(any::<u8>()),
-        reserved in prop::sample::select(vec![
-            "Upgrade",
-            "Connection",
-            "Sec-WebSocket-Accept",
-            "Sec-WebSocket-Protocol",
-            "Sec-WebSocket-Extensions",
-        ]),
-        value in "[a-zA-Z0-9]{1,20}",
-    ) {
+/// accept_handshake で予約済みヘッダーを additional_headers に渡すとエラーになる
+///
+/// RFC 6455 Section 4.2.2: サーバーハンドシェイクの予約済みヘッダーは重複してはならない
+#[test]
+fn prop_accept_handshake_rejects_reserved_header() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let reserved = noprop::sample_choice(ctx, &RESERVED_HEADER_NAMES);
+        let value = pbt::sample_alphabet(ctx, ASCII_ALNUM, 1, 20);
         use shiguredo_websocket::ServerHandshakeResponse;
 
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
@@ -975,19 +1090,24 @@ proptest! {
         let response = ServerHandshakeResponse::new().header(reserved, &value);
         let result = conn.accept_handshake(response);
 
-        prop_assert!(result.is_err(), "accept_handshake() should reject reserved header '{}'", reserved);
-    }
+        assert!(
+            result.is_err(),
+            "accept_handshake() should reject reserved header '{}'",
+            reserved
+        );
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== handle_close で close_sent が既に true の場合のテスト ====
 
-proptest! {
-    /// サーバーが先に Close を送った後にクライアントから Close を受信する
-    #[test]
-    fn prop_close_sent_then_received(
-        reason in "[\\x20-\\x7E]{0,50}",
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// サーバーが先に Close を送った後にクライアントから Close を受信する
+#[test]
+fn prop_close_sent_then_received() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let reason = pbt::sample_printable_ascii(ctx, 0, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // サーバーが先に Close を送信
@@ -995,48 +1115,53 @@ proptest! {
         while conn.poll_output().is_some() {}
         while conn.poll_event().is_some() {}
 
-        prop_assert_eq!(conn.state(), ConnectionState::Closing);
+        assert_eq!(conn.state(), ConnectionState::Closing);
 
         // クライアントから Close を受信
         let close = create_masked_close_frame(Some(1000), "", mask_key);
         conn.feed_recv_buf(&close).unwrap();
 
         // 状態が Closed に変わる（close_sent が true なので返信は送られない）
-        prop_assert_eq!(conn.state(), ConnectionState::Closed);
-    }
+        assert_eq!(conn.state(), ConnectionState::Closed);
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== RFC 6455 Section 7.1.7: failed フラグのテスト ====
 
-proptest! {
-    /// エラー後に feed_recv_buf() を呼ぶと即座に Err が返る
-    ///
-    /// RFC 6455 Section 7.1.7: Fail the WebSocket Connection 後は
-    /// データ処理を継続してはならない (MUST NOT)
-    #[test]
-    fn prop_failed_flag_prevents_reprocessing(
-        payload in prop::collection::vec(any::<u8>(), 1..50),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// エラー後に feed_recv_buf() を呼ぶと即座に Err が返る
+///
+/// RFC 6455 Section 7.1.7: Fail the WebSocket Connection 後は
+/// データ処理を継続してはならない (MUST NOT)
+#[test]
+fn prop_failed_flag_prevents_reprocessing() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let payload = pbt::sample_byte_vec(ctx, 1, 50);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         // RSV2 ビットが立ったフレームでエラーを発生させる
         let len = payload.len() as u8;
         let mut bad_frame = vec![0xA1, 0x80 | len];
         bad_frame.extend_from_slice(&mask_key);
-        let masked: Vec<u8> = payload.iter().enumerate()
+        let masked: Vec<u8> = payload
+            .iter()
+            .enumerate()
             .map(|(i, &b)| b ^ mask_key[i % 4])
             .collect();
         bad_frame.extend_from_slice(&masked);
 
         // 最初の呼び出しはエラーになる
         let first = conn.feed_recv_buf(&bad_frame);
-        prop_assert!(first.is_err());
+        assert!(first.is_err());
 
         // 2 回目以降も即座にエラーになる (failed フラグ)
         let second = conn.feed_recv_buf(&[]);
-        prop_assert!(second.is_err());
-    }
+        assert!(second.is_err());
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== RFC 6455 Section 4.2.2 / 4.4: VersionNotSupported 時の 426 応答テスト ====
@@ -1057,28 +1182,27 @@ fn create_wrong_version_handshake_request(key: &[u8; 16], version: u8) -> Vec<u8
     .into_bytes()
 }
 
-proptest! {
-    /// バージョン不一致時に 426 応答と Sec-WebSocket-Version: 13 が送信される
-    ///
-    /// RFC 6455 Section 4.4: サーバーはサポートするバージョンを
-    /// Sec-WebSocket-Version ヘッダーで返さなければならない (MUST)
-    #[test]
-    fn prop_version_not_supported_sends_426(
-        key in prop::array::uniform16(any::<u8>()),
-        version in prop::sample::select(vec![0u8, 1, 7, 8, 12, 14, 255]),
-    ) {
+/// バージョン不一致時に 426 応答と Sec-WebSocket-Version: 13 が送信される
+///
+/// RFC 6455 Section 4.4: サーバーはサポートするバージョンを
+/// Sec-WebSocket-Version ヘッダーで返さなければならない (MUST)
+#[test]
+fn prop_version_not_supported_sends_426() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
+        let version = noprop::sample_choice(ctx, &UNSUPPORTED_VERSIONS);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_wrong_version_handshake_request(&key, version);
 
         let result = conn.feed_recv_buf(&request);
 
         // VersionNotSupported エラーが返る
-        prop_assert!(result.is_err());
+        assert!(result.is_err());
         let err = result.unwrap_err();
-        prop_assert_eq!(err.kind, ErrorKind::VersionNotSupported);
+        assert_eq!(err.kind, ErrorKind::VersionNotSupported);
 
         // 状態は Closed になる
-        prop_assert_eq!(conn.state(), ConnectionState::Closed);
+        assert_eq!(conn.state(), ConnectionState::Closed);
 
         // 出力に 426 応答が含まれ、Sec-WebSocket-Version: 13 ヘッダーが存在する
         let mut found_426 = false;
@@ -1094,53 +1218,66 @@ proptest! {
                 }
             }
         }
-        prop_assert!(found_426, "426 response not sent for version mismatch");
-        prop_assert!(found_version_header, "Sec-WebSocket-Version: 13 header not sent");
-    }
+        assert!(found_426, "426 response not sent for version mismatch");
+        assert!(
+            found_version_header,
+            "Sec-WebSocket-Version: 13 header not sent"
+        );
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// バージョン不一致後に feed_recv_buf() を呼ぶと即座に Err が返る
-    #[test]
-    fn prop_version_not_supported_failed_flag(
-        key in prop::array::uniform16(any::<u8>()),
-    ) {
+/// バージョン不一致後に feed_recv_buf() を呼ぶと即座に Err が返る
+#[test]
+fn prop_version_not_supported_failed_flag() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let key = noprop::sample_bytes::<16>(ctx);
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         // バージョン 0 を送る（不正）
         let request = create_wrong_version_handshake_request(&key, 0);
 
         let first = conn.feed_recv_buf(&request);
-        prop_assert!(first.is_err());
+        assert!(first.is_err());
 
         // failed フラグが立っているので 2 回目も即座にエラー
         let second = conn.feed_recv_buf(&[]);
-        prop_assert!(second.is_err());
-    }
+        assert!(second.is_err());
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== Close フレームの接続層検証 ====
 
-proptest! {
-    /// RFC 6455 Section 5.5.1: Close ペイロードは 0 または 2 以上でなければならない。
-    /// 接続済みサーバーが 1 バイト Close フレームを受信した場合、
-    /// `handle_close` 経路で `ProtocolViolation` を返し、Close フレーム (1002) を送出する
-    #[test]
-    fn prop_close_frame_single_byte_payload_at_application_layer(
-        payload_byte in any::<u8>(),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// RFC 6455 Section 5.5.1: Close ペイロードは 0 または 2 以上でなければならない。
+/// 接続済みサーバーが 1 バイト Close フレームを受信した場合、
+/// `handle_close` 経路で `ProtocolViolation` を返し、Close フレーム (1002) を送出する
+#[test]
+fn prop_close_frame_single_byte_payload_at_application_layer() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let payload_byte = noprop::sample_u8(ctx);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
 
         let masked_payload = payload_byte ^ mask_key[0];
         let frame = vec![
-            0x88,       // FIN=1 + Close opcode
-            0x80 | 1,   // MASK=1 + length=1
-            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            0x88,     // FIN=1 + Close opcode
+            0x80 | 1, // MASK=1 + length=1
+            mask_key[0],
+            mask_key[1],
+            mask_key[2],
+            mask_key[3],
             masked_payload,
         ];
 
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_err(), "1 バイトの Close ペイロードはアプリ層でエラーになるべき");
+        assert!(
+            result.is_err(),
+            "1 バイトの Close ペイロードはアプリ層でエラーになるべき"
+        );
         let err = result.unwrap_err();
-        prop_assert_eq!(err.kind, ErrorKind::ProtocolViolation);
+        assert_eq!(err.kind, ErrorKind::ProtocolViolation);
 
         // サーバーは応答 Close (1002 Protocol Error) を送出する
         let mut found_close = false;
@@ -1153,14 +1290,19 @@ proptest! {
                     && decoded.payload.len() >= 2
                 {
                     let code = u16::from_be_bytes([decoded.payload[0], decoded.payload[1]]);
-                    prop_assert_eq!(code, CloseCode::PROTOCOL_ERROR.as_u16());
+                    assert_eq!(code, CloseCode::PROTOCOL_ERROR.as_u16());
                     found_close = true;
                     break;
                 }
             }
         }
-        prop_assert!(found_close, "1 バイト Close 受信後に応答 Close フレームが送出されていない");
-    }
+        assert!(
+            found_close,
+            "1 バイト Close 受信後に応答 Close フレームが送出されていない"
+        );
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // ==== MAX_PENDING_FRAME_DATA の境界値テスト ====
@@ -1215,125 +1357,152 @@ fn setup_connected_server_with_deflate() -> WebSocketServerConnection {
 
 // ==== RSV ビット違反の検出 ====
 
-proptest! {
-    /// RFC 6455 Section 5.2: クライアントから RSV2=1 のフレームは ProtocolViolation で拒否される
-    #[test]
-    fn prop_rsv2_rejected_at_server(
-        opcode in prop::sample::select(vec![0x01u8, 0x02, 0x08, 0x09, 0x0A]),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// RFC 6455 Section 5.2: クライアントから RSV2=1 のフレームは ProtocolViolation で拒否される
+#[test]
+fn prop_rsv2_rejected_at_server() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let opcode = noprop::sample_choice(ctx, &FRAME_OPCODES);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
         // byte 0: FIN=1 (0x80) + RSV2=1 (0x20) + opcode
         // byte 1: MASK=1 (0x80) + length=0
         let frame = vec![
             0x80 | 0x20 | opcode,
             0x80,
-            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            mask_key[0],
+            mask_key[1],
+            mask_key[2],
+            mask_key[3],
         ];
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_err(), "RSV2=1 は拒否されるべき");
-        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
-    }
+        assert!(result.is_err(), "RSV2=1 は拒否されるべき");
+        assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// RFC 6455 Section 5.2: クライアントから RSV3=1 のフレームは ProtocolViolation で拒否される
-    #[test]
-    fn prop_rsv3_rejected_at_server(
-        opcode in prop::sample::select(vec![0x01u8, 0x02, 0x08, 0x09, 0x0A]),
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// RFC 6455 Section 5.2: クライアントから RSV3=1 のフレームは ProtocolViolation で拒否される
+#[test]
+fn prop_rsv3_rejected_at_server() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let opcode = noprop::sample_choice(ctx, &FRAME_OPCODES);
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server();
         // byte 0: FIN=1 (0x80) + RSV3=1 (0x10) + opcode
         let frame = vec![
             0x80 | 0x10 | opcode,
             0x80,
-            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            mask_key[0],
+            mask_key[1],
+            mask_key[2],
+            mask_key[3],
         ];
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_err(), "RSV3=1 は拒否されるべき");
-        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
-    }
+        assert!(result.is_err(), "RSV3=1 は拒否されるべき");
+        assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// RFC 7692 Section 6: permessage-deflate 合意済みでも、制御フレームに RSV1=1 を設定するのは禁止
-    #[test]
-    fn prop_rsv1_on_control_frame_rejected_with_deflate(
-        control_opcode in prop::sample::select(vec![0x08u8, 0x09, 0x0A]), // Close, Ping, Pong
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// RFC 7692 Section 6: permessage-deflate 合意済みでも、制御フレームに RSV1=1 を設定するのは禁止
+#[test]
+fn prop_rsv1_on_control_frame_rejected_with_deflate() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let control_opcode = noprop::sample_choice(ctx, &CONTROL_OPCODES); // Close, Ping, Pong
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server_with_deflate();
         // byte 0: FIN=1 (0x80) + RSV1=1 (0x40) + control opcode
         let frame = vec![
             0x80 | 0x40 | control_opcode,
             0x80,
-            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            mask_key[0],
+            mask_key[1],
+            mask_key[2],
+            mask_key[3],
         ];
         let result = conn.feed_recv_buf(&frame);
-        prop_assert!(result.is_err(), "制御フレーム + RSV1=1 は拒否されるべき");
-        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
-    }
+        assert!(result.is_err(), "制御フレーム + RSV1=1 は拒否されるべき");
+        assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// RFC 7692 Section 6: permessage-deflate 合意済みでも、Continuation フレームに RSV1=1 は禁止
-    /// (RSV1 はメッセージの最初のフレームにのみ設定される)
-    #[test]
-    fn prop_rsv1_on_continuation_frame_rejected_with_deflate(
-        mask_key in prop::array::uniform4(any::<u8>()),
-    ) {
+/// RFC 7692 Section 6: permessage-deflate 合意済みでも、Continuation フレームに RSV1=1 は禁止
+/// (RSV1 はメッセージの最初のフレームにのみ設定される)
+#[test]
+fn prop_rsv1_on_continuation_frame_rejected_with_deflate() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let mask_key = noprop::sample_bytes::<4>(ctx);
         let mut conn = setup_connected_server_with_deflate();
         // 先に Text フレーム (RSV1=0, FIN=0) を送って Continuation 待ち状態にする
         let text_frame_first = vec![
-            0x01,           // FIN=0 + Text opcode
-            0x80,           // MASK=1 + length=0
-            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            0x01, // FIN=0 + Text opcode
+            0x80, // MASK=1 + length=0
+            mask_key[0],
+            mask_key[1],
+            mask_key[2],
+            mask_key[3],
         ];
-        conn.feed_recv_buf(&text_frame_first).expect("first fragment");
+        conn.feed_recv_buf(&text_frame_first)
+            .expect("first fragment");
 
         // Continuation + RSV1=1 を送る (違反)
         let continuation_with_rsv1 = vec![
-            0x80 | 0x40,    // FIN=1 + RSV1=1 + Continuation opcode (0)
-            0x80,           // MASK=1 + length=0
-            mask_key[0], mask_key[1], mask_key[2], mask_key[3],
+            0x80 | 0x40, // FIN=1 + RSV1=1 + Continuation opcode (0)
+            0x80,        // MASK=1 + length=0
+            mask_key[0],
+            mask_key[1],
+            mask_key[2],
+            mask_key[3],
         ];
         let result = conn.feed_recv_buf(&continuation_with_rsv1);
-        prop_assert!(result.is_err(), "Continuation + RSV1=1 は拒否されるべき");
-        prop_assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
-    }
+        assert!(result.is_err(), "Continuation + RSV1=1 は拒否されるべき");
+        assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+        Ok(())
+    })?;
+    Ok(())
 }
 
-proptest! {
-    /// 合計バイト数が MAX_PENDING_FRAME_DATA ちょうどなら受理される
-    /// (ハンドシェイク受理前にバッファされたフレームデータの上限境界)
-    #[test]
-    fn prop_pending_frame_data_at_exact_limit_is_accepted(
-        chunk_size in 1usize..=65_536,
-    ) {
+/// 合計バイト数が MAX_PENDING_FRAME_DATA ちょうどなら受理される
+/// (ハンドシェイク受理前にバッファされたフレームデータの上限境界)
+#[test]
+fn prop_pending_frame_data_at_exact_limit_is_accepted() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let chunk_size = pbt::sample_len_inclusive(ctx, 1, 65_536);
         let mut conn = setup_pending_request_server();
         // ハンドシェイクリクエスト直後の pending_frame_data は 0 のはず (残余なし)
         let result = feed_chunks_to_pending(&mut conn, MAX_PENDING_FRAME_DATA, chunk_size);
-        prop_assert!(
+        assert!(
             result.is_ok(),
             "ちょうど MAX_PENDING_FRAME_DATA は受理されるべき (chunk_size={}, err={:?})",
             chunk_size,
             result.err()
         );
-    }
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// 合計バイト数が MAX_PENDING_FRAME_DATA を 1 バイト超えると ProtocolViolation で拒否される
-    #[test]
-    fn prop_pending_frame_data_over_limit_by_one_is_rejected(
-        chunk_size in 1usize..=65_536,
-    ) {
+/// 合計バイト数が MAX_PENDING_FRAME_DATA を 1 バイト超えると ProtocolViolation で拒否される
+#[test]
+fn prop_pending_frame_data_over_limit_by_one_is_rejected() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let chunk_size = pbt::sample_len_inclusive(ctx, 1, 65_536);
         let mut conn = setup_pending_request_server();
         // 境界ちょうどまで詰める
         feed_chunks_to_pending(&mut conn, MAX_PENDING_FRAME_DATA, chunk_size)
             .expect("境界まで詰めるのは成功するはず");
         // 1 バイト追加で超過させる
         let result = conn.feed_recv_buf(&[0u8]);
-        prop_assert!(
+        assert!(
             result.is_err(),
             "MAX_PENDING_FRAME_DATA + 1 は拒否されるべき"
         );
-        prop_assert_eq!(
-            result.unwrap_err().kind,
-            ErrorKind::ProtocolViolation
-        );
-    }
+        assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolViolation);
+        Ok(())
+    })?;
+    Ok(())
 }

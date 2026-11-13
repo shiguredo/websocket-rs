@@ -5,12 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[dependencies]
+# プロパティベーステストフレームワーク
+noprop = "0.2"
+
 [dev-dependencies]
 # Sec-WebSocket-Accept の SHA-1 計算に使用する
 aws-lc-rs.workspace = true
 # Sec-WebSocket-Key などの base64 エンコード/デコードに使用する
 base64ct.workspace = true
-# プロパティベーステストフレームワーク
-proptest = "1.11"
 # テスト対象本体
 shiguredo_websocket.workspace = true

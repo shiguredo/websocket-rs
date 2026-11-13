@@ -4,7 +4,6 @@
 //! - `can_transition_to` が許可遷移表と一致することを保証する
 //! - 不正な遷移が許可されていないことを保証する
 
-use proptest::prelude::*;
 use shiguredo_websocket::ConnectionState;
 
 /// `ConnectionState` の全バリアント
@@ -31,17 +30,16 @@ fn is_allowed(from: ConnectionState, to: ConnectionState) -> bool {
     from == to || ALLOWED.iter().any(|&(f, t)| f == from && t == to)
 }
 
-proptest! {
-    /// 全ての (from, to) ペアについて `can_transition_to` が期待表と一致する
-    #[test]
-    fn prop_can_transition_to_matches_expected_table(
-        from_idx in 0usize..STATES.len(),
-        to_idx in 0usize..STATES.len(),
-    ) {
-        let from = STATES[from_idx];
-        let to = STATES[to_idx];
-        prop_assert_eq!(from.can_transition_to(to), is_allowed(from, to));
-    }
+/// 全ての (from, to) ペアについて `can_transition_to` が期待表と一致する
+#[test]
+fn prop_can_transition_to_matches_expected_table() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let from = noprop::sample_choice(ctx, &STATES);
+        let to = noprop::sample_choice(ctx, &STATES);
+        assert_eq!(from.can_transition_to(to), is_allowed(from, to));
+        Ok(())
+    })?;
+    Ok(())
 }
 
 #[test]

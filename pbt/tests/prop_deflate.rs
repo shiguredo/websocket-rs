@@ -2,47 +2,61 @@
 //!
 //! WebSocket 圧縮拡張 (RFC 7692) の準拠テスト
 
-use proptest::prelude::*;
 use shiguredo_websocket::PerMessageDeflateConfig;
 
 // PerMessageDeflate は pub ではないため、Config 経由でテスト
 // 内部テストは src/deflate/permessage_deflate.rs に追加
 
-proptest! {
-    // =========================================================================
-    // RFC 7692 Section 7.1: Extension Parameters
-    // =========================================================================
+fn sample_optional_window_bits(ctx: &mut noprop::TestCaseContext) -> Option<u8> {
+    // None と Some を等確率にする。Some の値は 8..=15。
+    if noprop::sample_bool(ctx) {
+        Some(noprop::sample_u8_in(ctx, 8..=15))
+    } else {
+        None
+    }
+}
 
-    /// window_bits は 8-15 の範囲
-    #[test]
-    fn prop_window_bits_range(
-        server_bits in 8u8..=15,
-        client_bits in 8u8..=15
-    ) {
+// =========================================================================
+// RFC 7692 Section 7.1: Extension Parameters
+// =========================================================================
+
+/// window_bits は 8-15 の範囲
+#[test]
+fn prop_window_bits_range() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let server_bits = noprop::sample_u8_in(ctx, 8..=15);
+        let client_bits = noprop::sample_u8_in(ctx, 8..=15);
         let config = PerMessageDeflateConfig::new()
             .server_max_window_bits(server_bits)
             .client_max_window_bits(client_bits);
 
-        prop_assert_eq!(config.server_max_window_bits, Some(server_bits));
-        prop_assert_eq!(config.client_max_window_bits, Some(client_bits));
-    }
+        assert_eq!(config.server_max_window_bits, Some(server_bits));
+        assert_eq!(config.client_max_window_bits, Some(client_bits));
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// window_bits が範囲外の場合はクランプ
-    #[test]
-    fn prop_window_bits_clamped(bits in 0u8..=20) {
-        let config = PerMessageDeflateConfig::new()
-            .server_max_window_bits(bits);
+/// window_bits が範囲外の場合はクランプ
+#[test]
+fn prop_window_bits_clamped() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let bits = noprop::sample_u8_in(ctx, 0..=20);
+        let config = PerMessageDeflateConfig::new().server_max_window_bits(bits);
 
         let expected = bits.clamp(8, 15);
-        prop_assert_eq!(config.server_max_window_bits, Some(expected));
-    }
+        assert_eq!(config.server_max_window_bits, Some(expected));
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// no_context_takeover フラグの設定
-    #[test]
-    fn prop_no_context_takeover_flags(
-        server_no_takeover in any::<bool>(),
-        client_no_takeover in any::<bool>()
-    ) {
+/// no_context_takeover フラグの設定
+#[test]
+fn prop_no_context_takeover_flags() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let server_no_takeover = noprop::sample_bool(ctx);
+        let client_no_takeover = noprop::sample_bool(ctx);
         let mut config = PerMessageDeflateConfig::new();
         if server_no_takeover {
             config = config.server_no_context_takeover();
@@ -51,25 +65,28 @@ proptest! {
             config = config.client_no_context_takeover();
         }
 
-        prop_assert_eq!(config.server_no_context_takeover, server_no_takeover);
-        prop_assert_eq!(config.client_no_context_takeover, client_no_takeover);
-    }
+        assert_eq!(config.server_no_context_takeover, server_no_takeover);
+        assert_eq!(config.client_no_context_takeover, client_no_takeover);
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    // =========================================================================
-    // Extension ヘッダー生成・パース
-    // =========================================================================
+// =========================================================================
+// Extension ヘッダー生成・パース
+// =========================================================================
 
-    /// Extension ヘッダーのラウンドトリップ
-    ///
-    /// to_extension() は設定に応じて no_context_takeover を含めるため、
-    /// ラウンドトリップ後も設定が保持される。
-    #[test]
-    fn prop_extension_roundtrip(
-        server_bits in prop::option::of(8u8..=15),
-        client_bits in prop::option::of(8u8..=15),
-        server_no_takeover in any::<bool>(),
-        client_no_takeover in any::<bool>()
-    ) {
+/// Extension ヘッダーのラウンドトリップ
+///
+/// to_extension() は設定に応じて no_context_takeover を含めるため、
+/// ラウンドトリップ後も設定が保持される。
+#[test]
+fn prop_extension_roundtrip() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let server_bits = sample_optional_window_bits(ctx);
+        let client_bits = sample_optional_window_bits(ctx);
+        let server_no_takeover = noprop::sample_bool(ctx);
+        let client_no_takeover = noprop::sample_bool(ctx);
         let mut config = PerMessageDeflateConfig::new();
         if let Some(bits) = server_bits {
             config = config.server_max_window_bits(bits);
@@ -90,30 +107,35 @@ proptest! {
         let parsed = PerMessageDeflateConfig::from_extension_for_server_request(&ext).unwrap();
 
         // ラウンドトリップ後は設定が保持される
-        prop_assert_eq!(parsed.server_no_context_takeover, server_no_takeover);
-        prop_assert_eq!(parsed.client_no_context_takeover, client_no_takeover);
+        assert_eq!(parsed.server_no_context_takeover, server_no_takeover);
+        assert_eq!(parsed.client_no_context_takeover, client_no_takeover);
 
         if let Some(bits) = server_bits {
-            prop_assert_eq!(parsed.server_max_window_bits, Some(bits));
+            assert_eq!(parsed.server_max_window_bits, Some(bits));
         }
         if let Some(bits) = client_bits {
-            prop_assert_eq!(parsed.client_max_window_bits, Some(bits));
+            assert_eq!(parsed.client_max_window_bits, Some(bits));
         }
-    }
+        Ok(())
+    })?;
+    Ok(())
+}
 
-    /// Extension 名は常に "permessage-deflate"
-    #[test]
-    fn prop_extension_name(
-        server_bits in prop::option::of(8u8..=15)
-    ) {
+/// Extension 名は常に "permessage-deflate"
+#[test]
+fn prop_extension_name() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let server_bits = sample_optional_window_bits(ctx);
         let mut config = PerMessageDeflateConfig::new();
         if let Some(bits) = server_bits {
             config = config.server_max_window_bits(bits);
         }
 
         let ext = config.to_extension();
-        prop_assert_eq!(ext.name, "permessage-deflate");
-    }
+        assert_eq!(ext.name, "permessage-deflate");
+        Ok(())
+    })?;
+    Ok(())
 }
 
 // =============================================================================

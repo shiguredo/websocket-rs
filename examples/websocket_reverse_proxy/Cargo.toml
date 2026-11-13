@@ -28,7 +28,7 @@ shiguredo_http11.workspace = true
 shiguredo_websocket.workspace = true
 # 非同期 I/O ランタイムに使用する
 tokio = {
-  version = "1.52",
+  version = "1.54",
   features = [
     "io-util",
     "macros",
