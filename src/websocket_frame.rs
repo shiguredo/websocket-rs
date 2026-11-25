@@ -1,3 +1,5 @@
+//! WebSocket フレームのエンコードとデコード
+
 use crate::error::Error;
 use crate::websocket_opcode::Opcode;
 

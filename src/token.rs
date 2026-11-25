@@ -1,3 +1,5 @@
+//! RFC 9110 の token ABNF に準拠するかを判定するヘルパー
+
 /// RFC 9110 Section 5.6.2 の token ABNF に準拠するかチェックする
 ///
 /// token = 1*tchar

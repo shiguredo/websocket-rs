@@ -162,20 +162,30 @@ pub struct WebSocketClientConnection<R: RandomSource> {
 impl<R: RandomSource> WebSocketClientConnection<R> {
     /// 新しい接続を作成
     ///
-    /// # Arguments
+    /// # 引数
     /// * `options` - 接続オプション
     /// * `random` - 乱数ソース（`RandomSource` トレイトを実装した型）
     ///
-    /// # Example
-    /// ```ignore
-    /// // 本番環境: 暗号学的に安全な乱数を使用
-    /// let ws = WebSocketClientConnection::new(options, SecureRandom);
+    /// # 例
     ///
-    /// // テスト環境: 固定値を使用
-    /// let ws = WebSocketClientConnection::new(options, FixedRandom {
-    ///     masking_key: [0xAB, 0xCD, 0xEF, 0x12],
-    ///     nonce: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-    /// });
+    /// ```no_run
+    /// use shiguredo_websocket::{ClientConnectionOptions, RandomSource, WebSocketClientConnection};
+    ///
+    /// // テスト環境: 固定値を使用 (本番環境では暗号学的に安全な乱数生成器を使うこと)
+    /// struct FixedRandom;
+    ///
+    /// impl RandomSource for FixedRandom {
+    ///     fn masking_key(&mut self) -> [u8; 4] {
+    ///         [0xAB, 0xCD, 0xEF, 0x12]
+    ///     }
+    ///
+    ///     fn nonce(&mut self) -> [u8; 16] {
+    ///         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    ///     }
+    /// }
+    ///
+    /// let options = ClientConnectionOptions::new("example.com", "/");
+    /// let ws = WebSocketClientConnection::new(options, FixedRandom);
     /// ```
     pub fn new(options: ClientConnectionOptions, random: R) -> Self {
         let shared = SharedConnectionState::new(

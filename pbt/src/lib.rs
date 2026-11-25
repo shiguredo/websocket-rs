@@ -37,7 +37,7 @@ pub fn run_cases(
 
 /// `min..max_exclusive` の長さを引く。
 ///
-/// 範囲に含まれる下限、下限の次、上限の直前を境界として [`BOUNDARY_RATIO`] の割合で選ぶ。
+/// 範囲に含まれる下限、下限の次、上限の直前を境界として `BOUNDARY_RATIO` の割合で選ぶ。
 /// 空・1 要素・上限付近が、一様分布だけだと薄いときに使う。
 pub fn sample_len(ctx: &mut noprop::TestCaseContext, min: usize, max_exclusive: usize) -> usize {
     assert!(min < max_exclusive, "長さの範囲が空です");

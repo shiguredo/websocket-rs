@@ -1,3 +1,5 @@
+//! Sec-WebSocket-Extensions のパースと permessage-deflate の設定
+
 use std::collections::HashSet;
 
 /// WebSocket 拡張パラメータ

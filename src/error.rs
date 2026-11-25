@@ -1,9 +1,13 @@
+//! ライブラリ全体で共有するエラー型とエラー種別
+
 use std::backtrace::{Backtrace, BacktraceStatus};
 use std::panic::Location;
 
 /// エラーの種類
+///
+/// 利用側で `match` の網羅性チェックが効くよう、`#[non_exhaustive]` は付けない。
+/// variant を追加する際は破壊的変更として扱い、マイナーバージョンを上げる。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum ErrorKind {
     /// 入力データの形式または構造が無効である
     InvalidInput,
@@ -47,7 +51,7 @@ pub enum ErrorKind {
 pub struct HttpResponseInfo {
     /// HTTP ステータスコード
     pub status_code: u16,
-    /// HTTP reason phrase
+    /// HTTP の reason phrase
     pub reason_phrase: String,
     /// HTTP レスポンスヘッダー
     pub headers: Vec<(String, String)>,
@@ -120,11 +124,6 @@ impl Error {
     }
 
     #[track_caller]
-    pub(crate) fn insufficient_buffer() -> Self {
-        Self::new(ErrorKind::InsufficientBuffer)
-    }
-
-    #[track_caller]
     pub(crate) fn protocol_violation<T: Into<String>>(reason: T) -> Self {
         Self::with_reason(ErrorKind::ProtocolViolation, reason)
     }
@@ -137,20 +136,6 @@ impl Error {
     #[track_caller]
     pub(crate) fn version_not_supported<T: Into<String>>(received: T) -> Self {
         Self::with_reason(ErrorKind::VersionNotSupported, received)
-    }
-
-    #[track_caller]
-    pub(crate) fn invalid_utf8<T: Into<String>>(reason: T) -> Self {
-        Self::with_reason(ErrorKind::InvalidUtf8, reason)
-    }
-
-    #[track_caller]
-    pub(crate) fn check_buffer_size(required_size: usize, buf: &[u8]) -> Result<(), Self> {
-        if buf.len() < required_size {
-            Err(Self::insufficient_buffer())
-        } else {
-            Ok(())
-        }
     }
 
     /// WebSocket クローズコードを設定する

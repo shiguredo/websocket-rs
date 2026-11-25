@@ -9,22 +9,24 @@ use crate::websocket_close::CloseCode;
 /// WebSocket クライアントが使用する masking key と nonce を生成するためのトレイト。
 /// ライブラリはこのトレイトのみを提供し、実装は利用者側で行う。
 ///
-/// # Example
+/// # 例
 ///
-/// ```ignore
+/// ```no_run
+/// use shiguredo_websocket::RandomSource;
+///
 /// // 本番環境: 暗号学的に安全な乱数を使用
 /// pub struct SecureRandom;
 ///
 /// impl RandomSource for SecureRandom {
 ///     fn masking_key(&mut self) -> [u8; 4] {
 ///         let mut key = [0u8; 4];
-///         getrandom::fill(&mut key).expect("failed to generate masking key");
+///         aws_lc_rs::rand::fill(&mut key).expect("failed to generate masking key");
 ///         key
 ///     }
 ///
 ///     fn nonce(&mut self) -> [u8; 16] {
 ///         let mut nonce = [0u8; 16];
-///         getrandom::fill(&mut nonce).expect("failed to generate nonce");
+///         aws_lc_rs::rand::fill(&mut nonce).expect("failed to generate nonce");
 ///         nonce
 ///     }
 /// }

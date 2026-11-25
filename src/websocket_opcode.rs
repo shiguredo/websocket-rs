@@ -1,3 +1,5 @@
+//! WebSocket フレームのオペコード定義
+
 /// WebSocket フレームのオペコード (RFC 6455 Section 5.2)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -10,9 +12,9 @@ pub enum Opcode {
     Binary = 0x2,
     /// 接続クローズ
     Close = 0x8,
-    /// Ping
+    /// Ping フレーム
     Ping = 0x9,
-    /// Pong
+    /// Pong フレーム
     Pong = 0xA,
 }
 

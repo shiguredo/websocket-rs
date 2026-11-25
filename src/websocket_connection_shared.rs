@@ -745,7 +745,7 @@ mod tests {
         assert_eq!(shared.state(), ConnectionState::Connecting);
         let event = shared
             .poll_event()
-            .expect("StateChanged event must be emitted");
+            .expect("StateChanged イベントが発行されるはず");
         assert_eq!(
             event,
             ConnectionEvent::StateChanged(ConnectionState::Connecting)
@@ -769,7 +769,7 @@ mod tests {
         // Disconnected -> Connected は許可遷移表外
         let err = shared
             .set_state(ConnectionState::Connected)
-            .expect_err("invalid transition must return Err");
+            .expect_err("許可されていない遷移はエラーを返すはず");
         assert_eq!(err.kind, ErrorKind::InvalidState);
         assert!(err.reason.contains("Disconnected"));
         assert!(err.reason.contains("Connected"));
@@ -780,19 +780,19 @@ mod tests {
     #[test]
     fn set_state_は終端状態からの遷移を拒否する() {
         let mut shared = new_shared();
-        // Disconnected -> Connecting -> Connected -> Closing -> Closed
+        // 状態遷移: Disconnected -> Connecting -> Connected -> Closing -> Closed
         shared
             .set_state(ConnectionState::Connecting)
-            .expect("Disconnected -> Connecting");
+            .expect("Disconnected から Connecting への遷移に失敗してはならない");
         shared
             .set_state(ConnectionState::Connected)
-            .expect("Connecting -> Connected");
+            .expect("Connecting から Connected への遷移に失敗してはならない");
         shared
             .set_state(ConnectionState::Closing)
-            .expect("Connected -> Closing");
+            .expect("Connected から Closing への遷移に失敗してはならない");
         shared
             .set_state(ConnectionState::Closed)
-            .expect("Closing -> Closed");
+            .expect("Closing から Closed への遷移に失敗してはならない");
         // Closed から他状態への遷移は全て拒否される
         for next in [
             ConnectionState::Disconnected,
@@ -802,7 +802,7 @@ mod tests {
         ] {
             let err = shared
                 .set_state(next)
-                .expect_err("transition from Closed must be rejected");
+                .expect_err("Closed からの遷移は必ず拒否されるべき");
             assert_eq!(err.kind, ErrorKind::InvalidState);
         }
         assert_eq!(shared.state(), ConnectionState::Closed);

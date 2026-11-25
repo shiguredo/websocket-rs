@@ -69,7 +69,6 @@
 //! - RFC 6455 - The WebSocket Protocol
 //! - RFC 7692 - Compression Extensions for WebSocket
 
-mod buf;
 mod deflate;
 mod error;
 mod fragment_buffer;
@@ -109,12 +108,10 @@ pub use websocket_handshake_response::{
 pub use websocket_opcode::Opcode;
 pub use websocket_server_connection::{ServerConnectionOptions, WebSocketServerConnection};
 
-// 内部向け API。クレート外の通常利用は想定していないが、PBT (`ByteSliceExt` / `VecExt` /
+// 内部向け API。クレート外の通常利用は想定していないが、PBT (`is_valid_token` /
 // `truncate_reason`) および fuzz (`Decompressor`) から参照されるため pub のまま、通常の
 // pub use では公開せず #[doc(hidden)] でドキュメント上は非表示にする。
 // `Compressor` は同経路で hidden 再エクスポートする（PerMessageDeflate と対になる API のため）。
-#[doc(hidden)]
-pub use buf::{ByteSliceExt, VecExt};
 #[doc(hidden)]
 pub use deflate::{Compressor, Decompressor};
 #[doc(hidden)]

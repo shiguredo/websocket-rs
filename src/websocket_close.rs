@@ -1,3 +1,5 @@
+//! Close フレームのクローズコードと reason の扱い
+
 /// reason が max_bytes を超える場合、UTF-8 文字境界で切り詰める
 ///
 /// 内部向け API。`lib.rs` で `#[doc(hidden)] pub use` 経由で PBT に公開する。
