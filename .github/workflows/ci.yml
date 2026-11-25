@@ -35,6 +35,13 @@ jobs:
       # fuzz は workspace から exclude されており cargo fmt --all の対象外のため個別に確認する
       - run: cargo fmt --check
         working-directory: fuzz
+      # fuzz は libFuzzer をリンクするため Linux でのみ check する
+      - name: Check fuzz crate
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo check --manifest-path fuzz/Cargo.toml
+      - name: Clippy fuzz crate
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo clippy --manifest-path fuzz/Cargo.toml -- -D warnings
       # macOS ランナーには Docker がプリインストールされていないため
       # Docker を必要とする e2e テストを含むクレートを除外する
       - run: cargo test --workspace

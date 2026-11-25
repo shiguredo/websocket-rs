@@ -20,6 +20,8 @@ Please read <https://github.com/shiguredo/oss> before use.
 
 Rust で実装された Sans I/O な WebSocket ライブラリです。
 
+対応 Rust バージョン (MSRV) は 1.95 です。
+
 ## 特徴
 
 - Sans I/O
@@ -94,7 +96,7 @@ fn now() -> Timestamp {
     use std::time::{SystemTime, UNIX_EPOCH};
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock must be after the UNIX epoch")
         .as_millis() as u64;
     Timestamp::from_millis(millis)
 }
@@ -166,16 +168,16 @@ let mut ws = WebSocketServerConnection::new(options);
 use shiguredo_websocket::CloseCode;
 
 // テキストメッセージ送信
-ws.send_text("Hello, WebSocket!").unwrap();
+ws.send_text("Hello, WebSocket!").expect("failed to send a text message");
 
 // バイナリメッセージ送信
-ws.send_binary(&[0x01, 0x02, 0x03]).unwrap();
+ws.send_binary(&[0x01, 0x02, 0x03]).expect("failed to send a binary message");
 
 // Ping 送信
-ws.send_ping(&[]).unwrap();
+ws.send_ping(&[]).expect("failed to send a ping frame");
 
 // 接続を閉じる
-ws.close(CloseCode::NORMAL, "Goodbye").unwrap();
+ws.close(CloseCode::NORMAL, "Goodbye").expect("failed to close the connection");
 ```
 
 ### メッセージ送信 (サーバー)
@@ -184,16 +186,16 @@ ws.close(CloseCode::NORMAL, "Goodbye").unwrap();
 use shiguredo_websocket::CloseCode;
 
 // テキストメッセージ送信
-ws.send_text("Hello, WebSocket!").unwrap();
+ws.send_text("Hello, WebSocket!").expect("failed to send a text message");
 
 // バイナリメッセージ送信
-ws.send_binary(&[0x01, 0x02, 0x03]).unwrap();
+ws.send_binary(&[0x01, 0x02, 0x03]).expect("failed to send a binary message");
 
 // Ping 送信
-ws.send_ping(&[]).unwrap();
+ws.send_ping(&[]).expect("failed to send a ping frame");
 
 // 接続を閉じる
-ws.close(CloseCode::NORMAL, "Goodbye").unwrap();
+ws.close(CloseCode::NORMAL, "Goodbye").expect("failed to close the connection");
 ```
 
 ### フレームの直接操作 (低レベル API)
@@ -210,7 +212,7 @@ let encoded = frame.encode(masking_key);
 let mut decoder = FrameDecoder::new();
 decoder.feed(&encoded);
 
-while let Some(frame) = decoder.decode().unwrap() {
+while let Some(frame) = decoder.decode().expect("failed to decode a frame") {
     match frame.opcode {
         Opcode::Text => {
             let text = String::from_utf8_lossy(&frame.payload);
@@ -357,6 +359,16 @@ cargo run -p websocket_reverse_proxy -- --tls --cert cert.pem --key key.pem --up
 - WS/WSS 接続の双方向プロキシ
 - テキスト/バイナリ/Ping/Close メッセージの中継
 - permessage-deflate 対応
+
+## Agent Skills
+
+[Agent Skills](https://agentskills.io/) 形式のスキルを同梱しています。`gh skill install` コマンドで対応する AI エージェント (Claude Code, Cursor, GitHub Copilot, Gemini CLI 等) にインストールでき、エージェントがこのライブラリの API や RFC 準拠仕様を理解した上で支援できるようになります。
+
+```bash
+gh skill install shiguredo/websocket-rs shiguredo-websocket
+```
+
+スキルの内容は [`skills/shiguredo-websocket/SKILL.md`](skills/shiguredo-websocket/SKILL.md) を参照してください。
 
 ## 規格書
 

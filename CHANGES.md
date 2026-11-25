@@ -13,6 +13,11 @@
 
 - [CHANGE] 最小対応 Rust バージョン (MSRV) を 1.88 から 1.95 に引き上げる
   - @voluntas
+- [UPDATE] `ErrorKind` から `#[non_exhaustive]` を削除し、利用側で網羅性チェックが効くようにする
+  - @voluntas
+- [CHANGE] 内部向けシンボル `ByteSliceExt` / `VecExt` を削除する
+  - ライブラリ本体から参照されておらず、PBT のためだけに公開していたため
+  - @voluntas
 
 ### misc
 
@@ -21,6 +26,12 @@
   - workspace 外の fuzz にも rust-version を設定し、fmt を CI で確認する
   - @voluntas
 - [UPDATE] Git フックを prek の標準構成に揃え、cargo test を pre-push でのみ実行するようにする
+  - @voluntas
+- [UPDATE] テストの `.unwrap()` を日本語メッセージ付きの `.expect()` に置き換える
+  - @voluntas
+- [UPDATE] PBT のファイル名を `src` のモジュール名に合わせる
+  - @voluntas
+- [UPDATE] `Makefile` のターゲットを実際のターゲットと揃え、fuzz の check を CI に追加する
   - @voluntas
 
 ## 2026.3.0

@@ -84,6 +84,16 @@ types = ["rust"]
 pass_filenames = false
 priority = 0
 
+# fuzz は workspace から exclude されており cargo fmt --all の対象外のため個別に確認する
+[[repos.hooks]]
+id = "cargo-fmt-fuzz"
+name = "cargo fmt (fuzz)"
+entry = "cargo fmt --manifest-path fuzz/Cargo.toml -- --check"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+priority = 0
+
 # --workspace で全メンバーを、--all-targets でテスト・example・ベンチも lint し、-D warnings で警告をエラーに昇格する
 [[repos.hooks]]
 id = "cargo-clippy"
@@ -96,10 +106,11 @@ priority = 10
 
 # cargo test: コミットを遅くしないため pre-push でだけ実行する
 # --workspace で examples と pbt も含める
+# Docker を必要とする e2e テストは GitHub Actions でのみ実行するため除外する
 [[repos.hooks]]
 id = "cargo-test"
 name = "cargo test"
-entry = "cargo test --workspace"
+entry = "cargo test --workspace --exclude websocket_client"
 language = "system"
 types = ["rust"]
 pass_filenames = false
