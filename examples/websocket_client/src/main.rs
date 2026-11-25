@@ -89,7 +89,7 @@ impl ServerCertVerifier for InsecureVerifier {
 fn now() -> Timestamp {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock must be after the UNIX epoch")
         .as_millis() as u64;
     Timestamp::from_millis(millis)
 }
@@ -303,7 +303,7 @@ async fn main() -> io::Result<()> {
     let mut ws = WebSocketClientConnection::new(options, SecureRandom);
 
     // ハンドシェイク開始
-    ws.connect().unwrap();
+    ws.connect().expect("failed to start the handshake");
 
     // 出力を送信
     while let Some(output) = ws.poll_output() {
@@ -321,7 +321,8 @@ async fn main() -> io::Result<()> {
             return Ok(());
         }
 
-        ws.feed_recv_buf(&buf[..n], now()).unwrap();
+        ws.feed_recv_buf(&buf[..n], now())
+            .expect("failed to feed received data");
 
         // イベントを処理
         while let Some(event) = ws.poll_event() {
@@ -356,7 +357,8 @@ async fn main() -> io::Result<()> {
     // テストメッセージを送信
     let test_message = "Hello, WebSocket!";
     println!("\nSending: {}", test_message);
-    ws.send_text(test_message).unwrap();
+    ws.send_text(test_message)
+        .expect("failed to send a text message");
 
     while let Some(output) = ws.poll_output() {
         if let ConnectionOutput::SendData(data) = output {
@@ -373,7 +375,8 @@ async fn main() -> io::Result<()> {
                 break;
             }
 
-            ws.feed_recv_buf(&buf[..n], now()).unwrap();
+            ws.feed_recv_buf(&buf[..n], now())
+                .expect("failed to feed received data");
 
             while let Some(event) = ws.poll_event() {
                 match event {
@@ -428,7 +431,8 @@ async fn main() -> io::Result<()> {
 
     // クローズ
     println!("\nClosing connection...");
-    ws.close(CloseCode::NORMAL, "goodbye").unwrap();
+    ws.close(CloseCode::NORMAL, "goodbye")
+        .expect("failed to close the connection");
 
     while let Some(output) = ws.poll_output() {
         match output {
@@ -451,7 +455,8 @@ async fn main() -> io::Result<()> {
                 break;
             }
 
-            ws.feed_recv_buf(&buf[..n], now()).unwrap();
+            ws.feed_recv_buf(&buf[..n], now())
+                .expect("failed to feed received data");
 
             while let Some(event) = ws.poll_event() {
                 if let ConnectionEvent::Close { code, reason } = event {

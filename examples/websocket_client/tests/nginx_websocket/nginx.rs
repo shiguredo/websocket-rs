@@ -40,11 +40,11 @@ pub async fn spawn_ws_proxy(echo_server_port: u16) -> NginxHandle {
     let container = request
         .start()
         .await
-        .expect("failed to start nginx container");
+        .expect("nginx コンテナの起動に失敗してはならない");
     let port = container
         .get_host_port_ipv4(NGINX_INTERNAL_PORT)
         .await
-        .expect("failed to get nginx host port");
+        .expect("nginx コンテナのポート取得に失敗してはならない");
 
     NginxHandle {
         _container: container,

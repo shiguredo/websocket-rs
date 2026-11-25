@@ -81,7 +81,7 @@ fn prop_from_u8_out_of_range() -> noprop::TestResult {
 fn prop_roundtrip() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &VALID_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert_eq!(op.as_u8(), opcode);
         Ok(())
     })?;
@@ -95,7 +95,7 @@ fn prop_roundtrip() -> noprop::TestResult {
 fn prop_as_u8_all_variants() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &VALID_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         let expected = match op {
             Opcode::Continuation => 0x0,
             Opcode::Text => 0x1,
@@ -117,7 +117,7 @@ fn prop_as_u8_all_variants() -> noprop::TestResult {
 fn prop_is_control_true() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &CONTROL_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert!(op.is_control());
         assert!(!op.is_data());
         Ok(())
@@ -130,7 +130,7 @@ fn prop_is_control_true() -> noprop::TestResult {
 fn prop_is_control_false() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &DATA_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert!(!op.is_control());
         assert!(op.is_data());
         Ok(())
@@ -143,7 +143,7 @@ fn prop_is_control_false() -> noprop::TestResult {
 fn prop_control_data_exclusive() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &VALID_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert_ne!(op.is_control(), op.is_data());
         Ok(())
     })?;
@@ -157,7 +157,7 @@ fn prop_control_data_exclusive() -> noprop::TestResult {
 fn prop_is_data_true() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &DATA_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert!(op.is_data());
         Ok(())
     })?;
@@ -169,7 +169,7 @@ fn prop_is_data_true() -> noprop::TestResult {
 fn prop_is_data_false() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &CONTROL_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert!(!op.is_data());
         Ok(())
     })?;
@@ -183,7 +183,7 @@ fn prop_is_data_false() -> noprop::TestResult {
 fn prop_rfc6455_control_opcodes() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &CONTROL_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert!(op.is_control(), "Opcode 0x{:X} should be control", opcode);
         Ok(())
     })?;
@@ -195,7 +195,7 @@ fn prop_rfc6455_control_opcodes() -> noprop::TestResult {
 fn prop_rfc6455_data_opcodes() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &DATA_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert!(op.is_data(), "Opcode 0x{:X} should be data", opcode);
         Ok(())
     })?;
@@ -239,7 +239,7 @@ fn prop_rfc6455_reserved_control_opcodes() -> noprop::TestResult {
 fn prop_display() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &VALID_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         let expected = match op {
             Opcode::Continuation => "Continuation",
             Opcode::Text => "Text",
@@ -264,8 +264,8 @@ fn prop_hash_consistency() -> noprop::TestResult {
         use std::hash::{Hash, Hasher};
 
         let opcode = noprop::sample_choice(ctx, &VALID_OPCODES);
-        let op1 = Opcode::from_u8(opcode).unwrap();
-        let op2 = Opcode::from_u8(opcode).unwrap();
+        let op1 = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
+        let op2 = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
 
         let mut hasher1 = DefaultHasher::new();
         let mut hasher2 = DefaultHasher::new();
@@ -286,7 +286,7 @@ fn prop_hash_consistency() -> noprop::TestResult {
 fn prop_all_opcodes_categorized() -> noprop::TestResult {
     pbt::run(|ctx| {
         let opcode = noprop::sample_choice(ctx, &VALID_OPCODES);
-        let op = Opcode::from_u8(opcode).unwrap();
+        let op = Opcode::from_u8(opcode).expect("有効なオペコードであるはず");
         assert!(
             op.is_control() || op.is_data(),
             "Opcode {:?} is neither control nor data",

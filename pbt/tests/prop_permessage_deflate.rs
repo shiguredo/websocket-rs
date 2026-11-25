@@ -27,10 +27,10 @@ fn prop_compress_decompress_roundtrip() -> noprop::TestResult {
         let mut server = PerMessageDeflate::new_server(config);
 
         // クライアント -> サーバー
-        let compressed = client.compress(&data).unwrap();
+        let compressed = client.compress(&data).expect("圧縮に失敗してはならない");
         let decompressed = server
             .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-            .unwrap();
+            .expect("展開に失敗してはならない");
 
         assert_eq!(decompressed, data);
         Ok(())
@@ -45,7 +45,7 @@ fn prop_no_trailer_in_compressed() -> noprop::TestResult {
         let config = PerMessageDeflateConfig::default();
         let mut codec = PerMessageDeflate::new_client(config);
 
-        let compressed = codec.compress(&data).unwrap();
+        let compressed = codec.compress(&data).expect("圧縮に失敗してはならない");
 
         assert!(!compressed.ends_with(&DEFLATE_TRAILER));
         Ok(())
@@ -74,7 +74,7 @@ fn prop_repetitive_data_compresses_well() -> noprop::TestResult {
         let mut client = PerMessageDeflate::new_client(config.clone());
         let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = client.compress(&data).unwrap();
+        let compressed = client.compress(&data).expect("圧縮に失敗してはならない");
 
         if data.len() > 100 {
             assert!(compressed.len() < data.len());
@@ -83,7 +83,7 @@ fn prop_repetitive_data_compresses_well() -> noprop::TestResult {
 
         let decompressed = server
             .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-            .unwrap();
+            .expect("展開に失敗してはならない");
         assert_eq!(decompressed, data);
         Ok(())
     })?;
@@ -107,10 +107,10 @@ fn prop_multiple_compress_decompress() -> noprop::TestResult {
         let mut current = data.clone();
         for _ in 0..iterations {
             // クライアント -> サーバー
-            let compressed = client.compress(&current).unwrap();
+            let compressed = client.compress(&current).expect("圧縮に失敗してはならない");
             current = server
                 .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-                .unwrap();
+                .expect("展開に失敗してはならない");
         }
 
         assert_eq!(current, data);
@@ -130,10 +130,10 @@ fn prop_no_context_takeover() -> noprop::TestResult {
         let mut client = PerMessageDeflate::new_client(config.clone());
         let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = client.compress(&data).unwrap();
+        let compressed = client.compress(&data).expect("圧縮に失敗してはならない");
         let decompressed = server
             .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-            .unwrap();
+            .expect("展開に失敗してはならない");
 
         assert_eq!(decompressed, data);
         Ok(())
@@ -156,10 +156,10 @@ fn prop_window_bits_variations() -> noprop::TestResult {
         let mut client = PerMessageDeflate::new_client(config.clone());
         let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = client.compress(&data).unwrap();
+        let compressed = client.compress(&data).expect("圧縮に失敗してはならない");
         let decompressed = server
             .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-            .unwrap();
+            .expect("展開に失敗してはならない");
 
         assert_eq!(decompressed, data);
         Ok(())
@@ -177,10 +177,10 @@ fn prop_server_codec() -> noprop::TestResult {
         let mut server = PerMessageDeflate::new_server(config);
 
         // サーバー -> クライアント
-        let compressed = server.compress(&data).unwrap();
+        let compressed = server.compress(&data).expect("圧縮に失敗してはならない");
         let decompressed = client
             .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-            .unwrap();
+            .expect("展開に失敗してはならない");
 
         assert_eq!(decompressed, data);
         Ok(())
@@ -215,7 +215,7 @@ fn prop_decompress_max_size_limit() -> noprop::TestResult {
         let mut client = PerMessageDeflate::new_client(config.clone());
         let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = client.compress(&data).unwrap();
+        let compressed = client.compress(&data).expect("圧縮に失敗してはならない");
 
         // 元データより小さい上限を設定
         let small_limit = data.len() / 2;
@@ -237,12 +237,12 @@ fn prop_decompress_within_limit() -> noprop::TestResult {
         let mut client = PerMessageDeflate::new_client(config.clone());
         let mut server = PerMessageDeflate::new_server(config);
 
-        let compressed = client.compress(&data).unwrap();
+        let compressed = client.compress(&data).expect("圧縮に失敗してはならない");
 
         // 元データと同じサイズの上限を設定
         let result = server.decompress(&compressed, data.len());
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), data);
+        assert_eq!(result.expect("直前の is_ok の確認どおり成功するはず"), data);
         Ok(())
     })?;
     Ok(())
@@ -257,10 +257,10 @@ fn prop_compress_decompress_empty() {
     let mut client = PerMessageDeflate::new_client(config.clone());
     let mut server = PerMessageDeflate::new_server(config);
 
-    let compressed = client.compress(b"").unwrap();
+    let compressed = client.compress(b"").expect("圧縮に失敗してはならない");
     let decompressed = server
         .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-        .unwrap();
+        .expect("展開に失敗してはならない");
 
     assert!(decompressed.is_empty());
 }
@@ -280,12 +280,14 @@ fn prop_context_takeover_improves_compression() -> noprop::TestResult {
         let mut compressed_sizes = Vec::new();
 
         for _ in 0..3 {
-            let compressed = client.compress(msg.as_bytes()).unwrap();
+            let compressed = client
+                .compress(msg.as_bytes())
+                .expect("圧縮に失敗してはならない");
             compressed_sizes.push(compressed.len());
 
             let decompressed = server
                 .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-                .unwrap();
+                .expect("展開に失敗してはならない");
             assert_eq!(decompressed, msg.as_bytes());
         }
 
@@ -310,17 +312,17 @@ fn prop_bidirectional_communication() -> noprop::TestResult {
         for (i, msg) in messages.iter().enumerate() {
             if i % 2 == 0 {
                 // クライアント -> サーバー
-                let compressed = client.compress(msg).unwrap();
+                let compressed = client.compress(msg).expect("圧縮に失敗してはならない");
                 let decompressed = server
                     .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-                    .unwrap();
+                    .expect("展開に失敗してはならない");
                 assert_eq!(&decompressed, msg);
             } else {
                 // サーバー -> クライアント
-                let compressed = server.compress(msg).unwrap();
+                let compressed = server.compress(msg).expect("圧縮に失敗してはならない");
                 let decompressed = client
                     .decompress(&compressed, TEST_MAX_DECOMPRESS_SIZE)
-                    .unwrap();
+                    .expect("展開に失敗してはならない");
                 assert_eq!(&decompressed, msg);
             }
         }

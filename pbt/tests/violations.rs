@@ -104,7 +104,7 @@ fn prop_single_byte_incomplete() -> noprop::TestResult {
         let mut decoder = FrameDecoder::new();
         decoder.feed(&[byte]);
 
-        let result = decoder.decode().unwrap();
+        let result = decoder.decode().expect("デコードに失敗してはならない");
         assert!(result.is_none());
         Ok(())
     })?;
@@ -123,7 +123,7 @@ fn prop_header_only_incomplete() -> noprop::TestResult {
         let mut decoder = FrameDecoder::new();
         decoder.feed(&frame);
 
-        let result = decoder.decode().unwrap();
+        let result = decoder.decode().expect("デコードに失敗してはならない");
         assert!(result.is_none());
         Ok(())
     })?;
@@ -147,7 +147,7 @@ fn prop_extended_length_header_incomplete() -> noprop::TestResult {
         let mut decoder = FrameDecoder::new();
         decoder.feed(&frame);
 
-        let result = decoder.decode().unwrap();
+        let result = decoder.decode().expect("デコードに失敗してはならない");
         assert!(result.is_none());
         Ok(())
     })?;
@@ -169,7 +169,7 @@ fn prop_64bit_length_header_incomplete() -> noprop::TestResult {
         let mut decoder = FrameDecoder::new();
         decoder.feed(&frame);
 
-        let result = decoder.decode().unwrap();
+        let result = decoder.decode().expect("デコードに失敗してはならない");
         assert!(result.is_none());
         Ok(())
     })?;
@@ -194,7 +194,7 @@ fn prop_incomplete_masking_key() -> noprop::TestResult {
         let mut decoder = FrameDecoder::new();
         decoder.feed(&frame);
 
-        let result = decoder.decode().unwrap();
+        let result = decoder.decode().expect("デコードに失敗してはならない");
         assert!(result.is_none());
         Ok(())
     })?;
@@ -222,7 +222,7 @@ fn prop_incomplete_payload() -> noprop::TestResult {
         let mut decoder = FrameDecoder::new();
         decoder.feed(&frame);
 
-        let result = decoder.decode().unwrap();
+        let result = decoder.decode().expect("デコードに失敗してはならない");
         assert!(result.is_none());
         Ok(())
     })?;

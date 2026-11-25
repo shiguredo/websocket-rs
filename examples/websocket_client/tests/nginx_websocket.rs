@@ -4,6 +4,9 @@
 //! shiguredo_websocket のクライアント・サーバーが実際のプロキシ経由で
 //! 正しく動作することを検証する。
 
+// テストバイナリの crate root は tests/ 直下とみなされるため、`#[path]` で
+// nginx_websocket/ 配下のヘルパーを明示する。
+#[path = "nginx_websocket/helpers.rs"]
 mod helpers;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,13 +23,13 @@ struct SecureRandom;
 impl RandomSource for SecureRandom {
     fn masking_key(&mut self) -> [u8; 4] {
         let mut key = [0u8; 4];
-        aws_lc_rs::rand::fill(&mut key).expect("failed to generate masking key");
+        aws_lc_rs::rand::fill(&mut key).expect("masking key の生成に失敗してはならない");
         key
     }
 
     fn nonce(&mut self) -> [u8; 16] {
         let mut nonce = [0u8; 16];
-        aws_lc_rs::rand::fill(&mut nonce).expect("failed to generate nonce");
+        aws_lc_rs::rand::fill(&mut nonce).expect("nonce の生成に失敗してはならない");
         nonce
     }
 }
@@ -34,7 +37,7 @@ impl RandomSource for SecureRandom {
 fn now() -> Timestamp {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock is before UNIX epoch")
+        .expect("システム時刻が UNIX エポックより前になっている")
         .as_millis() as u64;
     Timestamp::from_millis(millis)
 }
@@ -44,20 +47,21 @@ async fn connect_via_nginx(
 ) -> (TcpStream, WebSocketClientConnection<SecureRandom>) {
     let mut stream = TcpStream::connect(("127.0.0.1", nginx_port))
         .await
-        .expect("failed to connect to nginx");
+        .expect("nginx への接続に失敗してはならない");
 
     let host = format!("127.0.0.1:{nginx_port}");
     let options = ClientConnectionOptions::new(&host, "/");
     let mut ws = WebSocketClientConnection::new(options, SecureRandom);
 
-    ws.connect().expect("failed to initiate handshake");
+    ws.connect()
+        .expect("ハンドシェイクの開始に失敗してはならない");
 
     while let Some(output) = ws.poll_output() {
         if let ConnectionOutput::SendData(data) = output {
             stream
                 .write_all(&data)
                 .await
-                .expect("failed to send handshake request");
+                .expect("ハンドシェイク要求の送信に失敗してはならない");
         }
     }
 
@@ -66,14 +70,14 @@ async fn connect_via_nginx(
     loop {
         let n = tokio::time::timeout_at(deadline, stream.read(&mut buf))
             .await
-            .expect("handshake timed out")
-            .expect("failed to read handshake response");
+            .expect("ハンドシェイクの応答がタイムアウトした")
+            .expect("ハンドシェイク応答の受信に失敗してはならない");
         if n == 0 {
             panic!("connection closed during handshake");
         }
 
         ws.feed_recv_buf(&buf[..n], now())
-            .expect("failed to feed handshake response");
+            .expect("ハンドシェイク応答の投入に失敗してはならない");
 
         while let Some(event) = ws.poll_event() {
             match event {
@@ -90,7 +94,7 @@ async fn connect_via_nginx(
                 stream
                     .write_all(&data)
                     .await
-                    .expect("failed to send during handshake");
+                    .expect("ハンドシェイク中の送信に失敗してはならない");
             }
         }
 
@@ -107,7 +111,8 @@ async fn send_and_recv_text(
     ws: &mut WebSocketClientConnection<SecureRandom>,
     text: &str,
 ) -> String {
-    ws.send_text(text).expect("failed to send text");
+    ws.send_text(text)
+        .expect("テキストメッセージの送信に失敗してはならない");
     flush_output(stream, ws).await;
 
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
@@ -115,14 +120,14 @@ async fn send_and_recv_text(
     loop {
         let n = tokio::time::timeout_at(deadline, stream.read(&mut buf))
             .await
-            .expect("echo reception timed out")
-            .expect("failed to read echo");
+            .expect("エコー応答の受信がタイムアウトした")
+            .expect("エコー応答の受信に失敗してはならない");
         if n == 0 {
             panic!("connection closed while waiting for echo");
         }
 
         ws.feed_recv_buf(&buf[..n], now())
-            .expect("failed to feed echo data");
+            .expect("エコー応答の投入に失敗してはならない");
 
         while let Some(event) = ws.poll_event() {
             match event {
@@ -144,7 +149,8 @@ async fn send_and_recv_binary(
     ws: &mut WebSocketClientConnection<SecureRandom>,
     data: &[u8],
 ) -> Vec<u8> {
-    ws.send_binary(data).expect("failed to send binary");
+    ws.send_binary(data)
+        .expect("バイナリメッセージの送信に失敗してはならない");
     flush_output(stream, ws).await;
 
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
@@ -152,14 +158,14 @@ async fn send_and_recv_binary(
     loop {
         let n = tokio::time::timeout_at(deadline, stream.read(&mut buf))
             .await
-            .expect("echo reception timed out")
-            .expect("failed to read echo");
+            .expect("エコー応答の受信がタイムアウトした")
+            .expect("エコー応答の受信に失敗してはならない");
         if n == 0 {
             panic!("connection closed while waiting for echo");
         }
 
         ws.feed_recv_buf(&buf[..n], now())
-            .expect("failed to feed echo data");
+            .expect("エコー応答の投入に失敗してはならない");
 
         while let Some(event) = ws.poll_event() {
             match event {
@@ -182,7 +188,7 @@ async fn flush_output(stream: &mut TcpStream, ws: &mut WebSocketClientConnection
             stream
                 .write_all(&data)
                 .await
-                .expect("failed to flush output");
+                .expect("送信データのフラッシュに失敗してはならない");
         }
     }
 }
@@ -232,7 +238,8 @@ async fn ping_pong_の往復() {
     let (mut stream, mut ws) = connect_via_nginx(nginx.port).await;
 
     let ping_data = b"ping-test";
-    ws.send_ping(ping_data).expect("failed to send ping");
+    ws.send_ping(ping_data)
+        .expect("Ping の送信に失敗してはならない");
     flush_output(&mut stream, &mut ws).await;
 
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
@@ -240,14 +247,14 @@ async fn ping_pong_の往復() {
     loop {
         let n = tokio::time::timeout_at(deadline, stream.read(&mut buf))
             .await
-            .expect("pong reception timed out")
-            .expect("failed to read pong");
+            .expect("Pong の受信がタイムアウトした")
+            .expect("Pong の受信に失敗してはならない");
         if n == 0 {
             panic!("connection closed while waiting for pong");
         }
 
         ws.feed_recv_buf(&buf[..n], now())
-            .expect("failed to feed pong data");
+            .expect("Pong の投入に失敗してはならない");
 
         let mut pong_received = false;
         while let Some(event) = ws.poll_event() {
@@ -282,7 +289,7 @@ async fn close_ハンドシェイク() {
     let (mut stream, mut ws) = connect_via_nginx(nginx.port).await;
 
     ws.close(CloseCode::NORMAL, "")
-        .expect("failed to send close");
+        .expect("Close の送信に失敗してはならない");
     flush_output(&mut stream, &mut ws).await;
 
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
@@ -291,14 +298,14 @@ async fn close_ハンドシェイク() {
     loop {
         let n = tokio::time::timeout_at(deadline, stream.read(&mut buf))
             .await
-            .expect("close response timed out")
-            .expect("failed to read close response");
+            .expect("Close 応答の受信がタイムアウトした")
+            .expect("Close 応答の受信に失敗してはならない");
         if n == 0 {
             break;
         }
 
         ws.feed_recv_buf(&buf[..n], now())
-            .expect("failed to feed close data");
+            .expect("Close 応答の投入に失敗してはならない");
 
         while let Some(event) = ws.poll_event() {
             match event {

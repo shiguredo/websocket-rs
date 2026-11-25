@@ -104,7 +104,8 @@ fn prop_extension_roundtrip() -> noprop::TestResult {
         let ext = config.to_extension();
         // サーバーレスポンスとしてパース（server_max_window_bits に値が必要）
         // to_extension() は値を含めて生成するのでパース可能
-        let parsed = PerMessageDeflateConfig::from_extension_for_server_request(&ext).unwrap();
+        let parsed = PerMessageDeflateConfig::from_extension_for_server_request(&ext)
+            .expect("拡張設定のパースに失敗してはならない");
 
         // ラウンドトリップ後は設定が保持される
         assert_eq!(parsed.server_no_context_takeover, server_no_takeover);

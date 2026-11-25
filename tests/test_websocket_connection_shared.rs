@@ -88,12 +88,13 @@ fn setup_connected_client() -> (WebSocketClientConnection<FixedRandom>, Timestam
     let mut conn = WebSocketClientConnection::new(options, random);
     let now = Timestamp::from_millis(0);
 
-    conn.connect().unwrap();
+    conn.connect().expect("接続処理に失敗してはならない");
     while conn.poll_output().is_some() {}
 
     let accept = compute_accept(&nonce);
     let response = create_valid_handshake_response(&accept);
-    conn.feed_recv_buf(&response, now).unwrap();
+    conn.feed_recv_buf(&response, now)
+        .expect("受信データの投入に失敗してはならない");
 
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
@@ -106,8 +107,10 @@ fn setup_connected_server() -> WebSocketServerConnection {
     let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
     let key: [u8; 16] = [0; 16];
     let request = create_valid_handshake_request(&key);
-    conn.feed_recv_buf(&request).unwrap();
-    conn.accept_handshake_auto().unwrap();
+    conn.feed_recv_buf(&request)
+        .expect("受信データの投入に失敗してはならない");
+    conn.accept_handshake_auto()
+        .expect("ハンドシェイクの受諾に失敗してはならない");
 
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
@@ -214,7 +217,8 @@ fn client_で_pong_timeout_が発生すると_close_1008_が送信される() {
     let (mut conn, _now) = setup_connected_client();
 
     // send_ping で awaiting_pong = true にする
-    conn.send_ping(&[]).unwrap();
+    conn.send_ping(&[])
+        .expect("Ping の送信に失敗してはならない");
     while conn.poll_output().is_some() {}
 
     // PongTimeout タイマーを発火させる
@@ -260,7 +264,8 @@ fn server_で_pong_timeout_が発生すると_close_1008_が送信される() {
     let mut conn = setup_connected_server();
 
     // send_ping で awaiting_pong = true にする
-    conn.send_ping(&[]).unwrap();
+    conn.send_ping(&[])
+        .expect("Ping の送信に失敗してはならない");
     while conn.poll_output().is_some() {}
 
     // PongTimeout タイマーを発火させる
@@ -386,16 +391,18 @@ fn client_で_pong_timeout_ビルダー値が_set_timer_に伝播する() {
     let mut conn = WebSocketClientConnection::new(options, random);
     let now = Timestamp::from_millis(0);
 
-    conn.connect().expect("connect");
+    conn.connect().expect("接続処理に失敗してはならない");
     while conn.poll_output().is_some() {}
 
     let accept = compute_accept(&nonce);
     let response = create_valid_handshake_response(&accept);
-    conn.feed_recv_buf(&response, now).expect("handshake");
+    conn.feed_recv_buf(&response, now)
+        .expect("ハンドシェイク応答の投入に失敗してはならない");
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
 
-    conn.send_ping(&[]).expect("send_ping");
+    conn.send_ping(&[])
+        .expect("Ping の送信に失敗してはならない");
 
     let mut outputs = Vec::new();
     while let Some(o) = conn.poll_output() {
@@ -417,16 +424,18 @@ fn client_で_close_timeout_ビルダー値が_set_timer_に伝播する() {
     let mut conn = WebSocketClientConnection::new(options, random);
     let now = Timestamp::from_millis(0);
 
-    conn.connect().expect("connect");
+    conn.connect().expect("接続処理に失敗してはならない");
     while conn.poll_output().is_some() {}
 
     let accept = compute_accept(&nonce);
     let response = create_valid_handshake_response(&accept);
-    conn.feed_recv_buf(&response, now).expect("handshake");
+    conn.feed_recv_buf(&response, now)
+        .expect("ハンドシェイク応答の投入に失敗してはならない");
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
 
-    conn.close(CloseCode::NORMAL, "bye").expect("close");
+    conn.close(CloseCode::NORMAL, "bye")
+        .expect("クローズ処理に失敗してはならない");
 
     let mut outputs = Vec::new();
     while let Some(o) = conn.poll_output() {
@@ -444,12 +453,15 @@ fn server_で_pong_timeout_ビルダー値が_set_timer_に伝播する() {
     let mut conn = WebSocketServerConnection::new(options);
     let key: [u8; 16] = [0; 16];
     let request = create_valid_handshake_request(&key);
-    conn.feed_recv_buf(&request).expect("feed handshake");
-    conn.accept_handshake_auto().expect("accept handshake");
+    conn.feed_recv_buf(&request)
+        .expect("ハンドシェイク応答の投入に失敗してはならない");
+    conn.accept_handshake_auto()
+        .expect("ハンドシェイクの受諾に失敗してはならない");
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
 
-    conn.send_ping(&[]).expect("send_ping");
+    conn.send_ping(&[])
+        .expect("Ping の送信に失敗してはならない");
     let mut outputs = Vec::new();
     while let Some(o) = conn.poll_output() {
         outputs.push(o);
@@ -468,12 +480,15 @@ fn server_で_close_timeout_ビルダー値が_set_timer_に伝播する() {
     let mut conn = WebSocketServerConnection::new(options);
     let key: [u8; 16] = [0; 16];
     let request = create_valid_handshake_request(&key);
-    conn.feed_recv_buf(&request).expect("feed handshake");
-    conn.accept_handshake_auto().expect("accept handshake");
+    conn.feed_recv_buf(&request)
+        .expect("ハンドシェイク応答の投入に失敗してはならない");
+    conn.accept_handshake_auto()
+        .expect("ハンドシェイクの受諾に失敗してはならない");
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
 
-    conn.close(CloseCode::NORMAL, "bye").expect("close");
+    conn.close(CloseCode::NORMAL, "bye")
+        .expect("クローズ処理に失敗してはならない");
     let mut outputs = Vec::new();
     while let Some(o) = conn.poll_output() {
         outputs.push(o);

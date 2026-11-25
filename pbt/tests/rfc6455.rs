@@ -49,18 +49,24 @@ fn prop_section_4_1_item_7_websocket_key_format() -> noprop::TestResult {
     pbt::run(|ctx| {
         let nonce = noprop::sample_bytes::<16>(ctx);
         let request = HandshakeRequest::new("/", "example.com");
-        let encoded = request.build(nonce).unwrap();
-        let s = String::from_utf8(encoded).unwrap();
+        let encoded = request
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s = String::from_utf8(encoded).expect("UTF-8 への変換に失敗してはならない");
 
         // Sec-WebSocket-Key を抽出
         let key_line = s
             .lines()
             .find(|l| l.starts_with("Sec-WebSocket-Key:"))
-            .unwrap();
-        let key = key_line.split(':').nth(1).unwrap().trim();
+            .expect("Sec-WebSocket-Key ヘッダー行が存在するはず");
+        let key = key_line
+            .split(':')
+            .nth(1)
+            .expect("要素が存在するはず")
+            .trim();
 
         // base64 デコードして 16 バイトであることを確認
-        let decoded = Base64::decode_vec(key).unwrap();
+        let decoded = Base64::decode_vec(key).expect("base64 デコードに失敗してはならない");
         assert_eq!(decoded.len(), 16);
         Ok(())
     })?;
@@ -75,14 +81,18 @@ fn prop_section_4_1_item_10_websocket_protocol_optional() -> noprop::TestResult 
         let nonce = noprop::sample_bytes::<16>(ctx);
         // プロトコルなし
         let request1 = HandshakeRequest::new("/", "example.com");
-        let encoded1 = request1.build(nonce).unwrap();
-        let s1 = String::from_utf8(encoded1).unwrap();
+        let encoded1 = request1
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s1 = String::from_utf8(encoded1).expect("UTF-8 への変換に失敗してはならない");
         assert!(!s1.contains("Sec-WebSocket-Protocol"));
 
         // プロトコルあり
         let request2 = HandshakeRequest::new("/", "example.com").protocol(&protocol);
-        let encoded2 = request2.build(nonce).unwrap();
-        let s2 = String::from_utf8(encoded2).unwrap();
+        let encoded2 = request2
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s2 = String::from_utf8(encoded2).expect("UTF-8 への変換に失敗してはならない");
         let expected = format!("Sec-WebSocket-Protocol: {}", protocol);
         assert!(s2.contains(&expected));
         Ok(())
@@ -475,13 +485,13 @@ fn prop_section_5_2_opcode_4bits() -> noprop::TestResult {
         } else {
             payload.clone()
         })
-        .unwrap();
+        .expect("Ping フレームの生成に失敗してはならない");
         let pong_frame = Frame::pong(if payload.len() > 125 {
             payload[..125].to_vec()
         } else {
             payload
         })
-        .unwrap();
+        .expect("Pong フレームの生成に失敗してはならない");
 
         let text_encoded = text_frame.encode(masking_key);
         let binary_encoded = binary_frame.encode(masking_key);
@@ -569,7 +579,10 @@ fn prop_section_5_3_masking_is_reversible() -> noprop::TestResult {
         // デコード
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert_eq!(decoded.payload, payload);
         Ok(())
@@ -664,12 +677,15 @@ fn prop_section_5_5_control_frame_max_125_bytes() -> noprop::TestResult {
     pbt::run(|ctx| {
         let data = pbt::sample_byte_vec(ctx, 0, 125);
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let ping = Frame::ping(data.clone()).unwrap();
+        let ping = Frame::ping(data.clone()).expect("Ping フレームの生成に失敗してはならない");
         let encoded = ping.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert!(decoded.payload.len() <= 125);
         assert_eq!(decoded.payload.len(), data.len());
@@ -684,9 +700,9 @@ fn prop_section_5_5_control_frames_must_be_final() -> noprop::TestResult {
     pbt::run(|ctx| {
         let data = pbt::sample_byte_vec(ctx, 0, 50);
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let ping = Frame::ping(data.clone()).unwrap();
-        let pong = Frame::pong(data.clone()).unwrap();
-        let close = Frame::close(Some(1000), "").unwrap();
+        let ping = Frame::ping(data.clone()).expect("Ping フレームの生成に失敗してはならない");
+        let pong = Frame::pong(data.clone()).expect("Pong フレームの生成に失敗してはならない");
+        let close = Frame::close(Some(1000), "").expect("Close フレームの生成に失敗してはならない");
 
         let ping_encoded = ping.encode(masking_key);
         let pong_encoded = pong.encode(masking_key);
@@ -713,7 +729,8 @@ fn prop_section_5_5_1_close_opcode() -> noprop::TestResult {
             50,
         );
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let close = Frame::close(Some(code), &reason).unwrap();
+        let close =
+            Frame::close(Some(code), &reason).expect("Close フレームの生成に失敗してはならない");
         let encoded = close.encode(masking_key);
 
         assert_eq!(encoded[0] & 0x0F, 0x08);
@@ -734,12 +751,16 @@ fn prop_section_5_5_1_close_payload_structure() -> noprop::TestResult {
             100,
         );
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let close = Frame::close(Some(code), &reason).unwrap();
+        let close =
+            Frame::close(Some(code), &reason).expect("Close フレームの生成に失敗してはならない");
         let encoded = close.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         // ペイロードは 2 + reason.len() バイト
         assert_eq!(decoded.payload.len(), 2 + reason.len());
@@ -761,12 +782,15 @@ fn prop_section_5_5_1_close_payload_structure() -> noprop::TestResult {
 fn prop_section_5_5_1_close_without_code() -> noprop::TestResult {
     pbt::run(|ctx| {
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let close = Frame::close(None, "").unwrap();
+        let close = Frame::close(None, "").expect("Close フレームの生成に失敗してはならない");
         let encoded = close.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert!(decoded.payload.is_empty());
         Ok(())
@@ -780,7 +804,7 @@ fn prop_section_5_5_2_ping_opcode() -> noprop::TestResult {
     pbt::run(|ctx| {
         let data = pbt::sample_byte_vec(ctx, 0, 50);
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let ping = Frame::ping(data).unwrap();
+        let ping = Frame::ping(data).expect("Ping フレームの生成に失敗してはならない");
         let encoded = ping.encode(masking_key);
 
         assert_eq!(encoded[0] & 0x0F, 0x09);
@@ -795,7 +819,7 @@ fn prop_section_5_5_3_pong_opcode() -> noprop::TestResult {
     pbt::run(|ctx| {
         let data = pbt::sample_byte_vec(ctx, 0, 50);
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let pong = Frame::pong(data).unwrap();
+        let pong = Frame::pong(data).expect("Pong フレームの生成に失敗してはならない");
         let encoded = pong.encode(masking_key);
 
         assert_eq!(encoded[0] & 0x0F, 0x0A);
@@ -877,12 +901,15 @@ fn prop_section_5_6_text_payload_is_utf8() -> noprop::TestResult {
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         // UTF-8 として有効
         let parsed = String::from_utf8(decoded.payload.clone());
         assert!(parsed.is_ok());
-        assert_eq!(parsed.unwrap(), text);
+        assert_eq!(parsed.expect("直前の is_ok の確認どおり成功するはず"), text);
         Ok(())
     })?;
     Ok(())
@@ -1123,7 +1150,10 @@ fn prop_frame_roundtrip() -> noprop::TestResult {
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert_eq!(decoded.opcode, Opcode::Binary);
         assert_eq!(decoded.payload, payload);
@@ -1144,10 +1174,14 @@ fn prop_text_frame_roundtrip() -> noprop::TestResult {
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert_eq!(decoded.opcode, Opcode::Text);
-        let decoded_text = String::from_utf8(decoded.payload).unwrap();
+        let decoded_text =
+            String::from_utf8(decoded.payload).expect("UTF-8 への変換に失敗してはならない");
         assert_eq!(decoded_text, text);
         Ok(())
     })?;
@@ -1181,7 +1215,10 @@ fn prop_decoder_arbitrary_chunks() -> noprop::TestResult {
             decoder.feed(&encoded[pos..]);
         }
 
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
         assert_eq!(decoded.payload, payload);
         Ok(())
     })?;
@@ -1204,7 +1241,10 @@ fn prop_multiple_frames_decode() -> noprop::TestResult {
         decoder.feed(&all_encoded);
 
         for expected_payload in &payloads {
-            let decoded = decoder.decode().unwrap().unwrap();
+            let decoded = decoder
+                .decode()
+                .expect("デコードに失敗してはならない")
+                .expect("デコード結果が取得できるはず");
             assert_eq!(&decoded.payload, expected_payload);
         }
         Ok(())
@@ -1226,7 +1266,10 @@ fn prop_empty_payload() -> noprop::TestResult {
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert!(decoded.payload.is_empty());
         Ok(())
@@ -1246,7 +1289,10 @@ fn prop_payload_boundary_125() -> noprop::TestResult {
 
             let mut decoder = FrameDecoder::new();
             decoder.feed(&encoded);
-            let decoded = decoder.decode().unwrap().unwrap();
+            let decoded = decoder
+                .decode()
+                .expect("デコードに失敗してはならない")
+                .expect("デコード結果が取得できるはず");
 
             assert_eq!(decoded.payload.len(), len);
         }
@@ -1267,7 +1313,10 @@ fn prop_payload_boundary_65535() -> noprop::TestResult {
 
             let mut decoder = FrameDecoder::new();
             decoder.feed(&encoded);
-            let decoded = decoder.decode().unwrap().unwrap();
+            let decoded = decoder
+                .decode()
+                .expect("デコードに失敗してはならない")
+                .expect("デコード結果が取得できるはず");
 
             assert_eq!(decoded.payload.len(), len);
         }
@@ -1438,7 +1487,9 @@ fn prop_section_5_2_accept_minimal_encoding() -> noprop::TestResult {
         let result = decoder.decode();
 
         assert!(result.is_ok());
-        let decoded = result.unwrap().unwrap();
+        let decoded = result
+            .expect("直前の is_ok の確認どおり成功するはず")
+            .expect("デコード結果が取得できるはず");
         assert_eq!(decoded.payload.len(), len);
         Ok(())
     })?;

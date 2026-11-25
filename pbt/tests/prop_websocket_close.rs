@@ -347,7 +347,7 @@ fn setup_connected_client_for_close_code() -> (WebSocketClientConnection<FixedRa
     let mut conn = WebSocketClientConnection::new(options, random);
     let now = Timestamp::from_millis(0);
 
-    conn.connect().expect("connect");
+    conn.connect().expect("接続処理に失敗してはならない");
     while conn.poll_output().is_some() {}
 
     let accept = compute_accept(&nonce);
@@ -359,7 +359,7 @@ fn setup_connected_client_for_close_code() -> (WebSocketClientConnection<FixedRa
          \r\n"
     );
     conn.feed_recv_buf(response.as_bytes(), now)
-        .expect("handshake");
+        .expect("ハンドシェイク応答の投入に失敗してはならない");
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
 

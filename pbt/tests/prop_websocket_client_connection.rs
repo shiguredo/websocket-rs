@@ -87,7 +87,7 @@ fn setup_connected_client() -> (WebSocketClientConnection<FixedRandom>, Timestam
     let mut conn = WebSocketClientConnection::new(options, random);
     let now = Timestamp::from_millis(0);
 
-    conn.connect().unwrap();
+    conn.connect().expect("接続処理に失敗してはならない");
 
     // 出力を消費（ハンドシェイクリクエスト）
     while conn.poll_output().is_some() {}
@@ -95,7 +95,8 @@ fn setup_connected_client() -> (WebSocketClientConnection<FixedRandom>, Timestam
     // Accept を計算してレスポンスを送信
     let accept = compute_accept(&nonce);
     let response = create_valid_handshake_response(&accept, None, None);
-    conn.feed_recv_buf(&response, now).unwrap();
+    conn.feed_recv_buf(&response, now)
+        .expect("受信データの投入に失敗してはならない");
 
     // イベントと出力を消費
     while conn.poll_event().is_some() {}
@@ -121,7 +122,7 @@ fn prop_connect_changes_state_to_connecting() -> noprop::TestResult {
         );
         let options = ClientConnectionOptions::new(&host, &path);
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         assert_eq!(conn.state(), ConnectionState::Connecting);
         Ok(())
     })?;
@@ -143,8 +144,8 @@ fn prop_connect_sends_handshake_request() -> noprop::TestResult {
         );
         let options = ClientConnectionOptions::new(&host, &path);
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-        conn.connect().unwrap();
-        let output = conn.poll_output().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
+        let output = conn.poll_output().expect("出力が取得できるはず");
         match output {
             ConnectionOutput::SendData(data) => {
                 let request = String::from_utf8_lossy(&data);
@@ -179,7 +180,7 @@ fn prop_double_connect_fails() -> noprop::TestResult {
         );
         let options = ClientConnectionOptions::new(&host, &path);
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         let result = conn.connect();
         assert!(result.is_err());
         Ok(())
@@ -198,11 +199,12 @@ fn prop_valid_handshake_connects() -> noprop::TestResult {
         let random = FixedRandom::with_nonce(nonce);
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         while conn.poll_output().is_some() {}
         let accept = compute_accept(&nonce);
         let response = create_valid_handshake_response(&accept, None, None);
-        conn.feed_recv_buf(&response, now).unwrap();
+        conn.feed_recv_buf(&response, now)
+            .expect("受信データの投入に失敗してはならない");
         while conn.poll_event().is_some() {}
         while conn.poll_output().is_some() {}
         assert_eq!(conn.state(), ConnectionState::Connected);
@@ -220,10 +222,10 @@ fn prop_handshake_with_protocol() -> noprop::TestResult {
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
         let now = Timestamp::from_millis(0);
 
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
 
         // リクエストから nonce を取得
-        let output = conn.poll_output().unwrap();
+        let output = conn.poll_output().expect("出力が取得できるはず");
         let request_data = match output {
             ConnectionOutput::SendData(data) => data,
             _ => panic!("expected SendData"),
@@ -237,15 +239,20 @@ fn prop_handshake_with_protocol() -> noprop::TestResult {
         let key_line = request_str
             .lines()
             .find(|l| l.starts_with("Sec-WebSocket-Key:"))
-            .unwrap();
-        let key = key_line.split(": ").nth(1).unwrap().trim();
-        let nonce_vec = Base64::decode_vec(key).unwrap();
+            .expect("Sec-WebSocket-Key ヘッダー行が存在するはず");
+        let key = key_line
+            .split(": ")
+            .nth(1)
+            .expect("要素が存在するはず")
+            .trim();
+        let nonce_vec = Base64::decode_vec(key).expect("base64 デコードに失敗してはならない");
         let mut nonce = [0u8; 16];
         nonce.copy_from_slice(&nonce_vec);
 
         let accept = compute_accept(&nonce);
         let response = create_valid_handshake_response(&accept, Some(&protocol), None);
-        conn.feed_recv_buf(&response, now).unwrap();
+        conn.feed_recv_buf(&response, now)
+            .expect("受信データの投入に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Connected);
         assert_eq!(conn.protocol(), Some(protocol.as_str()));
@@ -269,7 +276,7 @@ fn prop_invalid_accept_fails() -> noprop::TestResult {
         let nonce = random.nonce;
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         while conn.poll_output().is_some() {}
         let valid_accept = compute_accept(&nonce);
         // 一致したら拒否しない。文字クラス [a-zA-Z0-9+/=] に含まれる
@@ -314,7 +321,7 @@ fn prop_handshake_unsupported_protocol() -> noprop::TestResult {
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
 
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         while conn.poll_output().is_some() {}
 
         // サーバーがクライアントの要求と異なるプロトコルを返す
@@ -428,8 +435,11 @@ fn prop_ping_auto_pong() -> noprop::TestResult {
         let data = pbt::sample_byte_vec(ctx, 0, 125);
         let (mut conn, now, _) = setup_connected_client();
 
-        let ping = Frame::ping(data.clone()).unwrap().encode_unmasked();
-        conn.feed_recv_buf(&ping, now).unwrap();
+        let ping = Frame::ping(data.clone())
+            .expect("Ping フレームの生成に失敗してはならない")
+            .encode_unmasked();
+        conn.feed_recv_buf(&ping, now)
+            .expect("受信データの投入に失敗してはならない");
 
         // Ping イベントが発生
         let mut ping_found = false;
@@ -464,12 +474,16 @@ fn prop_pong_clears_awaiting() -> noprop::TestResult {
         let (mut conn, now, _) = setup_connected_client();
 
         // まず Ping を送信
-        conn.send_ping(&[]).unwrap();
+        conn.send_ping(&[])
+            .expect("Ping の送信に失敗してはならない");
         while conn.poll_output().is_some() {}
 
         // Pong を受信
-        let pong = Frame::pong(data.clone()).unwrap().encode_unmasked();
-        conn.feed_recv_buf(&pong, now).unwrap();
+        let pong = Frame::pong(data.clone())
+            .expect("Pong フレームの生成に失敗してはならない")
+            .encode_unmasked();
+        conn.feed_recv_buf(&pong, now)
+            .expect("受信データの投入に失敗してはならない");
 
         // Pong イベントが発生
         let mut found = false;
@@ -503,8 +517,11 @@ fn prop_close_frame_received() -> noprop::TestResult {
         let reason = pbt::sample_printable_ascii(ctx, 0, 50);
         let (mut conn, now, _) = setup_connected_client();
 
-        let close = Frame::close(Some(code), &reason).unwrap().encode_unmasked();
-        conn.feed_recv_buf(&close, now).unwrap();
+        let close = Frame::close(Some(code), &reason)
+            .expect("Close フレームの生成に失敗してはならない")
+            .encode_unmasked();
+        conn.feed_recv_buf(&close, now)
+            .expect("受信データの投入に失敗してはならない");
 
         // Close イベントが発生
         let mut found = false;
@@ -537,7 +554,8 @@ fn prop_close_sends_frame() -> noprop::TestResult {
         let reason = pbt::sample_printable_ascii(ctx, 0, 50);
         let (mut conn, _, _) = setup_connected_client();
 
-        conn.close(code, &reason).unwrap();
+        conn.close(code, &reason)
+            .expect("クローズ処理に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Closing);
 
@@ -566,7 +584,7 @@ fn prop_close_rejected_in_connecting_state() -> noprop::TestResult {
         let random = FixedRandom::new();
         let mut conn = WebSocketClientConnection::new(options, random);
 
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         // ハンドシェイクレスポンスを送らず Connecting 状態のまま
         assert_eq!(conn.state(), ConnectionState::Connecting);
 
@@ -605,7 +623,7 @@ fn prop_cannot_send_while_connecting() -> noprop::TestResult {
         let text = pbt::sample_text(ctx, 0, 99);
         let options = ClientConnectionOptions::new("example.com", "/ws");
         let mut conn = WebSocketClientConnection::new(options, FixedRandom::new());
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         assert_eq!(conn.state(), ConnectionState::Connecting);
         let result = conn.send_text(&text);
         assert!(result.is_err());
@@ -635,8 +653,11 @@ fn prop_feed_to_closed_fails() -> noprop::TestResult {
     pbt::run(|ctx| {
         let extra = pbt::sample_byte_vec(ctx, 1, 50);
         let (mut conn, now, _) = setup_connected_client();
-        let close = Frame::close(Some(1000), "").unwrap().encode_unmasked();
-        conn.feed_recv_buf(&close, now).unwrap();
+        let close = Frame::close(Some(1000), "")
+            .expect("Close フレームの生成に失敗してはならない")
+            .encode_unmasked();
+        conn.feed_recv_buf(&close, now)
+            .expect("受信データの投入に失敗してはならない");
         assert_eq!(conn.state(), ConnectionState::Closed);
         let result = conn.feed_recv_buf(&extra, now);
         assert!(result.is_err());
@@ -712,14 +733,16 @@ fn prop_fragmented_text_message() -> noprop::TestResult {
             frame.fin = false;
             frame.encode_unmasked()
         };
-        conn.feed_recv_buf(&first_frame, now).unwrap();
+        conn.feed_recv_buf(&first_frame, now)
+            .expect("受信データの投入に失敗してはならない");
 
         // 中間のフラグメント
         for part in parts.iter().take(parts.len() - 1).skip(1) {
             let mut frame = Frame::new(Opcode::Continuation, part.as_bytes().to_vec());
             frame.fin = false;
             let encoded = frame.encode_unmasked();
-            conn.feed_recv_buf(&encoded, now).unwrap();
+            conn.feed_recv_buf(&encoded, now)
+                .expect("受信データの投入に失敗してはならない");
         }
 
         // 最後のフラグメント
@@ -727,7 +750,8 @@ fn prop_fragmented_text_message() -> noprop::TestResult {
         let mut frame = Frame::new(Opcode::Continuation, parts[last_idx].as_bytes().to_vec());
         frame.fin = true;
         let encoded = frame.encode_unmasked();
-        conn.feed_recv_buf(&encoded, now).unwrap();
+        conn.feed_recv_buf(&encoded, now)
+            .expect("受信データの投入に失敗してはならない");
 
         // 完全なメッセージが受信される
         let mut found = false;
@@ -767,7 +791,8 @@ fn prop_new_message_during_fragment_fails() -> noprop::TestResult {
         let (mut conn, now, _) = setup_connected_client();
         let mut frame1 = Frame::text(&first_part);
         frame1.fin = false;
-        conn.feed_recv_buf(&frame1.encode_unmasked(), now).unwrap();
+        conn.feed_recv_buf(&frame1.encode_unmasked(), now)
+            .expect("エンコードに失敗してはならない");
         let frame2 = Frame::text(&new_message).encode_unmasked();
         let result = conn.feed_recv_buf(&frame2, now);
         assert!(result.is_err());
@@ -790,7 +815,8 @@ fn prop_chunked_frame_reception() -> noprop::TestResult {
 
         // チャンクに分割して送信
         for chunk in frame.chunks(chunk_size) {
-            conn.feed_recv_buf(chunk, now).unwrap();
+            conn.feed_recv_buf(chunk, now)
+                .expect("受信データの投入に失敗してはならない");
         }
 
         // メッセージが正しく受信される
@@ -820,12 +846,13 @@ fn setup_connected_client_with_deflate()
     let mut conn = WebSocketClientConnection::new(options, random);
     let now = Timestamp::from_millis(0);
 
-    conn.connect().unwrap();
+    conn.connect().expect("接続処理に失敗してはならない");
     while conn.poll_output().is_some() {}
 
     let accept = compute_accept(&nonce);
     let response = create_valid_handshake_response(&accept, None, Some("permessage-deflate"));
-    conn.feed_recv_buf(&response, now).unwrap();
+    conn.feed_recv_buf(&response, now)
+        .expect("受信データの投入に失敗してはならない");
 
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
@@ -840,9 +867,10 @@ fn prop_deflate_send_compressed_text() -> noprop::TestResult {
         let text = pbt::sample_printable_ascii(ctx, 65, 200);
         let (mut conn, _, _) = setup_connected_client_with_deflate();
 
-        conn.send_text(&text).unwrap();
+        conn.send_text(&text)
+            .expect("テキストメッセージの送信に失敗してはならない");
 
-        let output = conn.poll_output().unwrap();
+        let output = conn.poll_output().expect("出力が取得できるはず");
         match output {
             ConnectionOutput::SendData(data) => {
                 // RSV1 が設定されていること（圧縮フレーム）
@@ -870,7 +898,9 @@ fn prop_deflate_receive_compressed_text() -> noprop::TestResult {
         // サーバー側コーデックでテキストを圧縮
         let mut server_deflate =
             shiguredo_websocket::PerMessageDeflate::new_server(PerMessageDeflateConfig::new());
-        let compressed = server_deflate.compress(text.as_bytes()).unwrap();
+        let compressed = server_deflate
+            .compress(text.as_bytes())
+            .expect("圧縮に失敗してはならない");
 
         // 圧縮フレームを構築: FIN=1, RSV1=1, opcode=text(1)
         let mut frame = vec![0xC1]; // FIN + RSV1 + text
@@ -882,7 +912,8 @@ fn prop_deflate_receive_compressed_text() -> noprop::TestResult {
         }
         frame.extend_from_slice(&compressed);
 
-        conn.feed_recv_buf(&frame, now).unwrap();
+        conn.feed_recv_buf(&frame, now)
+            .expect("受信データの投入に失敗してはならない");
 
         let mut found = false;
         while let Some(event) = conn.poll_event() {
@@ -905,9 +936,10 @@ fn prop_deflate_small_message_not_compressed() -> noprop::TestResult {
         let text = pbt::sample_printable_ascii(ctx, 1, 10);
         let (mut conn, _, _) = setup_connected_client_with_deflate();
 
-        conn.send_text(&text).unwrap();
+        conn.send_text(&text)
+            .expect("テキストメッセージの送信に失敗してはならない");
 
-        let output = conn.poll_output().unwrap();
+        let output = conn.poll_output().expect("出力が取得できるはず");
         match output {
             ConnectionOutput::SendData(data) => {
                 // RSV1 が設定されていないこと（非圧縮）
@@ -938,12 +970,13 @@ fn prop_deflate_zip_bomb_protection() -> noprop::TestResult {
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
 
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         while conn.poll_output().is_some() {}
 
         let accept = compute_accept(&nonce);
         let response = create_valid_handshake_response(&accept, None, Some("permessage-deflate"));
-        conn.feed_recv_buf(&response, now).unwrap();
+        conn.feed_recv_buf(&response, now)
+            .expect("受信データの投入に失敗してはならない");
         while conn.poll_event().is_some() {}
         while conn.poll_output().is_some() {}
 
@@ -951,7 +984,9 @@ fn prop_deflate_zip_bomb_protection() -> noprop::TestResult {
         let mut server_deflate =
             shiguredo_websocket::PerMessageDeflate::new_server(PerMessageDeflateConfig::new());
         let large_data = "A".repeat(max_decompressed * repeat_count);
-        let compressed = server_deflate.compress(large_data.as_bytes()).unwrap();
+        let compressed = server_deflate
+            .compress(large_data.as_bytes())
+            .expect("圧縮に失敗してはならない");
 
         let mut frame = vec![0xC1];
         if compressed.len() >= 126 {
@@ -1010,7 +1045,7 @@ fn prop_reject_server_max_window_bits_exceeding_offer() -> noprop::TestResult {
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
 
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         while conn.poll_output().is_some() {}
 
         let accept = compute_accept(&nonce);
@@ -1046,7 +1081,7 @@ fn prop_accept_server_max_window_bits_within_offer() -> noprop::TestResult {
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
 
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         while conn.poll_output().is_some() {}
 
         let accept = compute_accept(&nonce);
@@ -1080,7 +1115,7 @@ fn prop_reject_client_max_window_bits_exceeding_offer() -> noprop::TestResult {
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
 
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         while conn.poll_output().is_some() {}
 
         let accept = compute_accept(&nonce);
@@ -1114,7 +1149,7 @@ fn prop_reject_client_max_window_bits_less_than_15() -> noprop::TestResult {
         let mut conn = WebSocketClientConnection::new(options, random);
         let now = Timestamp::from_millis(0);
 
-        conn.connect().unwrap();
+        conn.connect().expect("接続処理に失敗してはならない");
         while conn.poll_output().is_some() {}
 
         let accept = compute_accept(&nonce);
@@ -1175,12 +1210,13 @@ fn setup_connected_client_with_max_message_size(
     let mut conn = WebSocketClientConnection::new(options, random);
     let now = Timestamp::from_millis(0);
 
-    conn.connect().expect("connect");
+    conn.connect().expect("接続処理に失敗してはならない");
     while conn.poll_output().is_some() {}
 
     let accept = compute_accept(&nonce);
     let response = create_valid_handshake_response(&accept, None, None);
-    conn.feed_recv_buf(&response, now).expect("handshake");
+    conn.feed_recv_buf(&response, now)
+        .expect("ハンドシェイク応答の投入に失敗してはならない");
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
 

@@ -14,10 +14,10 @@ use tokio::net::TcpListener;
 pub async fn spawn() -> u16 {
     let listener = TcpListener::bind("0.0.0.0:0")
         .await
-        .expect("failed to bind echo server");
+        .expect("echo サーバーの bind に失敗してはならない");
     let port = listener
         .local_addr()
-        .expect("failed to get local addr")
+        .expect("ローカルアドレスの取得に失敗してはならない")
         .port();
 
     tokio::spawn(async move {

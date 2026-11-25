@@ -15,7 +15,10 @@ fn prop_text_frame_roundtrip() -> noprop::TestResult {
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert!(decoded.fin);
         assert_eq!(decoded.opcode, Opcode::Text);
@@ -36,7 +39,10 @@ fn prop_binary_frame_roundtrip() -> noprop::TestResult {
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert!(decoded.fin);
         assert_eq!(decoded.opcode, Opcode::Binary);
@@ -53,12 +59,15 @@ fn prop_ping_frame_roundtrip() -> noprop::TestResult {
         // 0..125 なので 125 自体は含まない。
         let data = pbt::sample_byte_vec(ctx, 0, 125);
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let frame = Frame::ping(data.clone()).unwrap();
+        let frame = Frame::ping(data.clone()).expect("Ping フレームの生成に失敗してはならない");
         let encoded = frame.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert!(decoded.fin);
         assert_eq!(decoded.opcode, Opcode::Ping);
@@ -74,12 +83,15 @@ fn prop_pong_frame_roundtrip() -> noprop::TestResult {
     pbt::run(|ctx| {
         let data = pbt::sample_byte_vec(ctx, 0, 125);
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let frame = Frame::pong(data.clone()).unwrap();
+        let frame = Frame::pong(data.clone()).expect("Pong フレームの生成に失敗してはならない");
         let encoded = frame.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert!(decoded.fin);
         assert_eq!(decoded.opcode, Opcode::Pong);
@@ -100,12 +112,16 @@ fn prop_close_frame_roundtrip() -> noprop::TestResult {
         // ASCII のみで 50 文字以下
         let reason = pbt::sample_alphabet(ctx, REASON_ALPHABET, 0, 50);
         let masking_key = noprop::sample_bytes::<4>(ctx);
-        let frame = Frame::close(Some(code), &reason).unwrap();
+        let frame =
+            Frame::close(Some(code), &reason).expect("Close フレームの生成に失敗してはならない");
         let encoded = frame.encode(masking_key);
 
         let mut decoder = FrameDecoder::new();
         decoder.feed(&encoded);
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
 
         assert!(decoded.fin);
         assert_eq!(decoded.opcode, Opcode::Close);
@@ -139,7 +155,10 @@ fn prop_partial_decode() -> noprop::TestResult {
             decoder.feed(chunk);
         }
 
-        let decoded = decoder.decode().unwrap().unwrap();
+        let decoded = decoder
+            .decode()
+            .expect("デコードに失敗してはならない")
+            .expect("デコード結果が取得できるはず");
         assert_eq!(decoded.payload, data);
         Ok(())
     })?;

@@ -180,7 +180,8 @@ fn prop_permessage_deflate_roundtrip() -> noprop::TestResult {
 
         let ext = config.to_extension();
         // サーバーリクエストとしてパース（クライアントからの要求）
-        let parsed = PerMessageDeflateConfig::from_extension_for_server_request(&ext).unwrap();
+        let parsed = PerMessageDeflateConfig::from_extension_for_server_request(&ext)
+            .expect("拡張設定のパースに失敗してはならない");
 
         // ラウンドトリップ後は設定が保持される
         assert_eq!(parsed.server_no_context_takeover, server_no_takeover);
@@ -215,8 +216,10 @@ fn prop_nonce_format() -> noprop::TestResult {
         let nonce = noprop::sample_bytes::<16>(ctx);
 
         let request = HandshakeRequest::new("/", "example.com");
-        let encoded = request.build(nonce).unwrap();
-        let s = String::from_utf8(encoded).unwrap();
+        let encoded = request
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s = String::from_utf8(encoded).expect("UTF-8 への変換に失敗してはならない");
 
         // 必須ヘッダーが含まれる
         assert!(s.contains("GET / HTTP/1.1"));
@@ -246,8 +249,10 @@ fn prop_handshake_request_builder() -> noprop::TestResult {
         let nonce = noprop::sample_bytes::<16>(ctx);
 
         let request = HandshakeRequest::new(&path, &host);
-        let encoded = request.build(nonce).unwrap();
-        let s = String::from_utf8(encoded).unwrap();
+        let encoded = request
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s = String::from_utf8(encoded).expect("UTF-8 への変換に失敗してはならない");
 
         let expected_get = format!("GET {} HTTP/1.1", path);
         let expected_host = format!("Host: {}", host);
@@ -268,8 +273,10 @@ fn prop_handshake_request_with_origin() -> noprop::TestResult {
         let nonce = noprop::sample_bytes::<16>(ctx);
 
         let request = HandshakeRequest::new("/", "example.com").origin(&origin);
-        let encoded = request.build(nonce).unwrap();
-        let s = String::from_utf8(encoded).unwrap();
+        let encoded = request
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s = String::from_utf8(encoded).expect("UTF-8 への変換に失敗してはならない");
 
         let expected_origin = format!("Origin: {}", origin);
         assert!(s.contains(&expected_origin));
@@ -286,8 +293,10 @@ fn prop_handshake_request_with_protocol() -> noprop::TestResult {
         let nonce = noprop::sample_bytes::<16>(ctx);
 
         let request = HandshakeRequest::new("/", "example.com").protocol(&protocol);
-        let encoded = request.build(nonce).unwrap();
-        let s = String::from_utf8(encoded).unwrap();
+        let encoded = request
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s = String::from_utf8(encoded).expect("UTF-8 への変換に失敗してはならない");
 
         let expected_protocol = format!("Sec-WebSocket-Protocol: {}", protocol);
         assert!(s.contains(&expected_protocol));
@@ -307,8 +316,10 @@ fn prop_handshake_request_with_multiple_protocols() -> noprop::TestResult {
         for p in &protocols {
             request = request.protocol(p);
         }
-        let encoded = request.build(nonce).unwrap();
-        let s = String::from_utf8(encoded).unwrap();
+        let encoded = request
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s = String::from_utf8(encoded).expect("UTF-8 への変換に失敗してはならない");
 
         let expected_protocols = format!("Sec-WebSocket-Protocol: {}", protocols.join(", "));
         assert!(s.contains(&expected_protocols));
@@ -325,8 +336,10 @@ fn prop_handshake_request_with_extension() -> noprop::TestResult {
         let nonce = noprop::sample_bytes::<16>(ctx);
 
         let request = HandshakeRequest::new("/", "example.com").extension(&extension);
-        let encoded = request.build(nonce).unwrap();
-        let s = String::from_utf8(encoded).unwrap();
+        let encoded = request
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s = String::from_utf8(encoded).expect("UTF-8 への変換に失敗してはならない");
 
         let expected_extension = format!("Sec-WebSocket-Extensions: {}", extension);
         assert!(s.contains(&expected_extension));
@@ -344,8 +357,10 @@ fn prop_handshake_request_with_header() -> noprop::TestResult {
         let nonce = noprop::sample_bytes::<16>(ctx);
 
         let request = HandshakeRequest::new("/", "example.com").header(&header_name, &header_value);
-        let encoded = request.build(nonce).unwrap();
-        let s = String::from_utf8(encoded).unwrap();
+        let encoded = request
+            .build(nonce)
+            .expect("ハンドシェイクリクエストの構築に失敗してはならない");
+        let s = String::from_utf8(encoded).expect("UTF-8 への変換に失敗してはならない");
 
         let expected_header = format!("{}: {}", header_name, header_value);
         assert!(s.contains(&expected_header));
@@ -418,7 +433,9 @@ fn prop_valid_handshake_request_validation() -> noprop::TestResult {
         let result = validator.validate();
 
         assert!(result.is_ok());
-        let req = result.unwrap().unwrap();
+        let req = result
+            .expect("直前の is_ok の確認どおり成功するはず")
+            .expect("検証済みのリクエストが取得できるはず");
         assert_eq!(req.path, path);
         assert_eq!(req.host, host);
         Ok(())
@@ -633,7 +650,9 @@ fn prop_valid_handshake_response_validation() -> noprop::TestResult {
         let result = validator.validate();
 
         assert!(result.is_ok());
-        let resp = result.unwrap().unwrap();
+        let resp = result
+            .expect("直前の is_ok の確認どおり成功するはず")
+            .expect("検証済みのレスポンスが取得できるはず");
         assert!(resp.protocol.is_none());
         assert!(resp.extensions.is_empty());
         Ok(())
@@ -664,7 +683,9 @@ fn prop_handshake_response_with_protocol() -> noprop::TestResult {
         let result = validator.validate();
 
         assert!(result.is_ok());
-        let resp = result.unwrap().unwrap();
+        let resp = result
+            .expect("直前の is_ok の確認どおり成功するはず")
+            .expect("検証済みのレスポンスが取得できるはず");
         assert_eq!(resp.protocol, Some(protocol));
         Ok(())
     })?;
@@ -1033,7 +1054,7 @@ fn prop_parse_strict_accepts_valid_quoted_token() -> noprop::TestResult {
         let input = format!(r#"ext; param="{}""#, token);
         let result = Extension::parse_strict(&input);
         assert!(result.is_ok());
-        let exts = result.unwrap();
+        let exts = result.expect("直前の is_ok の確認どおり成功するはず");
         assert_eq!(exts.len(), 1);
         assert_eq!(&exts[0].params[0].value, &Some(token));
         Ok(())
@@ -1050,7 +1071,7 @@ fn prop_parse_strict_preserves_unquoted_token() -> noprop::TestResult {
         let input = format!("ext; param={}", token);
         let result = Extension::parse_strict(&input);
         assert!(result.is_ok());
-        let exts = result.unwrap();
+        let exts = result.expect("直前の is_ok の確認どおり成功するはず");
         assert_eq!(exts.len(), 1);
         assert_eq!(&exts[0].params[0].value, &Some(token));
         Ok(())
@@ -1310,7 +1331,9 @@ fn prop_valid_protocol_token_accepted() -> noprop::TestResult {
         let result = validator.validate();
 
         assert!(result.is_ok());
-        let req = result.unwrap().unwrap();
+        let req = result
+            .expect("直前の is_ok の確認どおり成功するはず")
+            .expect("検証済みのリクエストが取得できるはず");
         assert_eq!(req.protocols, vec![protocol]);
         Ok(())
     })?;
@@ -1343,7 +1366,9 @@ fn prop_unique_multiple_protocols_accepted() -> noprop::TestResult {
         let result = validator.validate();
 
         assert!(result.is_ok());
-        let req = result.unwrap().unwrap();
+        let req = result
+            .expect("直前の is_ok の確認どおり成功するはず")
+            .expect("検証済みのリクエストが取得できるはず");
         assert_eq!(req.protocols, vec![p1, p2]);
         Ok(())
     })?;
@@ -1540,7 +1565,10 @@ fn prop_parse_strict_accepts_valid_extension() -> noprop::TestResult {
 
         let result = Extension::parse_strict(&name);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 1);
+        assert_eq!(
+            result.expect("直前の is_ok の確認どおり成功するはず").len(),
+            1
+        );
         Ok(())
     })?;
     Ok(())
@@ -1611,7 +1639,9 @@ fn prop_response_multiple_extension_headers_accepted() -> noprop::TestResult {
             result.is_ok(),
             "複数行の Sec-WebSocket-Extensions は受理されるべき"
         );
-        let resp = result.unwrap().unwrap();
+        let resp = result
+            .expect("直前の is_ok の確認どおり成功するはず")
+            .expect("バリデーション結果が取得できるはず");
         assert!(
             resp.extensions.contains(&ext1) || resp.extensions.contains(&ext2),
             "マージ後の extensions に拡張が含まれていない"
@@ -1673,7 +1703,9 @@ fn prop_response_first_empty_second_valid_extension() -> noprop::TestResult {
         let result = validator.validate();
 
         assert!(result.is_ok(), "1 行目が空でも受理されるべき");
-        let resp = result.unwrap().unwrap();
+        let resp = result
+            .expect("直前の is_ok の確認どおり成功するはず")
+            .expect("検証済みのレスポンスが取得できるはず");
         assert!(
             resp.extensions.contains(&ext),
             "マージ後の extensions に有効な拡張が含まれていない"

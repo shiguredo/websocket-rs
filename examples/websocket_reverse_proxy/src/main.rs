@@ -49,7 +49,7 @@ struct ProxyOptions {
 fn now() -> Timestamp {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock must be after the UNIX epoch")
         .as_millis() as u64;
     Timestamp::from_millis(millis)
 }

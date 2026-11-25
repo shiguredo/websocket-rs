@@ -91,15 +91,21 @@ fn create_masked_binary_frame(data: &[u8], mask_key: [u8; 4]) -> Vec<u8> {
 }
 
 fn create_masked_ping_frame(data: &[u8], mask_key: [u8; 4]) -> Vec<u8> {
-    Frame::ping(data.to_vec()).unwrap().encode(mask_key)
+    Frame::ping(data.to_vec())
+        .expect("Ping フレームの生成に失敗してはならない")
+        .encode(mask_key)
 }
 
 fn create_masked_pong_frame(data: &[u8], mask_key: [u8; 4]) -> Vec<u8> {
-    Frame::pong(data.to_vec()).unwrap().encode(mask_key)
+    Frame::pong(data.to_vec())
+        .expect("Pong フレームの生成に失敗してはならない")
+        .encode(mask_key)
 }
 
 fn create_masked_close_frame(code: Option<u16>, reason: &str, mask_key: [u8; 4]) -> Vec<u8> {
-    Frame::close(code, reason).unwrap().encode(mask_key)
+    Frame::close(code, reason)
+        .expect("Close フレームの生成に失敗してはならない")
+        .encode(mask_key)
 }
 
 // ==== ハンドシェイク処理のテスト ====
@@ -112,14 +118,16 @@ fn prop_valid_handshake_accepted() -> noprop::TestResult {
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
-        conn.feed_recv_buf(&request).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
 
         // ハンドシェイクリクエストが利用可能になるはず
         assert!(conn.handshake_request().is_some());
         assert_eq!(conn.state(), ConnectionState::Connecting);
 
         // accept_handshake_auto で受諾
-        conn.accept_handshake_auto().unwrap();
+        conn.accept_handshake_auto()
+            .expect("ハンドシェイクの受諾に失敗してはならない");
         assert_eq!(conn.state(), ConnectionState::Connected);
         Ok(())
     })?;
@@ -136,8 +144,10 @@ fn prop_handshake_with_protocol() -> noprop::TestResult {
             WebSocketServerConnection::new(ServerConnectionOptions::new().protocol(&protocol));
         let request = create_valid_handshake_request(&key, Some(&protocol), None);
 
-        conn.feed_recv_buf(&request).unwrap();
-        conn.accept_handshake_auto().unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
+        conn.accept_handshake_auto()
+            .expect("ハンドシェイクの受諾に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Connected);
         assert_eq!(conn.protocol(), Some(protocol.as_str()));
@@ -158,8 +168,10 @@ fn prop_handshake_unsupported_protocol() -> noprop::TestResult {
         );
         let request = create_valid_handshake_request(&key, Some(&client_protocol), None);
 
-        conn.feed_recv_buf(&request).unwrap();
-        conn.accept_handshake_auto().unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
+        conn.accept_handshake_auto()
+            .expect("ハンドシェイクの受諾に失敗してはならない");
 
         // プロトコルが一致しないので None
         assert!(conn.protocol().is_none());
@@ -176,8 +188,10 @@ fn prop_handshake_reject() -> noprop::TestResult {
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
-        conn.feed_recv_buf(&request).unwrap();
-        conn.reject_handshake(403, "Forbidden", &[]).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
+        conn.reject_handshake(403, "Forbidden", &[])
+            .expect("ハンドシェイクの拒否に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Closed);
         Ok(())
@@ -197,13 +211,14 @@ fn prop_handshake_reject_with_headers() -> noprop::TestResult {
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
-        conn.feed_recv_buf(&request).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
         conn.reject_handshake(
             426,
             "Upgrade Required",
             &[(header_name.as_str(), header_value.as_str())],
         )
-        .unwrap();
+        .expect("文字列が取得できるはず");
 
         assert_eq!(conn.state(), ConnectionState::Closed);
 
@@ -234,8 +249,10 @@ fn setup_connected_server() -> WebSocketServerConnection {
     let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
     let key: [u8; 16] = [0; 16];
     let request = create_valid_handshake_request(&key, None, None);
-    conn.feed_recv_buf(&request).unwrap();
-    conn.accept_handshake_auto().unwrap();
+    conn.feed_recv_buf(&request)
+        .expect("受信データの投入に失敗してはならない");
+    conn.accept_handshake_auto()
+        .expect("ハンドシェイクの受諾に失敗してはならない");
 
     // イベントと出力を消費
     while conn.poll_event().is_some() {}
@@ -365,7 +382,8 @@ fn prop_ping_auto_pong() -> noprop::TestResult {
         let mut conn = setup_connected_server();
 
         let ping = create_masked_ping_frame(&data, mask_key);
-        conn.feed_recv_buf(&ping).unwrap();
+        conn.feed_recv_buf(&ping)
+            .expect("受信データの投入に失敗してはならない");
 
         // Ping イベントが発生
         let mut ping_found = false;
@@ -401,12 +419,14 @@ fn prop_pong_clears_awaiting() -> noprop::TestResult {
         let mut conn = setup_connected_server();
 
         // まず Ping を送信
-        conn.send_ping(&[]).unwrap();
+        conn.send_ping(&[])
+            .expect("Ping の送信に失敗してはならない");
         while conn.poll_output().is_some() {}
 
         // Pong を受信
         let pong = create_masked_pong_frame(&data, mask_key);
-        conn.feed_recv_buf(&pong).unwrap();
+        conn.feed_recv_buf(&pong)
+            .expect("受信データの投入に失敗してはならない");
 
         // Pong イベントが発生
         let mut found = false;
@@ -434,7 +454,8 @@ fn prop_close_frame_received() -> noprop::TestResult {
         let mut conn = setup_connected_server();
 
         let close = create_masked_close_frame(Some(code), &reason, mask_key);
-        conn.feed_recv_buf(&close).unwrap();
+        conn.feed_recv_buf(&close)
+            .expect("受信データの投入に失敗してはならない");
 
         // Close イベントが発生
         let mut found = false;
@@ -467,7 +488,8 @@ fn prop_close_sends_frame() -> noprop::TestResult {
         let reason = pbt::sample_printable_ascii(ctx, 0, 50);
         let mut conn = setup_connected_server();
 
-        conn.close(code, &reason).unwrap();
+        conn.close(code, &reason)
+            .expect("クローズ処理に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Closing);
 
@@ -492,7 +514,8 @@ fn prop_close_without_code() -> noprop::TestResult {
         let mut conn = setup_connected_server();
 
         let close = create_masked_close_frame(None, "", mask_key);
-        conn.feed_recv_buf(&close).unwrap();
+        conn.feed_recv_buf(&close)
+            .expect("受信データの投入に失敗してはならない");
 
         let mut found = false;
         while let Some(event) = conn.poll_event() {
@@ -533,7 +556,8 @@ fn prop_cannot_send_while_connecting() -> noprop::TestResult {
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
-        conn.feed_recv_buf(&request).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
         assert_eq!(conn.state(), ConnectionState::Connecting);
 
         let result = conn.send_text(&text);
@@ -553,7 +577,8 @@ fn prop_feed_to_closed_connection_fails() -> noprop::TestResult {
 
         // Close フレームを送受信
         let close = create_masked_close_frame(Some(1000), "", mask_key);
-        conn.feed_recv_buf(&close).unwrap();
+        conn.feed_recv_buf(&close)
+            .expect("受信データの投入に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Closed);
 
@@ -664,7 +689,8 @@ fn prop_fragmented_text_message() -> noprop::TestResult {
             frame.fin = false;
             frame.encode(mask_keys[0])
         };
-        conn.feed_recv_buf(&first_frame).unwrap();
+        conn.feed_recv_buf(&first_frame)
+            .expect("受信データの投入に失敗してはならない");
 
         // 中間のフラグメント（opcode=Continuation, fin=false）
         for (i, part) in parts.iter().enumerate().take(parts.len() - 1).skip(1) {
@@ -675,7 +701,8 @@ fn prop_fragmented_text_message() -> noprop::TestResult {
             );
             frame.fin = false;
             let encoded = frame.encode(mask_keys[mask_idx]);
-            conn.feed_recv_buf(&encoded).unwrap();
+            conn.feed_recv_buf(&encoded)
+                .expect("受信データの投入に失敗してはならない");
         }
 
         // 最後のフラグメント（opcode=Continuation, fin=true）
@@ -687,7 +714,8 @@ fn prop_fragmented_text_message() -> noprop::TestResult {
         );
         frame.fin = true;
         let encoded = frame.encode(mask_keys[mask_idx]);
-        conn.feed_recv_buf(&encoded).unwrap();
+        conn.feed_recv_buf(&encoded)
+            .expect("受信データの投入に失敗してはならない");
 
         // 完全なメッセージが受信される
         let mut found = false;
@@ -735,7 +763,8 @@ fn prop_new_message_during_fragment_fails() -> noprop::TestResult {
         // フラグメント開始（fin=false）
         let mut frame1 = Frame::text(&first_part);
         frame1.fin = false;
-        conn.feed_recv_buf(&frame1.encode(mask_key1)).unwrap();
+        conn.feed_recv_buf(&frame1.encode(mask_key1))
+            .expect("エンコードに失敗してはならない");
 
         // 完了前に新しいメッセージ開始
         let frame2 = Frame::text(&new_message).encode(mask_key2);
@@ -762,7 +791,8 @@ fn prop_chunked_frame_reception() -> noprop::TestResult {
 
         // チャンクに分割して送信
         for chunk in frame.chunks(chunk_size) {
-            conn.feed_recv_buf(chunk).unwrap();
+            conn.feed_recv_buf(chunk)
+                .expect("受信データの投入に失敗してはならない");
         }
 
         // メッセージが正しく受信される
@@ -794,8 +824,10 @@ fn prop_deflate_negotiation() -> noprop::TestResult {
             WebSocketServerConnection::new(ServerConnectionOptions::new().deflate(config));
         let request = create_valid_handshake_request(&key, None, Some("permessage-deflate"));
 
-        conn.feed_recv_buf(&request).unwrap();
-        conn.accept_handshake_auto().unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
+        conn.accept_handshake_auto()
+            .expect("ハンドシェイクの受諾に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Connected);
         // 拡張がネゴシエートされている
@@ -816,8 +848,10 @@ fn prop_deflate_not_negotiated_without_client_request() -> noprop::TestResult {
         // 拡張なしのリクエスト
         let request = create_valid_handshake_request(&key, None, None);
 
-        conn.feed_recv_buf(&request).unwrap();
-        conn.accept_handshake_auto().unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
+        conn.accept_handshake_auto()
+            .expect("ハンドシェイクの受諾に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Connected);
         // 拡張はネゴシエートされない
@@ -841,8 +875,10 @@ fn prop_additional_headers_in_response() -> noprop::TestResult {
         );
         let request = create_valid_handshake_request(&key, None, None);
 
-        conn.feed_recv_buf(&request).unwrap();
-        conn.accept_handshake_auto().unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
+        conn.accept_handshake_auto()
+            .expect("ハンドシェイクの受諾に失敗してはならない");
 
         // レスポンスを確認
         let mut found_response = false;
@@ -872,7 +908,8 @@ fn prop_accept_handshake_unsupported_protocol_error() -> noprop::TestResult {
         // クライアントは "chat" を要求
         let request = create_valid_handshake_request(&key, Some("chat"), None);
 
-        conn.feed_recv_buf(&request).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
 
         // サーバーは "other" を返そうとする（クライアントが要求していない）
         let response = ServerHandshakeResponse::new().protocol("other");
@@ -893,7 +930,8 @@ fn prop_accept_handshake_unsupported_extension_error() -> noprop::TestResult {
         // クライアントは拡張を要求しない
         let request = create_valid_handshake_request(&key, None, None);
 
-        conn.feed_recv_buf(&request).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
 
         // サーバーは拡張を返そうとする（クライアントが要求していない）
         let response = ServerHandshakeResponse::new().extension("permessage-deflate");
@@ -922,8 +960,10 @@ fn prop_pending_frame_data_after_handshake() -> noprop::TestResult {
         let mut combined = request;
         combined.extend_from_slice(&frame);
 
-        conn.feed_recv_buf(&combined).unwrap();
-        conn.accept_handshake_auto().unwrap();
+        conn.feed_recv_buf(&combined)
+            .expect("受信データの投入に失敗してはならない");
+        conn.accept_handshake_auto()
+            .expect("ハンドシェイクの受諾に失敗してはならない");
 
         // イベントを確認
         let mut found = false;
@@ -951,14 +991,17 @@ fn prop_additional_data_during_handshake() -> noprop::TestResult {
         let request = create_valid_handshake_request(&key, None, None);
 
         // ハンドシェイクリクエストを送る
-        conn.feed_recv_buf(&request).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
 
         // ハンドシェイク完了前に追加データを送る
         let frame = Frame::text(&text).encode(mask_key);
-        conn.feed_recv_buf(&frame).unwrap();
+        conn.feed_recv_buf(&frame)
+            .expect("受信データの投入に失敗してはならない");
 
         // ハンドシェイクを完了
-        conn.accept_handshake_auto().unwrap();
+        conn.accept_handshake_auto()
+            .expect("ハンドシェイクの受諾に失敗してはならない");
 
         // 追加データが処理される
         let mut found = false;
@@ -987,7 +1030,8 @@ fn prop_close_on_closed_connection_fails() -> noprop::TestResult {
 
         // Close フレームを受信して Closed 状態にする
         let close = create_masked_close_frame(Some(close_code), "", mask_key);
-        conn.feed_recv_buf(&close).unwrap();
+        conn.feed_recv_buf(&close)
+            .expect("受信データの投入に失敗してはならない");
 
         assert_eq!(conn.state(), ConnectionState::Closed);
 
@@ -1011,7 +1055,8 @@ fn prop_close_rejected_in_connecting_state() -> noprop::TestResult {
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
 
-        conn.feed_recv_buf(&request).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
         // accept() を呼ばず Connecting 状態のまま
         assert_eq!(conn.state(), ConnectionState::Connecting);
 
@@ -1085,7 +1130,8 @@ fn prop_accept_handshake_rejects_reserved_header() -> noprop::TestResult {
 
         let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
         let request = create_valid_handshake_request(&key, None, None);
-        conn.feed_recv_buf(&request).unwrap();
+        conn.feed_recv_buf(&request)
+            .expect("受信データの投入に失敗してはならない");
 
         let response = ServerHandshakeResponse::new().header(reserved, &value);
         let result = conn.accept_handshake(response);
@@ -1111,7 +1157,8 @@ fn prop_close_sent_then_received() -> noprop::TestResult {
         let mut conn = setup_connected_server();
 
         // サーバーが先に Close を送信
-        conn.close(CloseCode::NORMAL, &reason).unwrap();
+        conn.close(CloseCode::NORMAL, &reason)
+            .expect("クローズ処理に失敗してはならない");
         while conn.poll_output().is_some() {}
         while conn.poll_event().is_some() {}
 
@@ -1119,7 +1166,8 @@ fn prop_close_sent_then_received() -> noprop::TestResult {
 
         // クライアントから Close を受信
         let close = create_masked_close_frame(Some(1000), "", mask_key);
-        conn.feed_recv_buf(&close).unwrap();
+        conn.feed_recv_buf(&close)
+            .expect("受信データの投入に失敗してはならない");
 
         // 状態が Closed に変わる（close_sent が true なので返信は送られない）
         assert_eq!(conn.state(), ConnectionState::Closed);
@@ -1336,7 +1384,8 @@ fn setup_pending_request_server() -> WebSocketServerConnection {
     let mut conn = WebSocketServerConnection::new(ServerConnectionOptions::new());
     let key: [u8; 16] = [0; 16];
     let request = create_valid_handshake_request(&key, None, None);
-    conn.feed_recv_buf(&request).expect("handshake");
+    conn.feed_recv_buf(&request)
+        .expect("ハンドシェイク応答の投入に失敗してはならない");
     // accept_handshake を呼ばず Connecting 状態のまま追加データを待つ
     conn
 }
@@ -1348,8 +1397,10 @@ fn setup_connected_server_with_deflate() -> WebSocketServerConnection {
     let mut conn = WebSocketServerConnection::new(options);
     let key: [u8; 16] = [0; 16];
     let request = create_valid_handshake_request(&key, None, Some("permessage-deflate"));
-    conn.feed_recv_buf(&request).expect("handshake");
-    conn.accept_handshake_auto().expect("accept handshake");
+    conn.feed_recv_buf(&request)
+        .expect("ハンドシェイク応答の投入に失敗してはならない");
+    conn.accept_handshake_auto()
+        .expect("ハンドシェイクの受諾に失敗してはならない");
     while conn.poll_event().is_some() {}
     while conn.poll_output().is_some() {}
     conn
@@ -1447,7 +1498,7 @@ fn prop_rsv1_on_continuation_frame_rejected_with_deflate() -> noprop::TestResult
             mask_key[3],
         ];
         conn.feed_recv_buf(&text_frame_first)
-            .expect("first fragment");
+            .expect("最初のフラグメントは受理されるべき");
 
         // Continuation + RSV1=1 を送る (違反)
         let continuation_with_rsv1 = vec![
