@@ -2,12 +2,13 @@
 
 - Priority: Medium
 - Created: 2026-11-27
+- Polished: 2026-11-27
 - Model: deepseek-v4.1-flash:1017
 - Branch: feature/fix-empty-host-header
 
 ## 目的
 
-WebSocket のオープニングハンドシェイクで、Host ヘッダーの値が空または空白だけでも受理される。RFC 6455 Section 4.2.1 item 4 は「サーバーの authority を含む Host ヘッダー」を要求しており、空の値は authority ではない。RFC 9112 Section 3.2 も、不正な Host を持つリクエストに 400 を返すことをサーバーに要求する。
+WebSocket のオープニングハンドシェイクで、Host ヘッダーの値が空または空白だけでも受理される。RFC 6455 Section 4.2.1 item 2 は「サーバーの authority を含む Host ヘッダー」を要求しており、空の値は authority ではない。同節の冒頭も、この要件に反するハンドシェイクに対して 400 Bad Request などの HTTP エラー応答を返すことをサーバーに要求している。
 
 ## 優先度根拠
 
@@ -21,11 +22,11 @@ Medium。`ServerHandshakeRequest.host` が空文字列のままアプリケー�
 
 ## 設計方針
 
-`validate_request` で Host の値を取得した直後に `trim().is_empty()` を検査し、空なら `Error::handshake_rejected` を返す。`shiguredo_http11` 側の変更は行わない。
+`validate_request` で Host の値を取得した直後に `trim().is_empty()` を検査し、空なら `Error::handshake_rejected` を返す。コードコメントには RFC 6455 Section 4.2.1 item 2 を記載する。`shiguredo_http11` 側の変更は行わない。
 
 ## CHANGES.md 登録内容
 
-`## develop` の FIX セクションに次を追加する。
+`## develop` に次のエントリを追加する。
 
 ```markdown
 - [FIX] 空または空白だけの Host ヘッダーを拒否する
@@ -36,4 +37,4 @@ Medium。`ServerHandshakeRequest.host` が空文字列のままアプリケー�
 
 - `Host:` と `Host:  ` のリクエストが `ErrorKind::HandshakeRejected` になるテストがある。
 - 正常な Host のリクエストは従来どおり受理される。
-- `cargo test --workspace` が通る。
+- `make test`（実体は `cargo test --workspace --exclude websocket_client`）が通る。nginx e2e テストは Docker が必要なため GitHub Actions で実行する。
