@@ -439,6 +439,12 @@ impl SharedConnectionState {
 
         if frame.fin {
             // 完全なメッセージ
+            // RFC 6455 Section 10.4: 分割の有無にかかわらず、受信メッセージの
+            // 解凍前ペイロードサイズに上限を課す。
+            if frame.payload.len() > self.max_message_size {
+                self.close_internal(CloseCode::MESSAGE_TOO_BIG, "message too large", policy);
+                return Err(Error::protocol_violation("message too large"));
+            }
             let payload = self.decompress_if_needed(frame.payload, frame.rsv1, policy)?;
             self.emit_message(frame.opcode, payload, policy)?;
         } else {

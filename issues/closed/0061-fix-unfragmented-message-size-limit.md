@@ -3,6 +3,7 @@
 - Priority: Medium
 - Created: 2026-11-27
 - Polished: 2026-11-27
+- Completed: 2026-11-27
 - Model: deepseek-v4.1-flash:1017
 - Branch: feature/fix-unfragmented-message-size-limit
 
@@ -44,7 +45,17 @@ Medium。利用者が設定したメッセージサイズ上限が、分割の�
 ## 完了条件
 
 - `max_message_size = 10`、`max_frame_size = 1000` のとき、未分割の Text と Binary について、10 バイトは受理され、11 バイトは `ErrorKind::ProtocolViolation` かつ Close 1009 で拒否される。テストは `tests/test_websocket_connection_shared.rs` の境界・エラーパスに追加する。
-- permessage-deflate 有効時、未分割メッセージの圧縮後ペイロードが 10 バイト以下なら受理され、11 バイトなら Close 1009 で拒否される。解凍後サイズの上限は `max_decompressed_size` で別途確認する。
+- permessage-deflate 有効時、未分割メッセージは圧縮後ペイロードのサイズで判定する。上限 20 バイトで 1000 バイトの `a` の圧縮後 18 バイトを受理し、上限 10 バイトで `hi` の圧縮後 14 バイトを Close 1009 で拒否する。解凍後サイズの上限は `max_decompressed_size` で別途確認する。
 - 分割メッセージの既存 PBT `prop_fragment_flood_exceeds_max_message_size` が引き続き通る。
 - `ClientConnectionOptions` / `ServerConnectionOptions` の `max_message_size` のフィールド doc とビルダー doc が新しい意味に更新されている。
 - `make test`（実体は `cargo test --workspace --exclude websocket_client`）が通る。nginx e2e テストは Docker が必要なため GitHub Actions で実行する。
+
+## 解決方法
+
+`src/websocket_connection_shared.rs` の `handle_data_frame` の `fin` 経路で、解凍前の `frame.payload.len()` を `max_message_size` と比較し、超過時は `close_internal(CloseCode::MESSAGE_TOO_BIG, ...)` と `Error::protocol_violation` を返すようにした。分割経路と同じ `>` 比較で、上限ちょうどは受理する。
+
+`ClientConnectionOptions` / `ServerConnectionOptions` の `max_message_size` のフィールド doc とビルダー doc を「受信メッセージの解凍前ペイロードサイズの上限（未分割・分割の両方に適用）」に更新した。
+
+`tests/test_websocket_connection_shared.rs` に、Text / Binary の上限ちょうど受理、上限 +1 の拒否 (Close 1009)、圧縮メッセージの圧縮後サイズ判定のテストを追加した。圧縮メッセージは、上限 20 バイトで 1000 バイトの `a` の圧縮後 18 バイトを受理し (解凍後は上限超過)、上限 10 バイトで `hi` の圧縮後 14 バイトを拒否する (解凍後は上限以下)。これにより解凍前のサイズで判定していることを固定している。
+
+`make test` が通る (25 個のテストターゲットすべて ok)。

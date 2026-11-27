@@ -6,9 +6,9 @@
 
 use base64ct::{Base64, Encoding};
 use shiguredo_websocket::{
-    ClientConnectionOptions, ConnectionEvent, ConnectionOutput, Frame, FrameDecoder, Opcode,
-    RandomSource, ServerConnectionOptions, TimerId, Timestamp, WebSocketClientConnection,
-    WebSocketServerConnection,
+    ClientConnectionOptions, ConnectionEvent, ConnectionOutput, ErrorKind, Frame, FrameDecoder,
+    Opcode, PerMessageDeflate, PerMessageDeflateConfig, RandomSource, ServerConnectionOptions,
+    TimerId, Timestamp, WebSocketClientConnection, WebSocketServerConnection,
 };
 
 // ============================================================
@@ -116,6 +116,78 @@ fn setup_connected_server() -> WebSocketServerConnection {
     while conn.poll_output().is_some() {}
 
     conn
+}
+
+/// 拡張ヘッダー付きの有効なハンドシェイクリクエストを生成する
+fn create_valid_handshake_request_with_extensions(key: &[u8; 16], extensions: &str) -> Vec<u8> {
+    let encoded_key = Base64::encode_string(key.as_slice());
+    format!(
+        "GET /websocket HTTP/1.1\r\n\
+         Host: example.com\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Key: {}\r\n\
+         Sec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Extensions: {}\r\n\
+         \r\n",
+        encoded_key, extensions
+    )
+    .into_bytes()
+}
+
+/// メッセージサイズとフレームサイズの上限を設定したサーバー接続を Connected 状態まで進める
+fn setup_connected_server_with_limits(
+    max_message_size: usize,
+    max_frame_size: usize,
+) -> WebSocketServerConnection {
+    let options = ServerConnectionOptions::new()
+        .max_message_size(max_message_size)
+        .max_frame_size(max_frame_size);
+    let mut conn = WebSocketServerConnection::new(options);
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request(&key);
+    conn.feed_recv_buf(&request)
+        .expect("受信データの投入に失敗してはならない");
+    conn.accept_handshake_auto()
+        .expect("ハンドシェイクの受諾に失敗してはならない");
+
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    conn
+}
+
+/// permessage-deflate を合意したサーバー接続を Connected 状態まで進める
+fn setup_connected_server_with_deflate(max_message_size: usize) -> WebSocketServerConnection {
+    let options = ServerConnectionOptions::new()
+        .max_message_size(max_message_size)
+        .max_frame_size(1000)
+        .deflate(PerMessageDeflateConfig::default());
+    let mut conn = WebSocketServerConnection::new(options);
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request_with_extensions(&key, "permessage-deflate");
+    conn.feed_recv_buf(&request)
+        .expect("受信データの投入に失敗してはならない");
+    conn.accept_handshake_auto()
+        .expect("ハンドシェイクの受諾に失敗してはならない");
+
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    conn
+}
+
+/// RSV1 を立てたマスク済みの圧縮フレームを生成する
+fn compressed_frame(opcode: Opcode, payload: Vec<u8>) -> Vec<u8> {
+    Frame {
+        fin: true,
+        rsv1: true,
+        rsv2: false,
+        rsv3: false,
+        opcode,
+        payload,
+    }
+    .encode([0xAB, 0xCD, 0xEF, 0x12])
 }
 
 /// 送信キューから Close フレームを取得し、close code を抽出する (サーバー: マスクなし)
@@ -497,4 +569,144 @@ fn server_で_close_timeout_ビルダー値が_set_timer_に伝播する() {
         find_set_timer_with_duration(&outputs, TimerId::CloseTimeout, 11_111),
         "CloseTimeout の SetTimer が close_timeout(11111) を反映していない"
     );
+}
+
+// ============================================================
+// max_message_size を未分割メッセージにも適用する
+// ============================================================
+
+/// 未分割テキストが上限を超えると Close 1009 で拒否される
+#[test]
+fn server_で未分割テキストが_max_message_size_を超えると_close_1009_が送信される() {
+    let mut conn = setup_connected_server_with_limits(10, 1000);
+    let frame = Frame::new(Opcode::Text, b"0123456789a".to_vec()).encode([0xAB, 0xCD, 0xEF, 0x12]);
+
+    let err = conn
+        .feed_recv_buf(&frame)
+        .expect_err("上限を超える未分割メッセージは拒否される");
+    assert_eq!(err.kind, ErrorKind::ProtocolViolation);
+
+    let mut close_found = false;
+    while let Some(output) = conn.poll_output() {
+        if let ConnectionOutput::SendData(data) = output {
+            assert_eq!(
+                extract_close_code_from_unmasked_output(&data),
+                1009,
+                "Close code は 1009 (Message Too Big) であるべき"
+            );
+            close_found = true;
+            break;
+        }
+    }
+    assert!(close_found, "送信キューに Close フレームが積まれていない");
+}
+
+/// 未分割バイナリが上限を超えると Close 1009 で拒否される
+#[test]
+fn server_で未分割バイナリが_max_message_size_を超えると_close_1009_が送信される() {
+    let mut conn = setup_connected_server_with_limits(10, 1000);
+    let frame = Frame::new(Opcode::Binary, vec![0u8; 11]).encode([0xAB, 0xCD, 0xEF, 0x12]);
+
+    let err = conn
+        .feed_recv_buf(&frame)
+        .expect_err("上限を超える未分割メッセージは拒否される");
+    assert_eq!(err.kind, ErrorKind::ProtocolViolation);
+
+    let mut close_found = false;
+    while let Some(output) = conn.poll_output() {
+        if let ConnectionOutput::SendData(data) = output {
+            assert_eq!(
+                extract_close_code_from_unmasked_output(&data),
+                1009,
+                "Close code は 1009 (Message Too Big) であるべき"
+            );
+            close_found = true;
+            break;
+        }
+    }
+    assert!(close_found, "送信キューに Close フレームが積まれていない");
+}
+
+/// 未分割メッセージが上限ちょうどなら受理される
+#[test]
+fn server_で未分割メッセージが_max_message_size_ちょうどなら受理される() {
+    let mut conn = setup_connected_server_with_limits(10, 1000);
+
+    let text_frame =
+        Frame::new(Opcode::Text, b"0123456789".to_vec()).encode([0xAB, 0xCD, 0xEF, 0x12]);
+    conn.feed_recv_buf(&text_frame)
+        .expect("上限ちょうどのテキストは受理される");
+    match conn.poll_event() {
+        Some(ConnectionEvent::TextMessage(text)) => assert_eq!(text, "0123456789"),
+        other => panic!("TextMessage を期待したが {:?} だった", other),
+    }
+
+    let binary_frame = Frame::new(Opcode::Binary, vec![0u8; 10]).encode([0xAB, 0xCD, 0xEF, 0x12]);
+    conn.feed_recv_buf(&binary_frame)
+        .expect("上限ちょうどのバイナリは受理される");
+    match conn.poll_event() {
+        Some(ConnectionEvent::BinaryMessage(data)) => assert_eq!(data, vec![0u8; 10]),
+        other => panic!("BinaryMessage を期待したが {:?} だった", other),
+    }
+}
+
+/// 圧縮メッセージの圧縮後ペイロードが上限を超えると Close 1009 で拒否される
+#[test]
+fn server_で未分割の圧縮メッセージが_max_message_size_を超えると_close_1009_が送信される() {
+    let mut conn = setup_connected_server_with_deflate(10);
+    let mut compressor = PerMessageDeflate::new_client(PerMessageDeflateConfig::default());
+    let compressed = compressor
+        .compress(b"hi")
+        .expect("圧縮に失敗してはならない");
+    assert!(
+        compressed.len() > 10 && compressed.len() <= 1000,
+        "テスト前提: 圧縮後サイズが上限を超え、フレームサイズ以内である ({} bytes)",
+        compressed.len()
+    );
+    let frame = compressed_frame(Opcode::Text, compressed);
+
+    let err = conn
+        .feed_recv_buf(&frame)
+        .expect_err("圧縮後ペイロードが上限を超えるメッセージは拒否される");
+    assert_eq!(err.kind, ErrorKind::ProtocolViolation);
+
+    let mut close_found = false;
+    while let Some(output) = conn.poll_output() {
+        if let ConnectionOutput::SendData(data) = output {
+            assert_eq!(
+                extract_close_code_from_unmasked_output(&data),
+                1009,
+                "Close code は 1009 (Message Too Big) であるべき"
+            );
+            close_found = true;
+            break;
+        }
+    }
+    assert!(close_found, "送信キューに Close フレームが積まれていない");
+}
+
+/// 圧縮メッセージの圧縮後ペイロードが上限以下なら受理される
+#[test]
+fn server_で未分割の圧縮メッセージが_max_message_size_以下なら受理される() {
+    let mut conn = setup_connected_server_with_deflate(20);
+    let mut compressor = PerMessageDeflate::new_client(PerMessageDeflateConfig::default());
+    let original = vec![b'a'; 1000];
+    let compressed = compressor
+        .compress(&original)
+        .expect("圧縮に失敗してはならない");
+    assert!(
+        compressed.len() <= 20,
+        "テスト前提: 圧縮後サイズが上限以下である ({} bytes)",
+        compressed.len()
+    );
+    let frame = compressed_frame(Opcode::Text, compressed);
+
+    conn.feed_recv_buf(&frame)
+        .expect("圧縮後ペイロードが上限以下のメッセージは受理される");
+    match conn.poll_event() {
+        Some(ConnectionEvent::TextMessage(text)) => {
+            assert_eq!(text, "a".repeat(1000), "解凍後のメッセージが一致する");
+        }
+        other => panic!("TextMessage を期待したが {:?} だった", other),
+    }
 }

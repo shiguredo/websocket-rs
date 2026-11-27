@@ -22,6 +22,8 @@
   - @voluntas
 - [FIX] window bits パラメータの符号付き表記を拒否する
   - @voluntas
+- [FIX] 未分割メッセージにも max_message_size を適用する
+  - @voluntas
 
 ### misc
 
