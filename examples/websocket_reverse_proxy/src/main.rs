@@ -577,7 +577,7 @@ where
                         }
                         ConnectionEvent::Close { code, reason } => {
                             log_debug(debug, &format!("クライアントから Close: {:?} {}", code, reason));
-                            upstream_ws.close(code.unwrap_or(CloseCode::NORMAL), &reason)?;
+                            upstream_ws.close(code.filter(|c| c.is_sendable()).unwrap_or(CloseCode::NORMAL), &reason)?;
                         }
                         ConnectionEvent::Error(err) => {
                             log_debug(debug, &format!("クライアントエラー: {}", err));
@@ -629,7 +629,7 @@ where
                         }
                         ConnectionEvent::Close { code, reason } => {
                             log_debug(debug, &format!("アップストリームから Close: {:?} {}", code, reason));
-                            client_ws.close(code.unwrap_or(CloseCode::NORMAL), &reason)?;
+                            client_ws.close(code.filter(|c| c.is_sendable()).unwrap_or(CloseCode::NORMAL), &reason)?;
                         }
                         ConnectionEvent::Error(err) => {
                             log_debug(debug, &format!("アップストリームエラー: {}", err));

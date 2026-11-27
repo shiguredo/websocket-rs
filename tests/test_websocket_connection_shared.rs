@@ -6,9 +6,10 @@
 
 use base64ct::{Base64, Encoding};
 use shiguredo_websocket::{
-    ClientConnectionOptions, ConnectionEvent, ConnectionOutput, ErrorKind, Frame, FrameDecoder,
-    Opcode, PerMessageDeflate, PerMessageDeflateConfig, RandomSource, ServerConnectionOptions,
-    TimerId, Timestamp, WebSocketClientConnection, WebSocketServerConnection,
+    ClientConnectionOptions, CloseCode, ConnectionEvent, ConnectionOutput, ErrorKind, Frame,
+    FrameDecoder, Opcode, PerMessageDeflate, PerMessageDeflateConfig, RandomSource,
+    ServerConnectionOptions, TimerId, Timestamp, WebSocketClientConnection,
+    WebSocketServerConnection,
 };
 
 // ============================================================
@@ -982,4 +983,14 @@ fn server_で_bfinal_1_の圧縮メッセージは_close_1007_で拒否される
             "未対応のメッセージを emit しない"
         );
     }
+}
+
+/// close() は送信不可コードを InvalidInput で拒否する
+#[test]
+fn server_close_rejects_unsendable_code() {
+    let mut conn = setup_connected_server();
+    let err = conn
+        .close(CloseCode::new(1016), "")
+        .expect_err("送信不可コードは拒否される");
+    assert_eq!(err.kind, ErrorKind::InvalidInput);
 }

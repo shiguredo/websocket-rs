@@ -142,7 +142,7 @@ impl SharedConnectionState {
     /// 成功時は `close_internal` に委譲する。
     ///
     /// RFC 6455 Section 7.1.2: Close フレームは established connection 上でのみ送信可能
-    /// RFC 6455 Section 7.4.1: 送信禁止のクローズコード (1005, 1006, 1015) は拒否される
+    /// 送信不可のクローズコード (`CloseCode::is_sendable` が false のコード) は拒否される
     /// RFC 6455 Section 5.5: reason は 123 バイト以下でなければならない
     pub(crate) fn close(
         &mut self,

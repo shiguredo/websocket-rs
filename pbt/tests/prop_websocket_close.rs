@@ -6,10 +6,10 @@ use shiguredo_websocket::{
 
 const UNSENDABLE_CODES: [u16; 3] = [1005, 1006, 1015];
 
-/// 1004 と、2000..=2999 を 50 刻みにした送信禁止コード。
-const VALID_BUT_UNSENDABLE: [u16; 21] = [
-    1004, 2000, 2050, 2100, 2150, 2200, 2250, 2300, 2350, 2400, 2450, 2500, 2550, 2600, 2650, 2700,
-    2750, 2800, 2850, 2900, 2950,
+/// 1004、1016-1999 の代表値、2000..=2999 を 50 刻みにした送信禁止コード。
+const VALID_BUT_UNSENDABLE: [u16; 24] = [
+    1004, 1016, 1100, 1999, 2000, 2050, 2100, 2150, 2200, 2250, 2300, 2350, 2400, 2450, 2500, 2550,
+    2600, 2650, 2700, 2750, 2800, 2850, 2900, 2950,
 ];
 
 /// 定義済み CloseCode 定数の値
@@ -136,14 +136,14 @@ fn prop_iana_range_1012_1014() -> noprop::TestResult {
     Ok(())
 }
 
-/// 1016-1999 は予約済みだが、受信時は有効として扱い送信も許容
+/// 1016-1999 は IANA 未登録のため、受信時は有効だが送信は不可
 #[test]
 fn prop_reserved_range_1016_1999() -> noprop::TestResult {
     pbt::run(|ctx| {
         let code = noprop::sample_u16_in(ctx, 1016..2000);
         let close_code = CloseCode::new(code);
         assert!(close_code.is_valid());
-        assert!(close_code.is_sendable());
+        assert!(!close_code.is_sendable());
         Ok(())
     })?;
     Ok(())
@@ -412,8 +412,8 @@ fn prop_invalid_close_code_received_returns_protocol_violation() -> noprop::Test
     Ok(())
 }
 
-/// RFC 6455 Section 7.4.1: 受信した Close フレームの code が `is_valid() && !is_sendable()`
-/// (1004, 2000-2999) の場合、返送する Close フレームは 1000 (Normal Closure) にフォールバックする
+/// 受信した Close フレームの code が `is_valid() && !is_sendable()`
+/// の場合、返送する Close フレームは 1000 (Normal Closure) にフォールバックする (本ライブラリのポリシー)
 #[test]
 fn prop_valid_but_unsendable_close_code_responds_with_normal_closure() -> noprop::TestResult {
     pbt::run(|ctx| {
