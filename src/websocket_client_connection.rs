@@ -44,7 +44,7 @@ pub struct ClientConnectionOptions {
     close_timeout_millis: u64,
     /// 最大フレームサイズ（メモリ DoS 対策）
     max_frame_size: usize,
-    /// 最大メッセージサイズ（フラグメント累積サイズ制限）
+    /// 受信メッセージの解凍前ペイロードサイズの上限（未分割・分割の両方に適用）
     max_message_size: usize,
     /// 最大解凍サイズ（Zip Bomb 対策）
     max_decompressed_size: usize,
@@ -128,7 +128,7 @@ impl ClientConnectionOptions {
         self
     }
 
-    /// 最大メッセージサイズを設定（フラグメント累積サイズ制限）
+    /// 受信メッセージの解凍前ペイロードサイズの上限を設定する
     pub fn max_message_size(mut self, size: usize) -> Self {
         self.max_message_size = size;
         self
