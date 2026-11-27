@@ -20,6 +20,8 @@
   - @voluntas
 - [FIX] 空または空白だけの Host ヘッダーを拒否する
   - @voluntas
+- [FIX] window bits パラメータの符号付き表記を拒否する
+  - @voluntas
 
 ### misc
 

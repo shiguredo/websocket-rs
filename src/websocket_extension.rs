@@ -43,7 +43,7 @@ impl std::fmt::Display for ExtensionParseError {
             Self::DuplicateParameter(name) => write!(f, "duplicate parameter: {name}"),
             Self::MissingValue(name) => write!(f, "missing value for parameter: {name}"),
             Self::UnexpectedValue(name) => write!(f, "unexpected value for parameter: {name}"),
-            // InvalidValue は生成側 (from_extension_validated および parse_strict) が
+            // InvalidValue は生成側 (parse_window_bits および parse_strict) が
             // 既にパラメータ名と詳細を含む自己完結的なメッセージを構築しているため、そのまま出力する。
             Self::InvalidValue(detail) => write!(f, "{detail}"),
         }
@@ -362,6 +362,41 @@ pub struct PerMessageDeflateConfig {
     pub client_no_context_takeover: bool,
 }
 
+/// window bits パラメータの値を検証してパースする
+///
+/// RFC 7692 Section 7.1.2.1 / 7.1.2.2: 値は先頭ゼロなしの 10 進整数で 8-15。
+/// `str::parse::<u8>()` は先頭の `+` を許容するため、パース前に数字だけであることを検査する。
+fn parse_window_bits(name: &str, value: &str) -> Result<u8, ExtensionParseError> {
+    if value.is_empty() {
+        return Err(ExtensionParseError::InvalidValue(format!(
+            "{name}: empty value"
+        )));
+    }
+
+    if !value.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ExtensionParseError::InvalidValue(format!(
+            "{name}: invalid value '{value}'"
+        )));
+    }
+
+    // 先頭ゼロは不正。0 単体は下の範囲検査で拒否される。
+    if value.len() > 1 && value.starts_with('0') {
+        return Err(ExtensionParseError::InvalidValue(format!(
+            "{name}: leading zeros are not allowed '{value}'"
+        )));
+    }
+
+    let bits = value.parse::<u8>().map_err(|_| {
+        ExtensionParseError::InvalidValue(format!("{name}: invalid value '{value}'"))
+    })?;
+    if !(8..=15).contains(&bits) {
+        return Err(ExtensionParseError::InvalidValue(format!(
+            "{name}: {bits} is out of range (8-15)"
+        )));
+    }
+    Ok(bits)
+}
+
 impl PerMessageDeflateConfig {
     /// 新しい設定を生成する
     pub fn new() -> Self {
@@ -473,27 +508,8 @@ impl PerMessageDeflateConfig {
                 "server_max_window_bits" => {
                     match &param.value {
                         Some(value) => {
-                            // RFC 7692 Section 7.1.2.1: 先頭ゼロは不正
-                            if value.starts_with('0') && value.len() > 1 {
-                                return Err(ExtensionParseError::InvalidValue(format!(
-                                    "server_max_window_bits: leading zeros are not allowed '{}'",
-                                    value
-                                )));
-                            }
-                            let bits = value.parse::<u8>().map_err(|_| {
-                                ExtensionParseError::InvalidValue(format!(
-                                    "server_max_window_bits: invalid value '{}'",
-                                    value
-                                ))
-                            })?;
-                            // RFC 7692: 8-15 の範囲外は拒否
-                            if !(8..=15).contains(&bits) {
-                                return Err(ExtensionParseError::InvalidValue(format!(
-                                    "server_max_window_bits: {} is out of range (8-15)",
-                                    bits
-                                )));
-                            }
-                            config.server_max_window_bits = Some(bits);
+                            config.server_max_window_bits =
+                                Some(parse_window_bits("server_max_window_bits", value)?);
                         }
                         None => {
                             // RFC 7692 Section 7.1.2.1: server_max_window_bits は
@@ -507,27 +523,8 @@ impl PerMessageDeflateConfig {
                 }
                 "client_max_window_bits" => {
                     if let Some(value) = &param.value {
-                        // RFC 7692 Section 7.1.2.2: 先頭ゼロは不正
-                        if value.starts_with('0') && value.len() > 1 {
-                            return Err(ExtensionParseError::InvalidValue(format!(
-                                "client_max_window_bits: leading zeros are not allowed '{}'",
-                                value
-                            )));
-                        }
-                        let bits = value.parse::<u8>().map_err(|_| {
-                            ExtensionParseError::InvalidValue(format!(
-                                "client_max_window_bits: invalid value '{}'",
-                                value
-                            ))
-                        })?;
-                        // RFC 7692: 8-15 の範囲外は拒否
-                        if !(8..=15).contains(&bits) {
-                            return Err(ExtensionParseError::InvalidValue(format!(
-                                "client_max_window_bits: {} is out of range (8-15)",
-                                bits
-                            )));
-                        }
-                        config.client_max_window_bits = Some(bits);
+                        config.client_max_window_bits =
+                            Some(parse_window_bits("client_max_window_bits", value)?);
                     } else {
                         // RFC 7692 Section 7.1.2.2: クライアントレスポンスでは値が必須
                         if context == ExtensionParseContext::ClientResponse {

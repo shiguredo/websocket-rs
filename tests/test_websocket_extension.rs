@@ -4,7 +4,7 @@
 //! を単体テストとして置く。CLAUDE.md「単体テスト: 意図的なエラーパス、境界値など PBT で実現できないケース」
 //! に該当する。
 
-use shiguredo_websocket::ExtensionParseError;
+use shiguredo_websocket::{Extension, ExtensionParseError, PerMessageDeflateConfig};
 
 #[test]
 fn not_deflate_の_display_は固定文言と一致する() {
@@ -20,4 +20,19 @@ fn extension_parse_error_は_std_error_を実装している() {
     let err = ExtensionParseError::NotDeflate;
     let dyn_err: &dyn std::error::Error = &err;
     assert!(dyn_err.source().is_none());
+}
+
+/// window bits の値が空文字や非 ASCII 数字の場合は拒否される
+#[test]
+fn window_bits_は空文字と非_ascii_数字を拒否する() {
+    for param in ["server_max_window_bits", "client_max_window_bits"] {
+        for value in ["", "８", "١٢"] {
+            let ext = Extension::new("permessage-deflate").param(param, Some(value));
+            let result = PerMessageDeflateConfig::from_extension_for_server_request(&ext);
+            assert!(
+                matches!(result, Err(ExtensionParseError::InvalidValue(_))),
+                "{param}={value:?} は不正値として拒否される"
+            );
+        }
+    }
 }
