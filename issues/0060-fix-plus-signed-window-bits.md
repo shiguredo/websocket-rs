@@ -3,6 +3,7 @@
 - Priority: Medium
 - Created: 2026-11-27
 - Polished: 2026-11-27
+- Completed: 2026-11-27
 - Model: deepseek-v4.1-flash:1017
 - Branch: feature/fix-window-bits-sign
 
@@ -51,3 +52,13 @@ Medium。実装間で受理集合が食い違い、ABNF に厳密な相手との
 - `accept_handshake` に `server_max_window_bits=+8` の offer と `permessage-deflate` 応答を渡すと `HandshakeRejected` になる。
 - 既存の `pbt/tests/prop_websocket_handshake.rs` の先頭ゼロ拒否 PBT (`prop_server_max_window_bits_leading_zeros_rejected` / `prop_client_max_window_bits_leading_zeros_rejected`) が通る。
 - `make test`（実体は `cargo test --workspace --exclude websocket_client`）が通る。nginx e2e テストは Docker が必要なため GitHub Actions で実行する。
+
+## 解決方法
+
+`src/websocket_extension.rs` に `parse_window_bits` を追加し、`server_max_window_bits` / `client_max_window_bits` の両方で、値が空でなく ASCII 数字だけで構成され、先頭ゼロがなく、8-15 の範囲であることを検査するようにした。`str::parse::<u8>()` が先頭の `+` を受理する問題を、パース前の数字検査で塞いでいる。
+
+`src/websocket_server_connection.rs` の `negotiate_deflate` は、offer を `from_extension_for_server_request` で検証し、不正な値の offer を受理対象から除外するようにした。有効な offer がない状態で permessage-deflate の応答を組み立てた場合は `HandshakeRejected` になる。
+
+`pbt/tests/prop_websocket_extension.rs` に不正値・範囲外・有効値の PBT を、`tests/test_websocket_server_connection.rs` に `server_max_window_bits=+8` の offer と permessage-deflate 応答を組み合わせた単体テストを追加した。
+
+`make test` が通る (25 個のテストターゲットすべて ok)。
