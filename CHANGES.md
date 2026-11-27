@@ -32,6 +32,8 @@
   - @voluntas
 - [FIX] Frame::close が送信不可コードと理由のみのボディを拒否する
   - @voluntas
+- [FIX] 複数の permessage-deflate offer から正しく選択する
+  - @voluntas
 
 ### misc
 
