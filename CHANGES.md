@@ -30,6 +30,8 @@
   - @voluntas
 - [FIX] 未登録のクローズコード 1016-1999 を送信不可にする
   - @voluntas
+- [FIX] Frame::close が送信不可コードと理由のみのボディを拒否する
+  - @voluntas
 
 ### misc
 

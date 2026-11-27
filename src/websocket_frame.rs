@@ -1,6 +1,7 @@
 //! WebSocket フレームのエンコードとデコード
 
 use crate::error::Error;
+use crate::websocket_close::CloseCode;
 use crate::websocket_opcode::Opcode;
 
 /// WebSocket フレーム (RFC 6455 Section 5.2)
@@ -80,9 +81,17 @@ impl Frame {
     ///
     /// RFC 6455 Section 5.5: コントロールフレームのペイロードは 125 バイト以下
     /// Close フレームの場合、コード (2 バイト) + 理由で 125 バイト以下
+    /// `CloseCode::is_sendable` が false のコードは拒否される (RFC 6455 Section 7.4.1/7.4.2、
+    /// IANA 未登録コードを含む)。code が None の場合、理由を含めることはできない。
     pub fn close(code: Option<u16>, reason: &str) -> Result<Self, Error> {
         let payload = match code {
             Some(c) => {
+                if !CloseCode::new(c).is_sendable() {
+                    return Err(Error::invalid_input(format!(
+                        "close code is not sendable: {}",
+                        c
+                    )));
+                }
                 // 理由は 123 バイト以下 (125 - 2 バイトのコード)
                 if reason.len() > 123 {
                     return Err(Error::invalid_input(format!(
@@ -95,7 +104,14 @@ impl Frame {
                 p.extend_from_slice(reason.as_bytes());
                 p
             }
-            None => Vec::new(),
+            None => {
+                // RFC 6455 Section 5.5.1: ボディの先頭 2 バイトはステータスコードで
+                // なければならないため、コードなしで理由だけのボディは生成できない
+                if !reason.is_empty() {
+                    return Err(Error::invalid_input("close reason requires a close code"));
+                }
+                Vec::new()
+            }
         };
         Ok(Self::new(Opcode::Close, payload))
     }
