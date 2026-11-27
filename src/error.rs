@@ -73,7 +73,7 @@ pub struct Error {
     /// バックトレースは `RUST_BACKTRACE` 環境変数が設定されていない場合には取得されない
     pub backtrace: Backtrace,
 
-    /// WebSocket クローズコード（該当する場合）
+    /// 解凍エラーの原因を表す Close コード（現状は解凍エラーでのみ設定される）
     pub close_code: Option<u16>,
 
     /// HTTP レスポンス情報（101 以外のレスポンスを受信した場合）

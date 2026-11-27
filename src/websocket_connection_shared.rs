@@ -297,7 +297,23 @@ impl SharedConnectionState {
     ) -> Result<Vec<u8>, Error> {
         if compressed {
             if let Some(deflate) = &mut self.deflate {
-                deflate.decompress(&payload, self.max_decompressed_size)
+                let result = deflate.decompress(&payload, self.max_decompressed_size);
+                match result {
+                    Ok(payload) => Ok(payload),
+                    Err(e) => {
+                        // RFC 6455 Section 7.1.7: 接続を失敗させる前に適切なコードの
+                        // Close フレームを送る。コードは解凍エラーの原因に応じて
+                        // Decompressor が設定する (1007 / 1009)。
+                        let code = e.close_code.unwrap_or(CloseCode::PROTOCOL_ERROR.as_u16());
+                        let reason = if code == CloseCode::MESSAGE_TOO_BIG.as_u16() {
+                            "message too large"
+                        } else {
+                            "decompression failed"
+                        };
+                        self.close_internal(CloseCode::new(code), reason, policy);
+                        Err(e)
+                    }
+                }
             } else {
                 self.close_internal(
                     CloseCode::PROTOCOL_ERROR,

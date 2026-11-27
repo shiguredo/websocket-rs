@@ -190,6 +190,69 @@ fn compressed_frame(opcode: Opcode, payload: Vec<u8>) -> Vec<u8> {
     .encode([0xAB, 0xCD, 0xEF, 0x12])
 }
 
+/// 拡張ヘッダー付きの 101 レスポンスを生成する
+fn create_valid_handshake_response_with_extensions(accept: &str, extensions: &str) -> Vec<u8> {
+    format!(
+        "HTTP/1.1 101 Switching Protocols\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Accept: {}\r\n\
+         Sec-WebSocket-Extensions: {}\r\n\
+         \r\n",
+        accept, extensions
+    )
+    .into_bytes()
+}
+
+/// permessage-deflate を合意したクライアント接続を Connected 状態まで進める
+fn setup_connected_client_with_deflate(
+    max_decompressed_size: usize,
+) -> (WebSocketClientConnection<FixedRandom>, Timestamp) {
+    let options = ClientConnectionOptions::new("example.com", "/ws")
+        .deflate(PerMessageDeflateConfig::default())
+        .max_decompressed_size(max_decompressed_size);
+    let random = FixedRandom::new();
+    let nonce = random.nonce;
+    let mut conn = WebSocketClientConnection::new(options, random);
+    let now = Timestamp::from_millis(0);
+
+    conn.connect().expect("接続処理に失敗してはならない");
+    while conn.poll_output().is_some() {}
+
+    let accept = compute_accept(&nonce);
+    let response = create_valid_handshake_response_with_extensions(&accept, "permessage-deflate");
+    conn.feed_recv_buf(&response, now)
+        .expect("受信データの投入に失敗してはならない");
+
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    (conn, now)
+}
+
+/// permessage-deflate を合意し、解凍後サイズの上限を設定したサーバー接続
+fn setup_connected_server_with_decompressed_limit(
+    max_decompressed_size: usize,
+) -> WebSocketServerConnection {
+    let options = ServerConnectionOptions::new()
+        .max_message_size(1000)
+        .max_frame_size(1000)
+        .max_decompressed_size(max_decompressed_size)
+        .deflate(PerMessageDeflateConfig::default());
+    let mut conn = WebSocketServerConnection::new(options);
+    let key: [u8; 16] = [0; 16];
+    let request = create_valid_handshake_request_with_extensions(&key, "permessage-deflate");
+    conn.feed_recv_buf(&request)
+        .expect("受信データの投入に失敗してはならない");
+    conn.accept_handshake_auto()
+        .expect("ハンドシェイクの受諾に失敗してはならない");
+
+    while conn.poll_event().is_some() {}
+    while conn.poll_output().is_some() {}
+
+    conn
+}
+
 /// 送信キューから Close フレームを取得し、close code を抽出する (サーバー: マスクなし)
 fn extract_close_code_from_unmasked_output(data: &[u8]) -> u16 {
     let mut decoder = FrameDecoder::new();
@@ -708,5 +771,215 @@ fn server_で未分割の圧縮メッセージが_max_message_size_以下なら�
             assert_eq!(text, "a".repeat(1000), "解凍後のメッセージが一致する");
         }
         other => panic!("TextMessage を期待したが {:?} だった", other),
+    }
+}
+
+// ============================================================
+// 解凍エラー時の Close フレーム
+// ============================================================
+
+/// サーバーで不正な DEFLATE データを受けると Close 1007 が送信される
+#[test]
+fn server_で解凍エラーが発生すると_close_1007_が送信される() {
+    let mut conn = setup_connected_server_with_deflate(1000);
+    let frame = Frame {
+        fin: true,
+        rsv1: true,
+        rsv2: false,
+        rsv3: false,
+        opcode: Opcode::Text,
+        payload: vec![0xFF],
+    }
+    .encode([0xAB, 0xCD, 0xEF, 0x12]);
+
+    let err = conn
+        .feed_recv_buf(&frame)
+        .expect_err("不正な DEFLATE データは拒否される");
+    assert_eq!(err.kind, ErrorKind::InvalidData);
+    assert_eq!(err.close_code, Some(1007));
+
+    let mut close_found = false;
+    while let Some(output) = conn.poll_output() {
+        if let ConnectionOutput::SendData(data) = output {
+            assert_eq!(
+                extract_close_code_from_unmasked_output(&data),
+                1007,
+                "Close code は 1007 (Invalid Payload) であるべき"
+            );
+            close_found = true;
+            break;
+        }
+    }
+    assert!(close_found, "送信キューに Close フレームが積まれていない");
+}
+
+/// クライアントで不正な DEFLATE データを受けると Close 1007 が送信される
+#[test]
+fn client_で解凍エラーが発生すると_close_1007_が送信される() {
+    let (mut conn, now) = setup_connected_client_with_deflate(16 * 1024 * 1024);
+    let frame = Frame {
+        fin: true,
+        rsv1: true,
+        rsv2: false,
+        rsv3: false,
+        opcode: Opcode::Text,
+        payload: vec![0xFF],
+    }
+    .encode_unmasked();
+
+    let err = conn
+        .feed_recv_buf(&frame, now)
+        .expect_err("不正な DEFLATE データは拒否される");
+    assert_eq!(err.kind, ErrorKind::InvalidData);
+    assert_eq!(err.close_code, Some(1007));
+
+    let mut close_found = false;
+    while let Some(output) = conn.poll_output() {
+        if let ConnectionOutput::SendData(data) = output {
+            assert_eq!(
+                extract_close_code_from_masked_output(&data),
+                1007,
+                "Close code は 1007 (Invalid Payload) であるべき"
+            );
+            close_found = true;
+            break;
+        }
+    }
+    assert!(close_found, "送信キューに Close フレームが積まれていない");
+}
+
+/// サーバーで解凍後サイズが max_decompressed_size を超えると Close 1009 が送信される
+#[test]
+fn server_で解凍後サイズ超過が発生すると_close_1009_が送信される() {
+    let mut conn = setup_connected_server_with_decompressed_limit(10);
+    let mut compressor = PerMessageDeflate::new_client(PerMessageDeflateConfig::default());
+    let compressed = compressor
+        .compress(&[b'a'; 100])
+        .expect("圧縮に失敗してはならない");
+    assert!(
+        compressed.len() < 1000,
+        "テスト前提: 圧縮後サイズがフレーム / メッセージの上限より小さい ({} bytes)",
+        compressed.len()
+    );
+    let frame = Frame {
+        fin: true,
+        rsv1: true,
+        rsv2: false,
+        rsv3: false,
+        opcode: Opcode::Text,
+        payload: compressed,
+    }
+    .encode([0xAB, 0xCD, 0xEF, 0x12]);
+
+    let err = conn
+        .feed_recv_buf(&frame)
+        .expect_err("解凍後サイズが上限を超えるメッセージは拒否される");
+    assert_eq!(err.kind, ErrorKind::InvalidData);
+    assert_eq!(err.close_code, Some(1009));
+
+    let mut close_found = false;
+    while let Some(output) = conn.poll_output() {
+        if let ConnectionOutput::SendData(data) = output {
+            assert_eq!(
+                extract_close_code_from_unmasked_output(&data),
+                1009,
+                "Close code は 1009 (Message Too Big) であるべき"
+            );
+            close_found = true;
+            break;
+        }
+    }
+    assert!(close_found, "送信キューに Close フレームが積まれていない");
+}
+
+/// permessage-deflate は切り詰めストリームを検出しない (既知の制限)
+///
+/// noflate は入力枯渇をエラーにせず、BFINAL=0 のストリームは `is_finished` で
+/// 終端を判定できない。切り詰めストリームの完全性検出は行わない。
+/// このテストは修正前の実装でも通る characterization test であり、
+/// 切り詰めが検出されない現状の挙動を固定する。
+#[test]
+fn permessage_deflate_は切り詰めストリームを検出しない() {
+    let mut compressor = PerMessageDeflate::new_client(PerMessageDeflateConfig::default());
+    let full = compressor
+        .compress(b"hello")
+        .expect("圧縮に失敗してはならない");
+    let truncated = &full[..full.len() - 1];
+    let mut decompressor = PerMessageDeflate::new_server(PerMessageDeflateConfig::default());
+
+    let result = decompressor.decompress(truncated, 1024);
+    let decoded = result.expect("切り詰めストリームは現状エラーにならない (既知の制限)");
+    assert_ne!(
+        decoded,
+        b"hello".to_vec(),
+        "切り詰めストリームは元のデータとして復元されない"
+    );
+}
+
+/// 128 KiB を超える完全な圧縮メッセージが切り詰められない
+#[test]
+fn permessage_deflate_は_128ki_b_超のメッセージを完全に解凍する() {
+    let mut compressor = PerMessageDeflate::new_client(PerMessageDeflateConfig::default());
+    let original = vec![b'a'; 300_000];
+    let compressed = compressor
+        .compress(&original)
+        .expect("圧縮に失敗してはならない");
+    let mut decompressor = PerMessageDeflate::new_server(PerMessageDeflateConfig::default());
+
+    let decoded = decompressor
+        .decompress(&compressed, 16 * 1024 * 1024)
+        .expect("解凍に失敗してはならない");
+    assert_eq!(
+        decoded.len(),
+        original.len(),
+        "解凍結果が切り詰められていない"
+    );
+    assert_eq!(decoded, original, "解凍結果が元のデータと一致する");
+}
+
+/// RFC 7692 Section 7.2.3.4: BFINAL=1 のメッセージは現状未対応で 1007 になる
+#[test]
+fn permessage_deflate_は_bfinal_1_のメッセージを未対応として拒否する() {
+    let payload = [0xF3, 0x48, 0xCD, 0xC9, 0xC9, 0x07, 0x00, 0x00];
+    let mut decompressor = PerMessageDeflate::new_server(PerMessageDeflateConfig::default());
+
+    let err = decompressor
+        .decompress(&payload, 1024)
+        .expect_err("BFINAL=1 のメッセージは未対応で拒否される");
+    assert_eq!(err.kind, ErrorKind::InvalidData);
+    assert_eq!(err.close_code, Some(1007));
+}
+
+/// BFINAL=1 のメッセージは接続レベルでも Close 1007 で拒否される
+#[test]
+fn server_で_bfinal_1_の圧縮メッセージは_close_1007_で拒否される() {
+    let mut conn = setup_connected_server_with_deflate(1000);
+    let payload = [0xF3, 0x48, 0xCD, 0xC9, 0xC9, 0x07, 0x00, 0x00];
+    let frame = compressed_frame(Opcode::Text, payload.to_vec());
+
+    let err = conn
+        .feed_recv_buf(&frame)
+        .expect_err("BFINAL=1 のメッセージは未対応で拒否される");
+    assert_eq!(err.close_code, Some(1007));
+
+    let mut close_found = false;
+    while let Some(output) = conn.poll_output() {
+        if let ConnectionOutput::SendData(data) = output {
+            assert_eq!(
+                extract_close_code_from_unmasked_output(&data),
+                1007,
+                "Close code は 1007 (Invalid Payload) であるべき"
+            );
+            close_found = true;
+            break;
+        }
+    }
+    assert!(close_found, "送信キューに Close フレームが積まれていない");
+
+    while let Some(event) = conn.poll_event() {
+        assert!(
+            !matches!(event, ConnectionEvent::TextMessage(_)),
+            "未対応のメッセージを emit しない"
+        );
     }
 }

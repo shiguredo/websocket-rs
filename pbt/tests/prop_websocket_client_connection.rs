@@ -997,10 +997,35 @@ fn prop_deflate_zip_bomb_protection() -> noprop::TestResult {
         }
         frame.extend_from_slice(&compressed);
 
-        let result = conn.feed_recv_buf(&frame, now);
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("exceeds maximum limit"));
+        let err = conn
+            .feed_recv_buf(&frame, now)
+            .expect_err("解凍後サイズが上限を超えるメッセージは拒否される");
+        assert!(format!("{err:?}").contains("exceeds maximum limit"));
+        assert_eq!(err.close_code, Some(1009), "Close code は 1009 であるべき");
+
+        // RFC 6455 Section 7.1.7: 接続を失敗させる前に Close フレームを送る
+        let mut found_close = false;
+        while let Some(output) = conn.poll_output() {
+            if let ConnectionOutput::SendData(data) = output {
+                let mut decoder = shiguredo_websocket::FrameDecoder::new();
+                decoder.feed(&data);
+                if let Ok(Some(decoded)) = decoder.decode_with_info()
+                    && decoded.frame.opcode == Opcode::Close
+                    && decoded.frame.payload.len() >= 2
+                {
+                    assert!(decoded.masked, "クライアント送信フレームはマスクされている");
+                    let code =
+                        u16::from_be_bytes([decoded.frame.payload[0], decoded.frame.payload[1]]);
+                    assert_eq!(code, CloseCode::MESSAGE_TOO_BIG.as_u16());
+                    found_close = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            found_close,
+            "MESSAGE_TOO_BIG (1009) Close フレームが送出されていない"
+        );
         Ok(())
     })?;
     Ok(())

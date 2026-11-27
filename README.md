@@ -135,6 +135,10 @@ loop {
 }
 ```
 
+`feed_recv_buf` がエラーを返した場合も、Close フレームなどの送信データが
+`poll_output` に積まれていることがあります。エラー時も `poll_output` を drain し、
+`SendData` を送信するとともにタイマーなどの出力も処理してください。
+
 ### サーバー (WebSocket 接続受付)
 
 ```rust
