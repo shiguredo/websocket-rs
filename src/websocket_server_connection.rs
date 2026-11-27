@@ -399,23 +399,41 @@ impl WebSocketServerConnection {
     ) -> Result<Option<PerMessageDeflate>, Error> {
         // RFC 7692 Section 7: 検証をレスポンス送信前に行い、エラー時は送信しない
 
-        // RFC 7692 Section 7.1.2.1: クライアントが offer した server_max_window_bits を取得する
-        let client_offered_smwb: Option<u8> = request
-            .extensions
-            .iter()
-            .flat_map(|s| Extension::parse(s))
-            .filter(|e| e.name == "permessage-deflate")
-            .find_map(|e| {
-                e.get_param("server_max_window_bits")
-                    .and_then(|p| p.value.as_deref())
-                    .and_then(|v| v.parse::<u8>().ok())
-            });
+        // RFC 7692 Section 7.1.2.1 / 7.1.2.2: 有効な offer のうち最初に現れる
+        // server_max_window_bits と、有効な offer のいずれかに含まれる
+        // client_max_window_bits を取得する。不正な値の offer は受理対象にしない。
+        let mut client_offered_smwb: Option<u8> = None;
+        let mut client_offered_cmwb = false;
+        let mut has_parseable_offer = false;
+        for ext in request.extensions.iter().flat_map(|s| Extension::parse(s)) {
+            if ext.name != "permessage-deflate" {
+                continue;
+            }
+            let Ok(config) = PerMessageDeflateConfig::from_extension_for_server_request(&ext)
+            else {
+                continue;
+            };
+            has_parseable_offer = true;
+            if client_offered_smwb.is_none() {
+                client_offered_smwb = config.server_max_window_bits;
+            }
+            if config.client_max_window_bits.is_some() {
+                client_offered_cmwb = true;
+            }
+        }
 
         let mut deflate = None;
         for ext_str in &response.extensions {
             let extensions = Extension::parse(ext_str);
             for ext in extensions {
                 if ext.name == "permessage-deflate" {
+                    // RFC 7692 Section 7: 不正な値の offer を受理してはならない (MUST decline)
+                    if !has_parseable_offer {
+                        return Err(Error::handshake_rejected(
+                            "permessage-deflate response without a valid offer",
+                        ));
+                    }
+
                     // サーバー自身が送信するレスポンスなので、ClientResponse コンテキストで検証
                     let config = PerMessageDeflateConfig::from_extension_for_client_response(&ext)
                         .map_err(|e| {
@@ -452,18 +470,10 @@ impl WebSocketServerConnection {
 
                     // RFC 7692 Section 7.1.2.2: クライアントが client_max_window_bits を
                     // offer していない場合、レスポンスに含めてはならない (MUST NOT)
-                    if ext.get_param("client_max_window_bits").is_some() {
-                        let client_offered_cmwb = request.extensions.iter().any(|req_ext_str| {
-                            Extension::parse(req_ext_str).iter().any(|req_ext| {
-                                req_ext.name == "permessage-deflate"
-                                    && req_ext.get_param("client_max_window_bits").is_some()
-                            })
-                        });
-                        if !client_offered_cmwb {
-                            return Err(Error::handshake_rejected(
-                                "client_max_window_bits included without client offer",
-                            ));
-                        }
+                    if ext.get_param("client_max_window_bits").is_some() && !client_offered_cmwb {
+                        return Err(Error::handshake_rejected(
+                            "client_max_window_bits included without client offer",
+                        ));
                     }
 
                     deflate = Some(PerMessageDeflate::new_server(config));
