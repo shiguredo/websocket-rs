@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-11-27
 - Polished: 2026-11-27
+- Completed: 2026-11-27
 - Model: deepseek-v4.1-flash:1017
 - Branch: feature/fix-unassigned-close-codes
 
@@ -55,3 +56,15 @@ CHANGES.md の種別は `[FIX]` とする。未登録コードの送信は予約
 - 1003/1004、1006/1007、1014/1015、1015/1016、1999/2000、2999/3000、4999/5000 の境界を、`tests/test_websocket_close.rs` の単体テストで決定的に検証する。
 - `is_sendable` の doc comment と `skills/shiguredo-websocket/SKILL.md` の拒否範囲が更新されている。
 - `make test`（実体は `cargo test --workspace --exclude websocket_client`）が通る。nginx e2e テストは Docker が必要なため GitHub Actions で実行する。
+
+## 解決方法
+
+`src/websocket_close.rs` の `CloseCode::is_sendable` を 1000-1003、1007-1014、3000-4999 に限定し、1016-1999 を送信不可にした。`is_valid` は受信互換のため変更していない。
+
+`pbt/tests/prop_websocket_close.rs` の `prop_reserved_range_1016_1999` を `is_valid() == true` / `is_sendable() == false` に更新し、`VALID_BUT_UNSENDABLE` に 1016、1100、1999 を追加した。`tests/test_websocket_close.rs` に送信・受信の境界テストを追加した。
+
+`skills/shiguredo-websocket/SKILL.md` の `is_sendable()` の拒否範囲と RFC 準拠メモを更新した。
+
+`examples/websocket_reverse_proxy` の Close 転送で `is_sendable()` を通して 1000 に正規化し、受信した 1016-1999 を転送時に `InvalidInput` にしないようにした。`tests/test_websocket_connection_shared.rs` に `close()` が送信不可コードを `InvalidInput` で拒否するテストを追加した。
+
+`make test` が通る (26 個のテストターゲットすべて ok)。
