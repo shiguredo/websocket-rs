@@ -193,6 +193,10 @@ impl WebSocketServerConnection {
     ///
     /// RFC 6455 Section 7.1.7: このメソッドが Err を返した後は
     /// 以降の呼び出しも即座に Err を返す。
+    ///
+    /// エラーを返した場合も、`poll_output` に Close フレームなどの送信データが
+    /// 積まれていることがある。呼び出し側はエラー後も `poll_output` を drain し、
+    /// `SendData` を送信するとともにタイマーなどの出力も処理すること。
     pub fn feed_recv_buf(&mut self, buf: &[u8]) -> Result<(), Error> {
         if self.shared.is_failed() {
             return Err(Error::invalid_state("connection has failed"));

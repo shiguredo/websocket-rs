@@ -5,6 +5,7 @@
 use noflate::deflate::{Decoder, Encoder};
 
 use crate::error::Error;
+use crate::websocket_close::CloseCode;
 use crate::websocket_extension::PerMessageDeflateConfig;
 
 /// DEFLATE 圧縮終端バイト列
@@ -121,34 +122,31 @@ impl Decompressor {
     ///
     /// RFC 7692 Section 7.2.2 に従い、終端の 0x00 0x00 0xFF 0xFF を追加してから解凍する。
     /// 展開後のサイズが `max_size` を超えた場合はエラーを返す（Zip Bomb 対策）。
+    ///
+    /// 入力が途中で切れていても、noflate は入力枯渇をエラーにせず `Ok` と
+    /// 壊れた/不完全なデータを返す場合がある。BFINAL=0 のストリームは
+    /// `is_finished` で終端を判定できず、切り詰めストリームの完全性検出は行わない。
+    ///
+    /// BFINAL=1 のブロックで終わるストリームは、noflate がストリーム終端で停止し、
+    /// 追加の trailer を feed すると "bytes fed after deflate stream end" になる
+    /// (RFC 7692 Section 7.2.3.4)。BFINAL=1 への完全対応は noflate の API 拡張が
+    /// 必要なため未対応である。
     pub fn decompress(&mut self, data: &[u8], max_size: usize) -> Result<Vec<u8>, Error> {
         let mut decompressed = Vec::new();
 
-        // RFC 7692: 入力末尾に 0x00 0x00 0xFF 0xFF を追加
-        // 入力をチャンク分割して feed し、都度出力サイズを検証することで
-        // Zip Bomb 攻撃時の内部バッファ拡大を制限する
-        let feed_chain = data
-            .chunks(DECOMPRESS_FEED_CHUNK)
-            .chain(core::iter::once(DEFLATE_TRAILER.as_slice()));
-
-        for chunk in feed_chain {
-            self.decoder
-                .feed(chunk)
-                .map_err(|e| Error::invalid_data(format!("decompression failed: {}", e)))?;
-
-            let produced = self.decoder.output();
-            if decompressed.len().saturating_add(produced.len()) > max_size {
-                self.reset_if_needed();
-                return Err(Error::invalid_data(format!(
-                    "decompressed size exceeds maximum limit of {} bytes",
-                    max_size
-                )));
-            }
-
-            let produced_len = produced.len();
-            decompressed.extend_from_slice(produced);
-            self.decoder.advance(produced_len);
+        // RFC 7692 Section 7.2.1: 圧縮データの末尾は BFINAL=0 / BTYPE=00 の
+        // ヘッダービット ("Hello" 例では 0x00) になる。BFINAL=1 のブロックを
+        // 含むメッセージは本実装では未対応 (1007 で接続を閉じる)。
+        for chunk in data.chunks(DECOMPRESS_FEED_CHUNK) {
+            self.feed_and_drain(chunk, &mut decompressed, max_size)?;
         }
+
+        // RFC 7692 Section 7.2.2: 入力末尾に 0x00 0x00 0xFF 0xFF を追加して解凍する。
+        // noflate は BFINAL=1 のブロックでストリームを終端するため、BFINAL=1 を
+        // 含むメッセージに trailer を追加すると "bytes fed after deflate stream end"
+        // になる。BFINAL=1 への完全対応は noflate の API 拡張が必要であり、本実装
+        // では未対応とする (1007 で接続を閉じる)。
+        self.feed_and_drain(&DEFLATE_TRAILER, &mut decompressed, max_size)?;
 
         // no_context_takeover の場合は Decoder を作り直してコンテキストをリセット
         if self.reset_after_message {
@@ -156,6 +154,48 @@ impl Decompressor {
         }
 
         Ok(decompressed)
+    }
+
+    /// チャンクを feed し、出力を drain する
+    ///
+    /// noflate の feed は未 drain の出力が 64 KiB に達すると Ok を返して yield する。
+    /// 出力を drain したあと空入力で再開し、出力が空になるまで繰り返す。
+    fn feed_and_drain(
+        &mut self,
+        chunk: &[u8],
+        decompressed: &mut Vec<u8>,
+        max_size: usize,
+    ) -> Result<(), Error> {
+        self.decoder.feed(chunk).map_err(|e| {
+            // RFC 6455 Section 7.4.1: 1007 は不正なペイロードデータ
+            Error::invalid_data(format!("decompression failed: {}", e))
+                .with_close_code(CloseCode::INVALID_PAYLOAD.as_u16())
+        })?;
+
+        loop {
+            let produced = self.decoder.output();
+            if produced.is_empty() {
+                break;
+            }
+            if decompressed.len().saturating_add(produced.len()) > max_size {
+                self.reset_if_needed();
+                // RFC 6455 Section 7.4.1: 1009 は処理できないほど大きなメッセージ
+                return Err(Error::invalid_data(format!(
+                    "decompressed size exceeds maximum limit of {} bytes",
+                    max_size
+                ))
+                .with_close_code(CloseCode::MESSAGE_TOO_BIG.as_u16()));
+            }
+
+            let produced_len = produced.len();
+            decompressed.extend_from_slice(produced);
+            self.decoder.advance(produced_len);
+            self.decoder.feed(&[]).map_err(|e| {
+                Error::invalid_data(format!("decompression failed: {}", e))
+                    .with_close_code(CloseCode::INVALID_PAYLOAD.as_u16())
+            })?;
+        }
+        Ok(())
     }
 
     /// エラー時のリセット処理

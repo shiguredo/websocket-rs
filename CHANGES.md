@@ -24,6 +24,10 @@
   - @voluntas
 - [FIX] 未分割メッセージにも max_message_size を適用する
   - @voluntas
+- [FIX] 解凍エラー時に適切な Close フレームを送る
+  - @voluntas
+- [FIX] 解凍時に出力が切り詰められる問題を修正する
+  - @voluntas
 
 ### misc
 
