@@ -3,6 +3,7 @@
 - Priority: Medium
 - Created: 2026-11-27
 - Polished: 2026-11-27
+- Completed: 2026-11-27
 - Model: deepseek-v4.1-flash:1017
 - Branch: feature/fix-empty-host-header
 
@@ -38,3 +39,11 @@ Medium。`ServerHandshakeRequest.host` が空文字列のままアプリケー�
 - `Host:` と `Host:  ` のリクエストが `ErrorKind::HandshakeRejected` になるテストがある。
 - 正常な Host のリクエストは従来どおり受理される。
 - `make test`（実体は `cargo test --workspace --exclude websocket_client`）が通る。nginx e2e テストは Docker が必要なため GitHub Actions で実行する。
+
+## 解決方法
+
+`src/websocket_handshake_request.rs` の `HandshakeRequestValidator::validate_request` で Host の値を取得した直後に `trim().is_empty()` を検査し、空なら `Error::handshake_rejected("invalid Host header: empty authority")` を返すようにした。
+
+`pbt/tests/rfc6455.rs` に `prop_section_4_2_1_host_authority_required` と `prop_section_4_2_1_host_authority_accepts_authority` を追加した。空・空白のみの Host が `ErrorKind::HandshakeRejected` になり、`example.com`、`example.com:8080`、`127.0.0.1`、`127.0.0.1:80` は受理されることを確認する。
+
+`make test` が通る (24 個のテストバイナリすべて ok)。
