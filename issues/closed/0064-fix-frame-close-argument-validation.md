@@ -3,6 +3,7 @@
 - Priority: Low
 - Created: 2026-11-27
 - Polished: 2026-11-27
+- Completed: 2026-11-27
 - Model: deepseek-v4.1-flash:1017
 - Branch: feature/fix-frame-close-validation
 
@@ -25,13 +26,13 @@ Low。高レベル API の `close()` は `CloseCode::is_sendable` を検査す�
 - `Some(code)` は `CloseCode::new(code).is_sendable()` を検査し、送信不可なら `Error::invalid_input` を返す。
 - `None` で `reason` が空でない場合は `Error::invalid_input` を返す。
 - `close_internal` など内部の呼び出し元が送るコードはすべて送信可能であり、影響しない。
-- `Frame::close` の doc comment に、送信禁止コードと理由のみのボディを拒否することを追記する。
+- `Frame::close` の doc comment に、送信不可コードと理由のみのボディを拒否することを追記する。
 - 0063 の変更後は 1016-1999 も送信不可になる。スタックでは 0063 の上に積むため、`is_sendable` の新しい許可範囲に従う。
 
 ## CHANGES.md 登録内容
 
 ```markdown
-- [FIX] Frame::close が送信禁止コードと理由のみのボディを拒否する
+- [FIX] Frame::close が送信不可コードと理由のみのボディを拒否する
   - @voluntas
 ```
 
@@ -44,3 +45,13 @@ Low。高レベル API の `close()` は `CloseCode::is_sendable` を検査す�
 - `Frame::close` の doc comment が更新されている。
 - `WebSocketClientConnection::close` / `WebSocketServerConnection::close` と `handle_close` の既存テストが通る。
 - `make test`（実体は `cargo test --workspace --exclude websocket_client`）が通る。nginx e2e テストは Docker が必要なため GitHub Actions で実行する。
+
+## 解決方法
+
+`src/websocket_frame.rs` の `Frame::close` で、`CloseCode::is_sendable` が false のコードを `ErrorKind::InvalidInput` で拒否するようにした。理由の 123 バイト検査は既存だが、その境界テストを追加し、コードなしで理由だけを指定した場合は拒否するようにした。
+
+`tests/test_websocket_frame.rs` に、送信不可コード (1004 / 1005 / 1006 / 1015 / 1016 / 2000 / 5000 / 65535) の拒否、送信可能コードの受理、コードなしの理由の拒否、123 / 124 バイトと UTF-8 の境界テストを追加した。
+
+`src/websocket_connection_shared.rs` の `close_internal` では、送信不可コードを `CloseCode::PROTOCOL_ERROR` に正規化してから `Frame::close` を呼ぶようにした。`Frame::close` の doc と `skills/shiguredo-websocket/SKILL.md` も、送信不可コードとコードなしの理由を拒否する旨に更新した。
+
+`make test` が通る (27 個のテストターゲットすべて ok)。

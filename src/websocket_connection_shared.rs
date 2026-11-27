@@ -199,13 +199,15 @@ impl SharedConnectionState {
         if !self.close_sent {
             // RFC 6455 Section 5.5 / 5.5.1: コントロールフレームのペイロードは 125 バイト以下、
             // Close フレームは先頭 2 バイトが status code のため reason は 123 バイト以下
-            // truncate_reason 後は reason が常に 123 バイト以下だが、
-            // Frame::close の将来的なエラー条件追加に備えて unwrap_or_else を維持する。
+            // 内部呼び出し元は送信可能コードのみを渡すが、防御的に正規化する
+            let code = if code.is_sendable() {
+                code
+            } else {
+                CloseCode::PROTOCOL_ERROR
+            };
             let truncated = truncate_reason(reason, 123);
-            let frame = Frame::close(Some(code.as_u16()), truncated).unwrap_or_else(|_| {
-                Frame::close(Some(code.as_u16()), "")
-                    .expect("empty reason close frame must always succeed")
-            });
+            let frame = Frame::close(Some(code.as_u16()), truncated)
+                .expect("normalized close code is sendable and truncate_reason guarantees at most 123 bytes");
             policy.encode_and_send(&frame, self);
             self.close_sent = true;
 

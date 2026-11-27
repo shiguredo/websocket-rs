@@ -93,13 +93,13 @@ Sans I/O 設計に基づく WebSocket (RFC 6455) ライブラリ。HTTP/1.1 上�
 
 | 型 | 説明 | 主要メソッド |
 |----|------|-------------|
-| `Frame` | WebSocket フレーム (`fin`, `rsv1`-`rsv3`, `opcode`, `payload`) | `new(opcode, payload)`, `text(&str)`, `binary(Vec<u8>)`, `ping(Vec<u8>)` (≤125 バイト, Result), `pong(Vec<u8>)` (≤125 バイト, Result), `close(code, reason)` (理由 ≤123 バイト, Result), `encode(masking_key)`, `encode_unmasked()` |
+| `Frame` | WebSocket フレーム (`fin`, `rsv1`-`rsv3`, `opcode`, `payload`) | `new(opcode, payload)`, `text(&str)`, `binary(Vec<u8>)`, `ping(Vec<u8>)` (≤125 バイト, Result), `pong(Vec<u8>)` (≤125 バイト, Result), `close(code, reason)` (コード検証, 理由 ≤123 バイト, Result), `encode(masking_key)`, `encode_unmasked()` |
 | `DecodedFrame` | デコード済みフレーム + マスク情報 (`frame`, `masked`) | - |
 | `FrameDecoder` | 状態を持つフレームデコーダー | `new()`, `feed(data)`, `decode() -> Result<Option<Frame>>`, `decode_with_info() -> Result<Option<DecodedFrame>>`, `clear()`, `buffer_len()` |
 | `Opcode` | フレームオペコード (RFC 6455 §5.2) | `Continuation = 0x0`, `Text = 0x1`, `Binary = 0x2`, `Close = 0x8`, `Ping = 0x9`, `Pong = 0xA`, `from_u8(u8)`, `as_u8()`, `is_control()`, `is_data()` |
 | `CloseCode` | クローズコード (RFC 6455 §7.4) | 定数 `NORMAL`(1000), `GOING_AWAY`(1001), `PROTOCOL_ERROR`(1002), `UNSUPPORTED_DATA`(1003), `RESERVED`(1004), `NO_STATUS_RECEIVED`(1005), `ABNORMAL_CLOSURE`(1006), `INVALID_PAYLOAD`(1007), `POLICY_VIOLATION`(1008), `MESSAGE_TOO_BIG`(1009), `MANDATORY_EXTENSION`(1010), `INTERNAL_ERROR`(1011), `TLS_HANDSHAKE`(1015) ほか, `new(u16)`, `as_u16()`, `is_valid()`, `is_sendable()` |
 
-`is_sendable()` は `0..=999` / `1004` / `1005` / `1006` / `1015` / `1016..=1999` / `2000..=2999` / `5000..` を拒否する。RFC 6455 §7.4.2 は 1000-2999 を予約範囲と定めており、IANA 未登録の 1016-1999 と 2000-2999 は本ライブラリでは送信しない。`WebSocketClientConnection::close` / `WebSocketServerConnection::close` は内部で `is_sendable()` を検証するが、低レベル `Frame::close` は検証しない。
+`is_sendable()` は `0..=999` / `1004` / `1005` / `1006` / `1015` / `1016..=1999` / `2000..=2999` / `5000..` を拒否する。RFC 6455 §7.4.2 は 1000-2999 を予約範囲と定めており、IANA 未登録の 1016-1999 と 2000-2999 は本ライブラリでは送信しない。`WebSocketClientConnection::close` / `WebSocketServerConnection::close` と低レベル `Frame::close` は内部で `is_sendable()` を検証する。`Frame::close` は `code` が `None` のとき `reason` を空に限る。
 
 ### ハンドシェイク (低レベル API)
 
