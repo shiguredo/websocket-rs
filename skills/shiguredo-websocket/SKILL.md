@@ -99,7 +99,7 @@ Sans I/O 設計に基づく WebSocket (RFC 6455) ライブラリ。HTTP/1.1 上�
 | `Opcode` | フレームオペコード (RFC 6455 §5.2) | `Continuation = 0x0`, `Text = 0x1`, `Binary = 0x2`, `Close = 0x8`, `Ping = 0x9`, `Pong = 0xA`, `from_u8(u8)`, `as_u8()`, `is_control()`, `is_data()` |
 | `CloseCode` | クローズコード (RFC 6455 §7.4) | 定数 `NORMAL`(1000), `GOING_AWAY`(1001), `PROTOCOL_ERROR`(1002), `UNSUPPORTED_DATA`(1003), `RESERVED`(1004), `NO_STATUS_RECEIVED`(1005), `ABNORMAL_CLOSURE`(1006), `INVALID_PAYLOAD`(1007), `POLICY_VIOLATION`(1008), `MESSAGE_TOO_BIG`(1009), `MANDATORY_EXTENSION`(1010), `INTERNAL_ERROR`(1011), `TLS_HANDSHAKE`(1015) ほか, `new(u16)`, `as_u16()`, `is_valid()`, `is_sendable()` |
 
-`is_sendable()` は `0..=999` / `1004` / `1005` / `1006` / `1015` / `2000..=2999` / `5000..` を拒否する (RFC 6455 §7.4.1)。`close()` API は内部で `is_sendable()` を検証する。
+`is_sendable()` は `0..=999` / `1004` / `1005` / `1006` / `1015` / `1016..=1999` / `2000..=2999` / `5000..` を拒否する。RFC 6455 §7.4.2 は 1000-2999 を予約範囲と定めており、IANA 未登録の 1016-1999 と 2000-2999 は本ライブラリでは送信しない。`WebSocketClientConnection::close` / `WebSocketServerConnection::close` は内部で `is_sendable()` を検証するが、低レベル `Frame::close` は検証しない。
 
 ### ハンドシェイク (低レベル API)
 
@@ -430,7 +430,7 @@ match ws.feed_recv_buf(&buf, now) {
 - RFC 6455 §4.1: 101 以外の HTTP レスポンスは `ErrorKind::HttpResponse` で `HttpResponseInfo` を伴って通知される。HTTP procedures はアプリケーション層で処理する。
 - RFC 6455 §4.2.1: Sec-WebSocket-Version は `13` 固定。それ以外は `VersionNotSupported`。
 - RFC 6455 §7.1.7: `feed_recv_buf` が `Err` を返した後は以降の呼び出しも即座に `Err` を返す (`failed` フラグ)。
-- RFC 6455 §7.4.1: 送信禁止コード (1004, 1005, 1006, 1015, 2000-2999, 5000+) は `CloseCode::is_sendable()` で拒否される。
+- 0-999、1004 (予約済み)、1005 / 1006 / 1015 (RFC 6455 §7.4.1 で送信禁止)、1016-1999 (IANA 未登録)、2000-2999 (予約済み)、5000+ (RFC 未定義) は `CloseCode::is_sendable()` で拒否される。
 - RFC 6455 §9.1: 不正な `Sec-WebSocket-Extensions` (parse_strict 失敗) はハンドシェイク失敗。
 - RFC 7692 §7.1.2.1: クライアントが `server_max_window_bits` を offer しなかった場合、サーバーがレスポンスに含めてはならない。サーバーが offer 値を超える値で応答するのも拒否。
 - RFC 7692 §7.1.2.2: クライアントが `client_max_window_bits` を offer していない場合、サーバーがレスポンスに含めてはならない。
