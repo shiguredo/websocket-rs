@@ -5,7 +5,7 @@
 
 use base64ct::{Base64, Encoding};
 use shiguredo_websocket::{
-    CloseCode, Frame, FrameDecoder, HandshakeRequest, HandshakeRequestValidator,
+    CloseCode, ErrorKind, Frame, FrameDecoder, HandshakeRequest, HandshakeRequestValidator,
     HandshakeValidator, Opcode, ServerHandshakeResponse,
 };
 
@@ -197,6 +197,69 @@ fn prop_section_4_2_1_host_required() -> noprop::TestResult {
         let result = validator.validate();
 
         assert!(result.is_err());
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Section 4.2.1 item 2: Host はサーバーの authority を含む (空・空白のみは拒否)
+#[test]
+fn prop_section_4_2_1_host_authority_required() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let host_value = noprop::sample_choice(ctx, &["", " ", "  ", "\t", " \t "]);
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host:{}\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             \r\n",
+            host_value, key
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        let err = result.expect_err("空または空白だけの Host は拒否される");
+        assert_eq!(err.kind, ErrorKind::HandshakeRejected);
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Section 4.2.1 item 2: authority を含む Host は受理される
+#[test]
+fn prop_section_4_2_1_host_authority_accepts_authority() -> noprop::TestResult {
+    pbt::run(|ctx| {
+        let host = noprop::sample_choice(
+            ctx,
+            &[
+                "example.com",
+                "example.com:8080",
+                "127.0.0.1",
+                "127.0.0.1:80",
+            ],
+        );
+        let key = generate_valid_ws_key();
+        let request = format!(
+            "GET / HTTP/1.1\r\n\
+             Host: {}\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             \r\n",
+            host, key
+        );
+
+        let mut validator = HandshakeRequestValidator::new();
+        validator.feed(request.as_bytes());
+        let result = validator.validate();
+
+        assert!(result.is_ok(), "authority を含む Host は受理される: {host}");
         Ok(())
     })?;
     Ok(())
