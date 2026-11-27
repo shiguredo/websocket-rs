@@ -18,6 +18,8 @@
 - [CHANGE] 内部向けシンボル `ByteSliceExt` / `VecExt` を削除する
   - ライブラリ本体から参照されておらず、PBT のためだけに公開していたため
   - @voluntas
+- [FIX] 空または空白だけの Host ヘッダーを拒否する
+  - @voluntas
 
 ### misc
 

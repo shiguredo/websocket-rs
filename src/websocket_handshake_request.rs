@@ -271,6 +271,14 @@ impl HandshakeRequestValidator {
             .ok_or_else(|| Error::handshake_rejected("missing Host header"))?
             .to_string();
 
+        // RFC 6455 Section 4.2.1 item 2: Host はサーバーの authority を含まなければならない。
+        // shiguredo_http11 は空の Host を汎用 HTTP として許容するため、WebSocket 層で拒否する。
+        if host.trim().is_empty() {
+            return Err(Error::handshake_rejected(
+                "invalid Host header: empty authority",
+            ));
+        }
+
         // RFC 6455 Section 4.2.1: Upgrade ヘッダーに "websocket" トークンが含まれていること
         // RFC 9110 Section 5.3: 同名ヘッダーが複数行の場合は統合して評価する
         {
